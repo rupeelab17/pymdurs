@@ -4,7 +4,7 @@ use encoding_rs;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs::{create_dir_all, File, write};
+use std::fs::{create_dir_all, write, File};
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 
@@ -121,7 +121,9 @@ impl IgnCollect {
     fn find_csv_file() -> Result<PathBuf> {
         // 1) Dev: CARGO_MANIFEST_DIR
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let csv_path = PathBuf::from(manifest_dir).join("src/collect/ign/data").join(CSV_NAME);
+        let csv_path = PathBuf::from(manifest_dir)
+            .join("src/collect/ign/data")
+            .join(CSV_NAME);
         if csv_path.exists() {
             return Ok(csv_path);
         }
@@ -144,9 +146,10 @@ impl IgnCollect {
 
         // 4) Download from IGN and save to TEMP_PATH
         let client = Client::new();
-        let response = client.get(IGN_CSV_URL).send().with_context(|| {
-            format!("Failed to download IGN CSV from {}", IGN_CSV_URL)
-        })?;
+        let response = client
+            .get(IGN_CSV_URL)
+            .send()
+            .with_context(|| format!("Failed to download IGN CSV from {}", IGN_CSV_URL))?;
         if !response.status().is_success() {
             anyhow::bail!(
                 "IGN CSV URL returned {}: {}",
@@ -154,13 +157,12 @@ impl IgnCollect {
                 IGN_CSV_URL
             );
         }
-        let bytes = response.bytes().with_context(|| {
-            format!("Failed to read response body from {}", IGN_CSV_URL)
-        })?;
+        let bytes = response
+            .bytes()
+            .with_context(|| format!("Failed to read response body from {}", IGN_CSV_URL))?;
         create_dir_all(TEMP_PATH).context("Failed to create temp directory for IGN CSV")?;
-        write(&cache_path, &bytes).with_context(|| {
-            format!("Failed to write IGN CSV to {}", cache_path.display())
-        })?;
+        write(&cache_path, &bytes)
+            .with_context(|| format!("Failed to write IGN CSV to {}", cache_path.display()))?;
         Ok(cache_path)
     }
 
@@ -327,7 +329,7 @@ impl IgnCollect {
         // Add Bbox if not in filter (following Python: Bbox=self._Bbox)
         if use_bbox_in_url {
             request_url.push_str(&format!(
-                "&Bbox={},{},{},{}&CRS=EPSG:4326",
+                "&BBOX={},{},{},{}&CRS=EPSG:4326",
                 bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x,
             ));
         }
@@ -441,7 +443,7 @@ impl IgnCollect {
                 format!("{}?", url)
             };
             format!(
-                "{}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&CRS=EPSG:4326&Bbox={}&WIDTH={}&HEIGHT={}&FORMAT=image/geotiff&TRANSPARENT=true&STYLES=normal&EXCEPTIONS=text/xml",
+                "{}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&CRS=EPSG:4326&BBOX={}&WIDTH={}&HEIGHT={}&FORMAT=image/geotiff&TRANSPARENT=true&STYLES=normal&EXCEPTIONS=text/xml",
                 base_url, typename, bbox_str, width_px, height_px
             )
         };
