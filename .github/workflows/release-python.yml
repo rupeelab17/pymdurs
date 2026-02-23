@@ -72,8 +72,8 @@ jobs:
 
   build-wheels:
     needs: [build-sdist]
-    #runs-on: ${{ matrix.os }}
-    runs-on: self-hosted
+    runs-on: ${{ matrix.os }}
+    #runs-on: self-hosted
     timeout-minutes: 60
     strategy:
       fail-fast: false
