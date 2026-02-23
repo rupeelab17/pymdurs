@@ -256,11 +256,8 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
-          manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_17' || (matrix.architecture == 'aarch64' && '2_24' || 'auto') }}
+          manylinux: ${{ matrix.os == 'ubuntu-latest' && 'auto' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
           maturin-version: 1.11.4
-          before-script-linux: |
-            yum install -y clang-devel gdal-devel || \
-            apt-get install -y libclang-dev libgdal-dev gdal-bin || true
 
       - name: Test wheel
         run: |
