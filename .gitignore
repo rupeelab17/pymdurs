@@ -160,3 +160,4 @@ notebooks/output/*.tif
 
 .cursor/
 .claude/
+actions-runner/
