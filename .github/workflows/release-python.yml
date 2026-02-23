@@ -258,7 +258,7 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
-          manylinux: ${{ matrix.os == 'ubuntu-latest' && 'auto' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
+          manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
           maturin-version: 1.11.4
           before-script-linux: |
             set -ex
