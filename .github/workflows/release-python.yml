@@ -262,11 +262,11 @@ jobs:
           maturin-version: 1.11.4
           before-script-linux: |
             set -ex
-            dnf install -y clang-devel gdal-devel 2>/dev/null || \
+            dnf install -y clang-devel gdal-devel || \
             (yum install -y epel-release && yum install -y clang-devel gdal-devel)
             LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
             export LIBCLANG_PATH=$(dirname "$LIBCLANG")
-            echo "LIBCLANG_PATH=$LIBCLANG_PATH" >> $GITHUB_ENV
+            echo "Found libclang at: $LIBCLANG_PATH"
 
       - name: Test wheel
         run: |
