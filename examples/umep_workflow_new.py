@@ -303,7 +303,7 @@ def main():
         )
         physics = solweig.load_physics("parametersforsolweig.json")
         # Calculate timeseries
-        results = solweig.calculate_timeseries(
+        results = solweig.calculate(
             surface=surface,
             physics=physics,
             human=solweig.HumanParams(
@@ -313,7 +313,7 @@ def main():
                 height=1.65,  # 165 cmrm
                 posture="sitting",
             ),
-            weather_series=weather_list,
+            weather=weather_list,
             use_anisotropic_sky=True,  # Uses SVF (computed automatically if needed)
             conifer=False,  # Use seasonal leaf on/off (set True for evergreen trees)
             output_dir=str(output_path),
@@ -402,21 +402,21 @@ def main():
 if __name__ == "__main__":
     main()
     gif_path = preview_pngs_to_gif(
-        Path("output/umep_workflow"),
+        Path("output/umep_workflow/shadow"),
         pattern="shadow_*.preview.png",
         out_path="output/umep_workflow/shadow_preview.gif",
         duration_ms=500,
     )
     print(f"✅ GIF created: {gif_path}")
     gif_path = preview_pngs_to_gif(
-        Path("output/umep_workflow"),
+        Path("output/umep_workflow/tmrt"),
         pattern="tmrt_*.preview.png",
         out_path="output/umep_workflow/tmrt_preview.gif",
         duration_ms=500,
     )
     print(f"✅ GIF created: {gif_path}")
     gif_path = preview_pngs_to_gif(
-        Path("output/umep_workflow/output_utci"),
+        Path("output/umep_workflow/utci"),
         pattern="utci_*.preview.png",
         out_path="output/umep_workflow/utci_preview.gif",
         duration_ms=500,
