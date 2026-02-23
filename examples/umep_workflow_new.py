@@ -1,20 +1,20 @@
 """
-Example: Complete UMEP workflow using pymdurs and umepr
+Example: Complete UMEP workflow using pymdurs and solweig
 
 This example demonstrates how to:
 1. Collect urban data using pymdurs (DEM, buildings, vegetation)
 2. Process data for UMEP analysis (DSM, CDSM)
-3. Calculate Sky View Factor (SVF) using umepr
+3. Calculate Sky View Factor (SVF) using solweig
 4. Optionally run SOLWEIG for thermal comfort analysis
 
 Inspired by: https://github.com/UMEP-dev/solweig/blob/dev/demos/athens-demo.py
 
 Required dependencies (install separately):
     pip install geopandas rasterio pyproj pillow
-    pip install "umepr @ git+https://github.com/UMEP-dev/solweig.git@dev"
+    pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git@main"
     # umep (optional) for additional SOLWEIG features
 
-Note: On Apple Silicon (ARM64), umepr may require the x86_64 target:
+Note: On Apple Silicon (ARM64), solweig may require the x86_64 target:
     rustup target add x86_64-apple-darwin
 """
 
@@ -68,7 +68,7 @@ def preview_pngs_to_gif(
 
 
 def main():
-    print("🌆 Starting UMEP workflow with pymdurs and umepr...")
+    print("🌆 Starting UMEP workflow with pymdurs and solweig...")
     print("=" * 60)
 
     # Configuration

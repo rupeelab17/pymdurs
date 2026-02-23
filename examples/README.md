@@ -277,50 +277,6 @@ python examples/lcz_from_url.py
 
 ---
 
-## Advanced workflow examples
-
-### 13. `umep_workflow.py`
-
-Complete example showing how to combine `pymdurs` and `umepr` for a full urban analysis workflow with UMEP (Urban Multi-scale Environmental Predictor).
-
-**Run:**
-
-```bash
-python examples/umep_workflow.py
-```
-
-**What this example does:**
-
-1. **Urban data collection** with pymdurs (DEM, buildings, vegetation)
-2. **LiDAR download** from the IGN WFS service to generate DSM and CDSM
-3. **Reprojection and resampling** of the DEM to match DSM dimensions
-4. **Sky View Factor (SVF) calculation** using umepr
-5. **Wall height generation** for SOLWEIG (if umep is available)
-6. **SOLWEIG run** for thermal comfort analysis (if umepr is available)
-
-**Additional prerequisites:**
-
-```bash
-pip install geopandas rasterio pyproj
-pip install "umepr @ git+https://github.com/UMEP-dev/umep-rust.git"
-# Optional for full SOLWEIG:
-pip install umep
-```
-
-**Important note - Apple Silicon (ARM64):**
-
-On Mac with Apple Silicon, `umepr` may require the Rust target `x86_64-apple-darwin`:
-
-```bash
-rustup target add x86_64-apple-darwin
-```
-
-If you encounter build errors, install `umepr` separately after adding the target.
-
-**Inspired by:** [athens-demo.py](https://github.com/UMEP-dev/umep-rust/blob/main/demos/athens-demo.py)
-
----
-
 ### 14. `umep_workflow_new.py`
 
 Alternative UMEP workflow using the `solweig` Python package (SOLWEIG from UMEP-dev/solweig). Collects DEM and LiDAR (DSM/CDSM), clips rasters, runs SOLWEIG for Tmrt/shadow, post-processes UTCI, and can build animated GIFs from preview PNGs.
@@ -411,7 +367,7 @@ pip install 'numpy<2.0.0' --force-reinstall
 pip install geopandas rasterio pyproj shapely
 
 # For umep_workflow.py
-pip install "umepr @ git+https://github.com/UMEP-dev/umep-rust.git"
+pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
 pip install umep  # Optional
 ```
 

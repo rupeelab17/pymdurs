@@ -22,6 +22,7 @@ Python bindings for `pymdurs`, a Rust transpilation of `pymdu` (Python Urban Dat
 **Install Rust** (required for building from source):
 
 **Windows:**
+
 ```bash
 # Download and run rustup-init.exe from https://rustup.rs/
 # Or use PowerShell:
@@ -30,16 +31,19 @@ Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
 ```
 
 **macOS:**
+
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 **Linux:**
+
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 After installation, restart your terminal or run:
+
 ```bash
 source $HOME/.cargo/env
 ```
@@ -47,11 +51,13 @@ source $HOME/.cargo/env
 ### Install pymdurs
 
 **From PyPI (when available):**
+
 ```bash
 pip install pymdurs
 ```
 
 **From source:**
+
 ```bash
 # Clone the repository
 git clone https://github.com/rupeelab17/rsmdu.git
@@ -131,6 +137,7 @@ print(f"Output path: {geo.output_path}")
 ## Geometric Data Modules
 
 All geometric modules follow a similar API pattern:
+
 1. Create an instance with `output_path`
 2. Set bounding box with `set_bbox(min_x, min_y, max_x, max_y)` (WGS84)
 3. Optionally set CRS with `set_crs(epsg_code)`
@@ -168,6 +175,7 @@ print(f"CRS: EPSG:{geo.epsg}")
 ```
 
 **Features:**
+
 - Automatic height processing (storeys × default height or alternative height field)
 - Mean district height calculation (weighted by area)
 - Integration with pandas for tabular operations
@@ -203,6 +211,7 @@ print(f"Mask saved to: {mask_path}")
 ```
 
 **Features:**
+
 - Automatic download from IGN WMS-R service
 - GeoTIFF generation with proper CRS
 - Mask generation for DEM boundaries
@@ -323,12 +332,14 @@ print(f"DSM saved to: {output_path}")
 ```
 
 **Features:**
+
 - Downloads LAZ files from IGN WFS service
 - Processes point clouds to create DSM, DTM, and CHM rasters
 - Filters by LiDAR classification classes
 - Outputs multi-band GeoTIFF files
 
 **LiDAR Classification Classes:**
+
 - `2` = Ground
 - `3` = Low Vegetation
 - `4` = Medium Vegetation
@@ -425,6 +436,7 @@ vegetation.to_geojson(name="vegetation")
 ```
 
 **Features:**
+
 - Downloads IRC (Infrared Color) images from IGN API
 - Calculates NDVI = (NIR - Red) / (NIR + Red)
 - Filters pixels with NDVI < 0.2
@@ -487,6 +499,7 @@ lcz.to_geojson(name="lcz")
 ```
 
 **Features:**
+
 - Loads LCZ data from zip URLs
 - Built-in LCZ color table (17 LCZ types)
 - Spatial filtering by bounding box
@@ -503,6 +516,7 @@ lcz.to_geojson(name="lcz")
 - **numpy < 2.0.0** (for compatibility with numexpr and other dependencies)
 
 **Note**: If you encounter NumPy 2.x compatibility issues, install NumPy 1.x:
+
 ```bash
 pip install 'numpy<2.0.0'
 ```
@@ -516,7 +530,7 @@ For advanced workflows and examples:
 pip install geopandas rasterio pyproj shapely
 
 # For UMEP integration
-pip install "umepr @ git+https://github.com/UMEP-dev/umep-rust.git"
+pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
 pip install umep  # Optional
 ```
 
@@ -524,22 +538,21 @@ pip install umep  # Optional
 
 ## UMEP Integration
 
-To use `pymdurs` with `umepr` for UMEP (Urban Multi-scale Environmental Predictor) workflows:
+To use `pymdurs` with `solweig` for UMEP (Urban Multi-scale Environmental Predictor) workflows:
 
 ```bash
 # On Apple Silicon (ARM64), first add the x86_64 Rust target:
 rustup target add x86_64-apple-darwin
 
-# Then install umepr:
-pip install "umepr @ git+https://github.com/UMEP-dev/umep-rust.git"
+# Then install solweig:
+pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
 
-# Or use the installation script:
-./install_umepr.sh
 ```
 
-**Note**: `umepr` currently requires the `x86_64-apple-darwin` Rust target even on Apple Silicon Macs. This is a limitation of the `umepr` package itself.
+**Note**: `solweig` currently requires the `x86_64-apple-darwin` Rust target even on Apple Silicon Macs. This is a limitation of the `solweig` package itself.
 
-See `examples/umep_workflow.py` for a complete example combining `pymdurs` and `umepr` for:
+See `examples/umep_workflow_new.py` for a complete example combining `pymdurs` and `solweig` for:
+
 - DEM, DSM, and CDSM generation
 - Sky View Factor (SVF) calculation
 - SOLWEIG thermal comfort analysis
@@ -595,28 +608,34 @@ print(f"Output path: {geo.output_path}")
 ### Module-Specific Methods
 
 #### Building
+
 - `run() -> Building` - Download and process buildings
 - `to_pandas() -> pandas.DataFrame` - Convert to pandas DataFrame
 
 #### Dem
+
 - `run(shape: Optional[Tuple[int, int]] = None) -> Dem` - Download and process DEM
 - `get_path_save_tiff() -> str` - Get DEM GeoTIFF path
 - `get_path_save_mask() -> str` - Get mask shapefile path
 
 #### Cadastre, Iris, Road, Rnb, Water, Vegetation
+
 - `run() -> Self` - Download and process data
 - `get_geojson() -> dict` - Get GeoJSON data
 - `to_geojson(name: str) -> None` - Save to GeoJSON file
 
 #### Cosia
+
 - `run_ign() -> Cosia` - Download COSIA from IGN API
 - `get_path_save_tiff() -> str` - Get COSIA raster path
 
 #### Lidar
+
 - `run(file_name: str, classification_list: List[int]) -> str` - Process LiDAR data
 - Returns path to output GeoTIFF file
 
 #### Lcz
+
 - `run() -> Lcz` - Load LCZ data
 - `get_table_color() -> dict` - Get LCZ color table
 
@@ -659,4 +678,3 @@ For more information:
 - [Examples README](../examples/README.md) - Detailed examples documentation
 - [GitHub Repository](https://github.com/rupeelab17/rsmdu)
 - [IGN Documentation](https://geoservices.ign.fr/documentation/services)
-

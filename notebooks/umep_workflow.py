@@ -14,12 +14,12 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Example: Complete UMEP workflow using pymdurs and umepr
+    ## Example: Complete UMEP workflow using pymdurs and solweig
 
     This example demonstrates how to:
-    1. Collect urban data using pymdurs (DEM, buildings, vegetation)
+    1. Collect urban data using pymdurs (DEM, buildi    ngs, vegetation)
     2. Process data for UMEP analysis (DSM, CDSM)
-    3. Calculate Sky View Factor (SVF) using umepr
+    3. Calculate Sky View Factor (SVF) using solweig
     4. Optionally run SOLWEIG for thermal comfort analysis
 
     Inspired by: https://github.com/UMEP-dev/umep-rust/blob/main/demos/athens-demo.py
@@ -30,9 +30,9 @@ def _(mo):
     ```
     ### umep (optional) for additional SOLWEIG features
     ```bash
-    pip install "umepr @ git+https://github.com/UMEP-dev/umep-rust.git"
+    pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git@main"
     ```
-    Note: On Apple Silicon (ARM64), umepr may require the x86_64 target:
+    Note: On Apple Silicon (ARM64), solweig may require the x86_64 target:
     ```bash
     rustup target add x86_64-apple-darwin
     ```
@@ -55,7 +55,7 @@ def _():
 
     import pymdurs
 
-    # Try to import umepr for SVF calculation
+    # Try to import solweig for SVF calculation
     try:
         from umepr import solweig_runner_rust, svf
 
@@ -64,7 +64,7 @@ def _():
         HAS_UMEPR = False
         print("⚠️  umepr package not available. SVF calculation will be skipped.")
         print(
-            "   Install with: pip install 'umepr @ git+https://github.com/UMEP-dev/umep-rust.git'"
+            "   Install with: pip install 'solweig @ git+https://github.com/UMEP-dev/solweig.git@main'"
         )
         print(
             "   On Apple Silicon, you may need: rustup target add x86_64-apple-darwin"
