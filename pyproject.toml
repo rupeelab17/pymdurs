@@ -27,7 +27,7 @@ dependencies = [
     "geopandas>=1.0.1",
     "rasterio>=1.4.3",
     "umep>=0.0.1a18",
-    "solweig @ git+https://github.com/UMEP-dev/solweig.git@main"
+    "solweig>=0.1.0b55"
 ]
 
 [project.optional-dependencies]
