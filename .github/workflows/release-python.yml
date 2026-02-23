@@ -256,7 +256,7 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
-          manylinux: ${{ matrix.os == 'ubuntu-latest' && 'off' || (matrix.architecture == 'aarch64' && '2_24' || 'auto') }}
+          manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_17' || (matrix.architecture == 'aarch64' && '2_24' || 'auto') }}
           maturin-version: 1.11.4
 
       - name: Test wheel
