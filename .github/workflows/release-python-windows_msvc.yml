@@ -131,6 +131,11 @@ jobs:
           }
           Write-Host "✅ GDAL headers OK"
 
+          # Vérifier sqlite
+          Write-Host "=== SQLite files ==="
+          Get-ChildItem "$libDir" -Filter "*sqlite*" -ErrorAction SilentlyContinue
+          Get-ChildItem "$incDir" -Filter "*sqlite*" -ErrorAction SilentlyContinue
+
           # Vérifier proj.pc
           Write-Host "=== pkgconfig files ==="
           Get-ChildItem "$pkgcfg" -ErrorAction SilentlyContinue
@@ -154,8 +159,13 @@ jobs:
           "PROJ_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_VERSION=$projVersion"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PKG_CONFIG_PATH=$pkgcfg"           | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # Aider CMake à trouver SQLite (utilisé par proj-sys en bundled_build)
+          "SQLite3_ROOT=$libRoot"             | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SQLite3_INCLUDE_DIR=$incDir"       | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SQLite3_LIBRARY=$libDir\sqlite3.lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_PREFIX_PATH=$libRoot"        | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RUST_BACKTRACE=1"                  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$binDir"                           | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "$binDir"                           | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append                         | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
