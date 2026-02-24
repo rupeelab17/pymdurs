@@ -129,6 +129,24 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
+      - name: Debug conda GDAL paths
+        shell: pwsh
+        run: |
+          $condaBase = conda info --base
+          Write-Host "Conda base: $condaBase"
+
+          Write-Host "=== Searching cpl_atomic_ops.h ==="
+          Get-ChildItem -Path $condaBase -Filter "cpl_atomic_ops.h" -Recurse -ErrorAction SilentlyContinue
+
+          Write-Host "=== include dir contents ==="
+          Get-ChildItem "$condaBase\Library\include" -ErrorAction SilentlyContinue | Select-Object -First 20
+
+          Write-Host "=== GDAL_INCLUDE_DIR env ==="
+          Write-Host $env:GDAL_INCLUDE_DIR
+
+          Write-Host "=== All GDAL related files ==="
+          Get-ChildItem -Path "$condaBase\Library" -Filter "*gdal*" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 20
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
