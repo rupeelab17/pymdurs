@@ -92,17 +92,36 @@ jobs:
         shell: pwsh
         run: choco install mingw -y
 
-      - name: Install SQLite
-        shell: pwsh
-        run: choco install sqlite -y
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ env.PYTHON_VERSION }}
+          channels: conda-forge
+          channel-priority: strict
 
-      - name: Set environment
+      - name: Install GDAL via Conda
         shell: pwsh
         run: |
-          "GDAL_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RUST_BACKTRACE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          conda install -c conda-forge libgdal geos proj sqlite -y
+
+          $condaBase = conda info --base
+          $lib = "$condaBase\Library"
+
+          Write-Host "=== GDAL headers ==="
+          Get-ChildItem "$lib\include" -Filter "cpl*" -ErrorAction SilentlyContinue | Select-Object -First 5
+
+          Write-Host "=== GDAL libs ==="
+          Get-ChildItem "$lib\lib" -Filter "*gdal*" -ErrorAction SilentlyContinue
+
+          "GDAL_HOME=$lib"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_LIB_DIR=$lib\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_INCLUDE_DIR=$lib\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_VERSION=3"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_LIB_DIR=$lib\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_LIB=$lib\share\proj"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUST_BACKTRACE=1"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$lib\bin"                       | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # Ajouter MinGW au PATH
           "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
