@@ -117,58 +117,32 @@ jobs:
 
           # Créer gdal_i.lib depuis gdal.lib
           if (-not (Test-Path "$libDir\gdal_i.lib")) {
-            if (Test-Path "$libDir\gdal.lib") {
-              Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
-              Write-Host "gdal_i.lib created"
-            } else {
-              throw "Neither gdal_i.lib nor gdal.lib found"
-            }
+            Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
+            Write-Host "gdal_i.lib created"
           }
-
-          if (-not (Test-Path "$incDir\cpl_atomic_ops.h")) {
-            throw "GDAL headers not found in $incDir"
-          }
-          Write-Host "GDAL headers OK"
 
           $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
           $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
-          Write-Host "GEOS version : $geosVersion"
-          Write-Host "PROJ version : $projVersion"
+          Write-Host "GEOS=$geosVersion PROJ=$projVersion"
 
-          # Ecrire toutes les variables d'env d'un coup
-          $envLines = @(
-            "GDAL_HOME=$condaEnv",
-            "GDAL_LIB_DIR=$libDir",
-            "GDAL_INCLUDE_DIR=$incDir",
-            "GDAL_VERSION=3",
-            "GEOS_LIB_DIR=$libDir",
-            "GEOS_INCLUDE_DIR=$incDir",
-            "GEOS_VERSION=$geosVersion",
-            "PROJ_LIB=$libRoot\share\proj",
-            "PROJ_LIB_DIR=$libDir",
-            "PROJ_INCLUDE_DIR=$incDir",
-            "PROJ_VERSION=$projVersion",
-            "PKG_CONFIG_PATH=$pkgcfg",
-            "SQLite3_ROOT=$libRoot",
-            "SQLite3_INCLUDE_DIR=$incDir",
-            "SQLite3_LIBRARY=$libDir\sqlite3.lib",
-            "CMAKE_PREFIX_PATH=$libRoot",
-            "RUST_BACKTRACE=1"
-          )
-          [System.IO.File]::AppendAllLines($env:GITHUB_ENV, $envLines)
-
-          # PATH avec retry
-          $retries = 5
-          for ($i = 0; $i -lt $retries; $i++) {
-            try {
-              [System.IO.File]::AppendAllText($env:GITHUB_PATH, "$binDir`n")
-              Write-Host "PATH updated"
-              break
-            } catch {
-              Write-Host "Retry $($i+1)/$retries..."
-              Start-Sleep -Milliseconds 500
-            }
-          }
+          echo "GDAL_HOME=$condaEnv"                 >> $env:GITHUB_ENV
+          echo "GDAL_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "GDAL_VERSION=3"                       >> $env:GITHUB_ENV
+          echo "GEOS_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "GEOS_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "GEOS_VERSION=$geosVersion"           >> $env:GITHUB_ENV
+          echo "PROJ_LIB=$libRoot\share\proj"        >> $env:GITHUB_ENV
+          echo "PROJ_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "PROJ_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "PROJ_VERSION=$projVersion"           >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$pkgcfg"             >> $env:GITHUB_ENV
+          echo "SQLite3_ROOT=$libRoot"               >> $env:GITHUB_ENV
+          echo "SQLite3_INCLUDE_DIR=$incDir"         >> $env:GITHUB_ENV
+          echo "SQLite3_LIBRARY=$libDir\sqlite3.lib" >> $env:GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$libRoot"          >> $env:GITHUB_ENV
+          echo "RUST_BACKTRACE=1"                     >> $env:GITHUB_ENV
+          echo "$binDir"                              >> $env:GITHUB_PATH
 
       - name: Install maturin
         run: pip install maturin
@@ -259,9 +233,9 @@ jobs:
             ## Python Package Release ${{ steps.version.outputs.version }}
 
             ### Installation
-              ```bash
-                          pip install pymdurs
-              ```
+            ```bash
+                        pip install pymdurs
+            ```
 
             ### Available Classes
             - `pymdurs.geometric.Building` - Building data collection
