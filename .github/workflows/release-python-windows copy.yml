@@ -68,6 +68,10 @@ jobs:
     needs: [build-sdist]
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x86-64]
 
     steps:
       - uses: actions/checkout@v4
@@ -83,12 +87,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Rust GNU target
-        run: |
-          rustup target add x86_64-pc-windows-gnu
-          rustup toolchain install stable-x86_64-pc-windows-gnu
-
-      - name: Setup Miniconda
+      - name: Setup Miniconda (Windows)
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
@@ -96,44 +95,62 @@ jobs:
           channels: conda-forge
           channel-priority: strict
 
-      - name: Install GDAL via Conda
+      - name: Install GDAL via Conda (Windows)
         shell: bash -el {0}
         run: |
-          conda install -c conda-forge \
-            libgdal \
-            geos \
-            proj \
-            sqlite -y
+          conda install -c conda-forge libgdal geos proj sqlite m2w64-toolchain -y
 
           CONDA_PREFIX=$(conda info --base)
           CONDA_LIB="$CONDA_PREFIX/Library"
 
-          echo "=== Searching for gdal lib files ==="
-          find "$CONDA_LIB" -name "*gdal*" 2>/dev/null
+          echo "=== Checking installed files ==="
+          echo "Library directory:"
+          ls -la "$CONDA_LIB/lib/" | grep -i gdal || echo "No gdal in lib/"
 
-          # Créer gdal_i.lib depuis gdal.dll si manquant
-          if [ ! -f "$CONDA_LIB/lib/gdal_i.lib" ]; then
-            echo "gdal_i.lib not found, creating from gdal.dll..."
-            GDAL_DLL=$(find "$CONDA_LIB/bin" -name "gdal*.dll" | head -1)
-            echo "Found DLL: $GDAL_DLL"
-            cd "$CONDA_LIB/lib"
-            lib.exe /def:"$GDAL_DLL" /out:gdal_i.lib /machine:x64 || true
-          fi
+          echo "Bin directory:"
+          ls -la "$CONDA_LIB/bin/" | grep -i gdal || echo "No gdal in bin/"
+
+          echo "Include directory:"
+          ls -la "$CONDA_LIB/include/" | grep -i gdal || echo "No gdal in include/"
+
+          echo "=== All GDAL files ==="
+          find "$CONDA_LIB" -name "*gdal*" -o -name "*GDAL*" || echo "No GDAL files found"
 
           echo "GDAL_HOME=$CONDA_LIB" >> $GITHUB_ENV
           echo "GDAL_LIB_DIR=$CONDA_LIB/lib" >> $GITHUB_ENV
           echo "GDAL_INCLUDE_DIR=$CONDA_LIB/include" >> $GITHUB_ENV
+          echo "GDAL_DATA=$CONDA_LIB/share/gdal" >> $GITHUB_ENV
+
           echo "GEOS_LIB_DIR=$CONDA_LIB/lib" >> $GITHUB_ENV
+          echo "GEOS_INCLUDE_DIR=$CONDA_LIB/include" >> $GITHUB_ENV
+
           echo "PROJ_LIB=$CONDA_LIB/share/proj" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$CONDA_LIB/lib/pkgconfig" >> $GITHUB_ENV
+          echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
+
           echo "$CONDA_LIB/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+          echo "=== Verifying GDAL ==="
+          gdalinfo --version || echo "gdalinfo not found"
+
+      - name: Install LLVM (Windows)
+        run: choco install llvm -y
+        env:
+          CHOCOLATEY_NO_PROMPT: 1
+
+      - name: Remove WindowsApps from PATH (Windows)
+        shell: pwsh
+        run: |
+          $path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'WindowsApps' }) -join ';'
+          echo "PATH=$path" >> $env:GITHUB_ENV
 
       - name: Install maturin
         run: pip install maturin
 
       - name: Set Rust target
         id: target
-        run: echo "target=x86_64-pc-windows-gnu" >> $GITHUB_OUTPUT
+        run: echo "target=x86_64-pc-windows-msvc" >> $GITHUB_OUTPUT
 
       - name: Install Rust target
         run: rustup target add ${{ steps.target.outputs.target }}
@@ -154,12 +171,13 @@ jobs:
           pip install --force-reinstall --verbose dist/*.whl
           cd $RUNNER_TEMP
           python -c "import pymdurs; print('pymdurs imported successfully')"
+          python -c "import pymdurs; print('Available classes:', [x for x in dir(pymdurs.geometric) if not x.startswith('_')])"
           python -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works:', bbox.min_x)"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-windows-x86_64
+          name: wheel-windows-latest-${{ matrix.architecture }}
           path: dist/*.whl
 
   publish-to-pypi:
@@ -222,10 +240,13 @@ jobs:
           body: |
             ## Python Package Release ${{ steps.version.outputs.version }}
 
+            This release includes Python bindings for pymdurs.
+
             ### Installation
-              ```bash
-                          pip install pymdurs
-              ```
+
+            ```bash
+            pip install pymdurs
+            ```
 
             ### Available Classes
 
