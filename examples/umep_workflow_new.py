@@ -306,9 +306,15 @@ def main():
         config = solweig.ModelConfig.defaults()
         config.save("my_config.json")
 
-        # Calculate timeseries
-        results = solweig.calculate(
+        location = solweig.Location(
+            latitude=46.1843, longitude=-1.1437, utc_offset=1
+        )  # La Rochelle
+
+        # Calculate timeseries (use calculate_timeseries for a list of Weather)
+        results = solweig.calculate_timeseries(
             surface=surface,
+            weather_series=weather_list,
+            location=location,
             physics=physics,
             materials=materials,
             human=solweig.HumanParams(
@@ -318,7 +324,6 @@ def main():
                 height=1.65,  # 165 cmrm
                 posture="sitting",
             ),
-            weather=weather_list,
             use_anisotropic_sky=True,  # Uses SVF (computed automatically if needed)
             conifer=False,  # Use seasonal leaf on/off (set True for evergreen trees)
             output_dir=str(output_path),

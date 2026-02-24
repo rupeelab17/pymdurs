@@ -1,6 +1,9 @@
 //! Röckle-based urban wind field: analytical zones (upwind, cavity, wake) and parallel raster solver.
 //!
-//! References: Röckle (1990), Kaplan & Dinar (1996), URock (Bernard et al., 2023).
+//! Zone formulas aligned with URock (Bernard et al., 2023):
+//! [UMEP-processing/functions/URock](https://github.com/UMEP-dev/UMEP-processing/tree/main/functions/URock),
+//! `CalculatesIndicators.zoneProperties` (Lf, Lr, Lw, Hcm). References: Röckle (1990),
+//! Kaplan & Dinar (1996), Bagal et al. (2004), Nelson et al. (2008).
 
 use anyhow::{Context, Result};
 use ndarray::Array2;
@@ -10,11 +13,11 @@ use crate::geo_core::{BoundingBox, GeoCore};
 use crate::geometric::building::{Building, BuildingCollection};
 
 #[cfg(feature = "gdal")]
-use gdal::Dataset;
-#[cfg(feature = "gdal")]
 use gdal::raster::Buffer;
 #[cfg(feature = "gdal")]
 use gdal::spatial_ref::SpatialRef;
+#[cfg(feature = "gdal")]
+use gdal::Dataset;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
@@ -75,25 +78,35 @@ pub struct RockleBuilding {
 }
 
 impl RockleBuilding {
-    /// Upwind deflection zone length (Röckle): Lu = min(H, W/2) * 0.9
+    /// Upwind (displacement) zone length. URock: Lf = DISPLACEMENT_LENGTH_FIELD = 1.5*W/(1+0.8*W/H).
     pub fn upwind_length(&self) -> f64 {
-        self.h.min(self.w / 2.0) * 0.9
+        if self.h <= 0.0 || self.w <= 0.0 {
+            return 0.0;
+        }
+        1.5 * self.w / (1.0 + 0.8 * self.w / self.h)
     }
 
-    /// Cavity (recirculation) length (Kaplan & Dinar 1996): Lr = 1.8*W / (H/W + 0.24)
+    /// Cavity (recirculation) length. URock: Lr = CAVITY_LENGTH_FIELD = 1.8*W/((L/H)^0.3*(1+0.24*W/H)) (Kaplan & Dinar 1996).
     pub fn cavity_length(&self) -> f64 {
-        let r = self.h / self.w;
-        1.8 * self.w / (r + 0.24)
+        if self.h <= 0.0 || self.w <= 0.0 {
+            return 0.0;
+        }
+        let l_over_h = (self.l / self.h).max(1e-6);
+        1.8 * self.w / (l_over_h.powf(0.3) * (1.0 + 0.24 * self.w / self.h))
     }
 
-    /// Wake length: Lw = Lr * (1 + 0.5*H/W)
+    /// Wake length. URock: Lw = WAKE_LENGTH_FIELD = 3*Lr (Kaplan et al. 1996).
     pub fn wake_length(&self) -> f64 {
-        self.cavity_length() * (1.0 + 0.5 * self.h / self.w)
+        3.0 * self.cavity_length()
     }
 
-    /// Displacement zone height: Hd = H + 0.22*sqrt(H*W)
+    /// Characteristic height for wake half-width expansion. URock: Hcm = ROOFTOP_PERP_HEIGHT = 0.22*(0.67*min(H,W)+0.33*max(H,W)).
     pub fn displacement_height(&self) -> f64 {
-        self.h + 0.22 * (self.h * self.w).sqrt()
+        if self.h <= 0.0 || self.w <= 0.0 {
+            return 0.0;
+        }
+        let (mn, mx) = (self.h.min(self.w), self.h.max(self.w));
+        0.22 * (0.67 * mn + 0.33 * mx)
     }
 
     /// Classify point (relative to building centre, in wind frame) into a zone.
@@ -158,13 +171,7 @@ pub fn buildings_to_rockle(
         }
         let l = (max_along - min_along).max(0.1);
         let w = (max_cross - min_cross).max(0.1);
-        out.push(RockleBuilding {
-            cx,
-            cy,
-            h,
-            w,
-            l,
-        });
+        out.push(RockleBuilding { cx, cy, h, w, l });
     }
     out
 }
@@ -341,7 +348,8 @@ pub struct WindField {
 
 impl WindField {
     pub fn new(output_path: Option<String>) -> Result<Self> {
-        let out = output_path.or_else(|| Some(crate::collect::global_variables::TEMP_PATH.to_string()));
+        let out =
+            output_path.or_else(|| Some(crate::collect::global_variables::TEMP_PATH.to_string()));
         Ok(WindField {
             geo_core: GeoCore::default(),
             output_path: out,
@@ -351,7 +359,8 @@ impl WindField {
 
     pub fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) {
         self.bbox = Some(BoundingBox::new(min_x, min_y, max_x, max_y));
-        self.geo_core.set_bbox(Some(BoundingBox::new(min_x, min_y, max_x, max_y)));
+        self.geo_core
+            .set_bbox(Some(BoundingBox::new(min_x, min_y, max_x, max_y)));
     }
 
     /// Run wind field: read DEM/DSM from paths, use buildings from collection, write GeoTIFFs.
@@ -399,12 +408,7 @@ impl WindField {
 }
 
 #[cfg(feature = "gdal")]
-fn write_geotiff_f32(
-    path: &Path,
-    arr: &Array2<f32>,
-    gt: &[f64; 6],
-    epsg: i32,
-) -> Result<()> {
+fn write_geotiff_f32(path: &Path, arr: &Array2<f32>, gt: &[f64; 6], epsg: i32) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("Create output dir")?;
     }
@@ -419,7 +423,8 @@ fn write_geotiff_f32(
     let mut band = ds.rasterband(1).context("Band 1")?;
     let data: Vec<f32> = arr.iter().copied().collect();
     let mut buf = Buffer::new((width, height), data);
-    band.write((0, 0), (width, height), &mut buf).context("Write band")?;
+    band.write((0, 0), (width, height), &mut buf)
+        .context("Write band")?;
     Ok(())
 }
 
@@ -450,8 +455,8 @@ mod tests {
         };
         assert!(b.upwind_length() > 0.0);
         assert!(b.cavity_length() > 0.0);
-        assert!(b.wake_length() > b.cavity_length());
-        assert!(b.displacement_height() > b.h);
+        assert_eq!(b.wake_length(), 3.0 * b.cavity_length());
+        assert!(b.displacement_height() > 0.0);
     }
 
     #[test]
@@ -480,15 +485,9 @@ mod tests {
         let half_l = 7.5;
         let lu = b.upwind_length();
         assert!(lu > 0.0);
-        assert_eq!(
-            b.classify_point(-half_l - lu * 0.5, 0.0),
-            WindZone::Upwind
-        );
+        assert_eq!(b.classify_point(-half_l - lu * 0.5, 0.0), WindZone::Upwind);
         let lr = b.cavity_length();
-        assert_eq!(
-            b.classify_point(half_l + lr * 0.5, 0.0),
-            WindZone::Cavity
-        );
+        assert_eq!(b.classify_point(half_l + lr * 0.5, 0.0), WindZone::Cavity);
         let lw = b.wake_length();
         assert_eq!(
             b.classify_point(half_l + lr + (lw - lr) * 0.5, 0.0),
