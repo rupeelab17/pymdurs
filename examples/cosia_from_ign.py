@@ -59,7 +59,7 @@ COSIA_TO_UMEP = {
     "Surface eau": 7,  # Water
     "Neige": 7,  # Water
     "Conifère": 3,
-    "Feuillu": 3,
+    "Feuillu": 4,
     "Coupe": 5,  # Grass
     "Broussaille": 5,  # Grass
     "Pelouse": 5,  # Grass
