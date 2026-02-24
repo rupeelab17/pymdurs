@@ -68,10 +68,6 @@ jobs:
     needs: [build-sdist]
     runs-on: windows-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        architecture: [x86-64]
 
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +83,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Miniconda (Windows)
+      - name: Install Rust GNU target
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          rustup toolchain install stable-x86_64-pc-windows-gnu
+
+      - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
@@ -95,65 +96,32 @@ jobs:
           channels: conda-forge
           channel-priority: strict
 
-      - name: Install GDAL via Conda (Windows)
+      - name: Install GDAL via Conda
         shell: bash -el {0}
         run: |
-          conda install -c conda-forge libgdal geos proj sqlite m2w64-toolchain -y
+          conda install -c conda-forge \
+            m2w64-gdal \
+            m2w64-geos \
+            m2w64-proj \
+            m2w64-sqlite3 -y
 
           CONDA_PREFIX=$(conda info --base)
-          CONDA_LIB="$CONDA_PREFIX/Library"
+          MINGW="$CONDA_PREFIX/Library/mingw-w64"
 
-          echo "=== Checking installed files ==="
-          echo "Library directory:"
-          ls -la "$CONDA_LIB/lib/" | grep -i gdal || echo "No gdal in lib/"
-
-          echo "Bin directory:"
-          ls -la "$CONDA_LIB/bin/" | grep -i gdal || echo "No gdal in bin/"
-
-          echo "Include directory:"
-          ls -la "$CONDA_LIB/include/" | grep -i gdal || echo "No gdal in include/"
-
-          echo "=== All GDAL files ==="
-          find "$CONDA_LIB" -name "*gdal*" -o -name "*GDAL*" || echo "No GDAL files found"
-
-          echo "GDAL_HOME=$CONDA_LIB" >> $GITHUB_ENV
-          echo "GDAL_LIB_DIR=$CONDA_LIB/lib" >> $GITHUB_ENV
-          echo "GDAL_INCLUDE_DIR=$CONDA_LIB/include" >> $GITHUB_ENV
-          echo "GDAL_DATA=$CONDA_LIB/share/gdal" >> $GITHUB_ENV
-
-          echo "GEOS_LIB_DIR=$CONDA_LIB/lib" >> $GITHUB_ENV
-          echo "GEOS_INCLUDE_DIR=$CONDA_LIB/include" >> $GITHUB_ENV
-
-          echo "PROJ_LIB=$CONDA_LIB/share/proj" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$CONDA_LIB/lib/pkgconfig" >> $GITHUB_ENV
-          echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
-
-          echo "$CONDA_LIB/bin" >> $GITHUB_PATH
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-          echo "=== Verifying GDAL ==="
-          gdalinfo --version || echo "gdalinfo not found"
-
-      - name: Install LLVM (Windows)
-        run: choco install llvm -y
-        env:
-          CHOCOLATEY_NO_PROMPT: 1
-
-      - name: Remove WindowsApps from PATH (Windows)
-        shell: pwsh
-        run: |
-          $path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'WindowsApps' }) -join ';'
-          echo "PATH=$path" >> $env:GITHUB_ENV
+          echo "GDAL_HOME=$MINGW" >> $GITHUB_ENV
+          echo "GDAL_LIB_DIR=$MINGW/lib" >> $GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$MINGW/include" >> $GITHUB_ENV
+          echo "GEOS_LIB_DIR=$MINGW/lib" >> $GITHUB_ENV
+          echo "PROJ_LIB=$MINGW/share/proj" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$MINGW/lib/pkgconfig" >> $GITHUB_ENV
+          echo "$MINGW/bin" >> $GITHUB_PATH
 
       - name: Install maturin
         run: pip install maturin
 
       - name: Set Rust target
         id: target
-        run: echo "target=x86_64-pc-windows-msvc" >> $GITHUB_OUTPUT
-
-      - name: Install Rust target
-        run: rustup target add ${{ steps.target.outputs.target }}
+        run: echo "target=x86_64-pc-windows-gnu" >> $GITHUB_OUTPUT
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -171,13 +139,12 @@ jobs:
           pip install --force-reinstall --verbose dist/*.whl
           cd $RUNNER_TEMP
           python -c "import pymdurs; print('pymdurs imported successfully')"
-          python -c "import pymdurs; print('Available classes:', [x for x in dir(pymdurs.geometric) if not x.startswith('_')])"
           python -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works:', bbox.min_x)"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-windows-latest-${{ matrix.architecture }}
+          name: wheel-windows-x86_64
           path: dist/*.whl
 
   publish-to-pypi:

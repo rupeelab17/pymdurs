@@ -40,7 +40,7 @@ def main():
     classification_list = [3, 4, 5]  # Vegetation and water classes
     lidar.run(file_name="CDSM.tif", classification_list=classification_list)
 
-    classification_list = [2, 6, 9, 10, 11]  # Ground and buildings classes
+    classification_list = [3, 4, 5, 2, 6, 9, 10, 11]  # Ground and buildings classes
 
     output_path = lidar.run(
         file_name="DSM.tif", classification_list=classification_list
