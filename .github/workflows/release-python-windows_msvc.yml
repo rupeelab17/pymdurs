@@ -113,28 +113,26 @@ jobs:
           $binDir   = "$libRoot\bin"
 
           Write-Host "Active env : $condaEnv"
-          Write-Host "Lib dir    : $libDir"
-          Write-Host "Inc dir    : $incDir"
 
-          # Conda-forge fournit gdal.lib mais pas gdal_i.lib (requis par MSVC)
-          # On crée gdal_i.lib depuis gdal.lib
+          # Créer gdal_i.lib depuis gdal.lib (conda-forge ne fournit pas gdal_i.lib)
           if (-not (Test-Path "$libDir\gdal_i.lib")) {
             if (Test-Path "$libDir\gdal.lib") {
-              Write-Host "Creating gdal_i.lib from gdal.lib..."
               Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
               Write-Host "✅ gdal_i.lib created"
             } else {
-              throw "Neither gdal_i.lib nor gdal.lib found in $libDir"
+              throw "Neither gdal_i.lib nor gdal.lib found"
             }
-          } else {
-            Write-Host "✅ gdal_i.lib already exists"
           }
 
-          # Vérifier les headers
+          # Vérifier headers GDAL
           if (-not (Test-Path "$incDir\cpl_atomic_ops.h")) {
             throw "❌ GDAL headers not found in $incDir"
           }
-          Write-Host "✅ GDAL headers found"
+          Write-Host "✅ GDAL headers OK"
+
+          # Récupérer GEOS_VERSION depuis conda (obligatoire pour geos-sys)
+          $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
+          Write-Host "GEOS version: $geosVersion"
 
           # Export variables
           "GDAL_HOME=$condaEnv"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -143,6 +141,7 @@ jobs:
           "GDAL_VERSION=3"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_LIB_DIR=$libDir"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_INCLUDE_DIR=$incDir"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_VERSION=$geosVersion"    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_LIB=$libRoot\share\proj" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RUST_BACKTRACE=1"             | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$binDir"                      | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
