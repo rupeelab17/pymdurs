@@ -121,6 +121,14 @@ jobs:
             Get-ChildItem "$lib\include" -ErrorAction SilentlyContinue | Select-Object -First 20
           }
 
+          $geosLine = conda list geos | Select-String -Pattern "^geos\s+"
+          if (-not $geosLine) { throw "GEOS not found in conda environment" }
+
+          # conda list: "geos  3.12.1  h..."
+          $geosVer = ($geosLine -split "\s+")[1]
+
+          "GEOS_VERSION=$geosVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_LIB_DIR=$lib\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_HOME=$lib"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
