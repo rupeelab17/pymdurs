@@ -123,12 +123,13 @@ jobs:
 
           $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
           $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
-          Write-Host "GEOS=$geosVersion PROJ=$projVersion"
+          $gdalVersion = (conda list gdal --json | ConvertFrom-Json | Where-Object { $_.name -eq "gdal" }).version
+          Write-Host "GDAL=$gdalVersion GEOS=$geosVersion PROJ=$projVersion"
 
           echo "GDAL_HOME=$condaEnv"                 >> $env:GITHUB_ENV
           echo "GDAL_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
           echo "GDAL_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
-          echo "GDAL_VERSION=3"                       >> $env:GITHUB_ENV
+          echo "GDAL_VERSION=$gdalVersion"           >> $env:GITHUB_ENV
           echo "GEOS_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
           echo "GEOS_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
           echo "GEOS_VERSION=$geosVersion"           >> $env:GITHUB_ENV
