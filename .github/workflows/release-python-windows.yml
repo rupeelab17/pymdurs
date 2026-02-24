@@ -81,37 +81,31 @@ jobs:
           architecture: x64
           cache: "pip"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Install LLVM
+      - name: Install Rust GNU toolchain
         shell: pwsh
-        run: choco install llvm -y
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu
+          rustup target add x86_64-pc-windows-gnu
+          rustup default stable-x86_64-pc-windows-gnu
+
+      - name: Install MinGW
+        shell: pwsh
+        run: choco install mingw -y
 
       - name: Install SQLite
         shell: pwsh
         run: choco install sqlite -y
 
-      - name: Set environment for static build
+      - name: Set environment
         shell: pwsh
         run: |
-          # Forcer compilation statique — évite le besoin de gdal_i.lib système
           "GDAL_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RUST_BACKTRACE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          # Trouver libclang — PowerShell gère bien les espaces dans les chemins
-          $llvm = Get-ChildItem "C:\Program Files\LLVM\bin\libclang.dll" -ErrorAction SilentlyContinue
-          if ($llvm) {
-            $path = $llvm.DirectoryName
-            "LIBCLANG_PATH=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Host "Found libclang at: $path"
-          } else {
-            Write-Host "WARNING: libclang.dll not found"
-          }
+          # Ajouter MinGW au PATH
+          "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
@@ -120,7 +114,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          target: x86_64-pc-windows-msvc
+          target: x86_64-pc-windows-gnu
           args: >
             --release
             --manifest-path pymdurs/Cargo.toml
