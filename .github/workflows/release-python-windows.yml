@@ -234,7 +234,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           name: Python pymdurs ${{ steps.version.outputs.version }}
-          tag: py-${{ steps.version.outputs.version }}
+          tag_name: py-${{ steps.version.outputs.version }}
           prerelease: ${{ steps.version.outputs.is_prerelease }}
           files: dist/*
           body: |
