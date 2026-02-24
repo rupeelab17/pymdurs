@@ -111,11 +111,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # - name: Install GDAL (Linux)
-      #   if: matrix.os == 'ubuntu-latest'
-      #   run: |
-      #     sudo apt-get update
-      #     sudo apt-get install -y libgdal-dev gdal-bin libclang-dev
+      - name: Install GDAL (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev gdal-bin libclang-dev
 
       - name: Install GDAL (macOS)
         if: startsWith(matrix.os, 'macos')
@@ -276,36 +276,36 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
-          manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
+          #manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
           maturin-version: 1.11.4
-          before-script-linux: |
-            set -ex
+          # before-script-linux: |
+          #   set -ex
 
-            # Installer miniconda
-            curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh
-            bash miniconda.sh -b -p /opt/conda
-            export PATH="/opt/conda/bin:$PATH"
+          #   # Installer miniconda
+          #   curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh
+          #   bash miniconda.sh -b -p /opt/conda
+          #   export PATH="/opt/conda/bin:$PATH"
 
-            # Installer les libs GIS via conda-forge (versions récentes)
-            conda install -y -c conda-forge \
-              gdal \
-              geos \
-              proj \
-              sqlite
+          #   # Installer les libs GIS via conda-forge (versions récentes)
+          #   conda install -y -c conda-forge \
+          #     gdal \
+          #     geos \
+          #     proj \
+          #     sqlite
 
-            # Exposer les libs pour Rust/pkg-config
-            export CONDA_PREFIX=/opt/conda
-            export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig"
-            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-            export GDAL_HOME="$CONDA_PREFIX"
-            export GEOS_LIB_DIR="$CONDA_PREFIX/lib"
-            export PROJ_LIB="$CONDA_PREFIX/share/proj"
+          #   # Exposer les libs pour Rust/pkg-config
+          #   export CONDA_PREFIX=/opt/conda
+          #   export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig"
+          #   export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+          #   export GDAL_HOME="$CONDA_PREFIX"
+          #   export GEOS_LIB_DIR="$CONDA_PREFIX/lib"
+          #   export PROJ_LIB="$CONDA_PREFIX/share/proj"
 
-            # clang reste depuis dnf (plus simple)
-            dnf install -y clang-devel
+          #   # clang reste depuis dnf (plus simple)
+          #   dnf install -y clang-devel
 
-            LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
-            export LIBCLANG_PATH=$(dirname "$LIBCLANG")
+          #   LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
+          #   export LIBCLANG_PATH=$(dirname "$LIBCLANG")
 
       - name: Test wheel
         run: |
