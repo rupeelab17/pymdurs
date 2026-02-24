@@ -1,0 +1,253 @@
+name: Release Python (Unix)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA
+        type: string
+      dry-run:
+        description: Dry run
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.sha || github.sha }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-sdist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install GDAL (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev gdal-bin
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Create source distribution
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: >
+            --manifest-path pymdurs/Cargo.toml
+            --out dist
+          maturin-version: 1.11.4
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  build-wheels:
+    needs: [build-sdist]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, macos-15]
+        architecture: [x86-64, aarch64]
+        exclude:
+          - os: macos-15
+            architecture: x86-64
+          - os: macos-15-intel
+            architecture: aarch64
+          - os: ubuntu-latest
+            architecture: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Set swap space for Linux
+        if: matrix.os == 'ubuntu-latest'
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install GDAL (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev gdal-bin libclang-dev
+
+      - name: Install GDAL (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install gdal
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Set Rust target
+        id: target
+        run: |
+          if [[ "${{ matrix.architecture }}" == "aarch64" ]]; then
+            if [[ "${{ matrix.os }}" == "macos-15" ]]; then
+              echo "target=aarch64-apple-darwin" >> $GITHUB_OUTPUT
+            else
+              echo "target=aarch64-unknown-linux-gnu" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "${{ matrix.architecture }}" == "x86-64" ]]; then
+            if [[ "${{ matrix.os }}" == "macos-15-intel" ]]; then
+              echo "target=x86_64-apple-darwin" >> $GITHUB_OUTPUT
+            elif [[ "${{ matrix.os }}" == "macos-26" ]]; then
+              echo "target=x86_64-apple-darwin" >> $GITHUB_OUTPUT
+            else
+              echo "target=x86_64-unknown-linux-gnu" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Install Rust target
+        run: rustup target add ${{ steps.target.outputs.target }}
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ steps.target.outputs.target }}
+          args: >
+            --release
+            --manifest-path pymdurs/Cargo.toml
+            --out dist
+          maturin-version: 1.11.4
+
+      - name: Test wheel
+        run: |
+          pip install --force-reinstall --verbose dist/*.whl
+          cd /tmp
+          python -c 'import pymdurs; print("pymdurs imported successfully")'
+          python -c 'import pymdurs; print("Available classes:", [x for x in dir(pymdurs.geometric) if not x.startswith("_")])'
+          python -c 'import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print("PyBoundingBox works:", bbox.min_x)'
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.architecture }}
+          path: dist/*.whl
+
+  publish-to-pypi:
+    needs: [build-sdist, build-wheels]
+    environment:
+      name: release-python
+      url: https://pypi.org/project/pymdurs
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download sdists and wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        if: inputs.dry-run == false
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          verbose: true
+
+  publish-to-github:
+    needs: [publish-to-pypi]
+    if: inputs.dry-run == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Get version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(grep -m 1 -oP 'version = "\K[^"]+' pyproject.toml)
+          if [[ "$VERSION" == *"-"* ]] || [[ "$VERSION" == *"dev"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"rc"* ]]; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Python pymdurs ${{ steps.version.outputs.version }}
+          tag: py-${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.version.outputs.is_prerelease }}
+          files: dist/*
+          body: |
+            ## Python Package Release ${{ steps.version.outputs.version }}
+
+            This release includes Python bindings for pymdurs.
+
+            ### Installation
+
+            ```bash
+            pip install pymdurs
+            ```
+
+            ### Available Classes
+
+            - `pymdurs.geometric.Building` - Building data collection
+            - `pymdurs.geometric.Dem` - Digital Elevation Model
+            - `pymdurs.geometric.Cadastre` - Cadastral parcel data
+            - `pymdurs.geometric.Iris` - IRIS statistical units
+            - `pymdurs.geometric.Lcz` - Local Climate Zone
+            - `pymdurs.BoundingBox` - Bounding box operations
+            - `pymdurs.GeoCore` - CRS and geographic operations
+
+            ### Changes
+
+            See the [changelog](https://github.com/rupeelab17/pymdurs/blob/main/CHANGELOG.md) for details.
+
+            ### Requirements
+
+            - Python >= 3.8
+            - pandas >= 2.0.0
+            - numpy < 2.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

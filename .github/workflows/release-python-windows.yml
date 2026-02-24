@@ -1,13 +1,11 @@
-name: Release Python
+name: Release Python (Windows)
 
 on:
   workflow_dispatch:
     inputs:
-      # Latest commit to include with the release. If omitted, use the latest commit on the main branch.
       sha:
         description: Commit SHA
         type: string
-      # Create the sdist and build the wheels, but do not publish to PyPI / GitHub.
       dry-run:
         description: Dry run
         type: boolean
@@ -30,8 +28,7 @@ defaults:
 jobs:
   build-sdist:
     runs-on: ubuntu-latest
-    #runs-on: self-hosted
-    timeout-minutes: 30 # Ajoutez un timeout
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,7 +39,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip" # Ajoutez le cache
+          cache: "pip"
 
       - name: Install GDAL (Linux)
         run: |
@@ -61,9 +58,6 @@ jobs:
             --out dist
           maturin-version: 1.11.4
 
-      # Test sdist disabled: pip install from sdist fails with "Large file option has not been set"
-      # (zip64 error when pymdurs wheel exceeds ZIP limits). Wheels are tested in build-wheels job.
-
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
@@ -72,35 +66,17 @@ jobs:
 
   build-wheels:
     needs: [build-sdist]
-    runs-on: ${{ matrix.os }}
-    #runs-on: self-hosted
+    runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15-intel, macos-15]
-        # os: [ubuntu-latest, macos-15-intel, macos-15, windows-latest]
-        architecture: [x86-64, aarch64]
-        exclude:
-          - os: windows-latest
-            architecture: aarch64
-          - os: macos-15
-            architecture: x86-64
-          - os: macos-15-intel
-            architecture: aarch64
-          - os: ubuntu-latest
-            architecture: aarch64
+        architecture: [x86-64]
 
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
-
-      - name: Set swap space for Linux
-        if: matrix.os == 'ubuntu-latest'
-        uses: pierotofy/set-swap-space@master
-        with:
-          swap-size-gb: 10
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -111,20 +87,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install GDAL (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgdal-dev gdal-bin libclang-dev
-
-      - name: Install GDAL (macOS)
-        if: startsWith(matrix.os, 'macos')
-        run: |
-          brew install gdal
-
-      # === SECTION WINDOWS AVEC CONDA ===
       - name: Setup Miniconda (Windows)
-        if: matrix.os == 'windows-latest'
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
@@ -133,10 +96,8 @@ jobs:
           channel-priority: strict
 
       - name: Install GDAL via Conda (Windows)
-        if: matrix.os == 'windows-latest'
         shell: bash -el {0}
         run: |
-          # Installer libgdal qui contient les fichiers de développement
           conda install -c conda-forge libgdal geos proj sqlite m2w64-toolchain -y
 
           CONDA_PREFIX=$(conda info --base)
@@ -152,7 +113,6 @@ jobs:
           echo "Include directory:"
           ls -la "$CONDA_LIB/include/" | grep -i gdal || echo "No gdal in include/"
 
-          # Chercher tous les fichiers GDAL
           echo "=== All GDAL files ==="
           find "$CONDA_LIB" -name "*gdal*" -o -name "*GDAL*" || echo "No GDAL files found"
 
@@ -174,49 +134,12 @@ jobs:
           echo "=== Verifying GDAL ==="
           gdalinfo --version || echo "gdalinfo not found"
 
-      # - name: Install GDAL via vcpkg (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   run: |
-      #     # Installer GDAL et ses dépendances via vcpkg
-      #     vcpkg install gdal[core]:x64-windows
-      #     vcpkg install geos:x64-windows
-      #     vcpkg install proj:x64-windows
-      #     vcpkg install sqlite3:x64-windows
-
-      #     VCPKG_ROOT="C:/vcpkg"
-      #     VCPKG_INSTALLED="$VCPKG_ROOT/installed/x64-windows"
-
-      #     echo "=== Checking GDAL files ==="
-      #     ls -la "$VCPKG_INSTALLED/lib/" | grep -i gdal
-      #     ls -la "$VCPKG_INSTALLED/bin/" | grep -i gdal
-
-      #     echo "GDAL_HOME=$VCPKG_INSTALLED" >> $GITHUB_ENV
-      #     echo "GDAL_LIB_DIR=$VCPKG_INSTALLED/lib" >> $GITHUB_ENV
-      #     echo "GDAL_INCLUDE_DIR=$VCPKG_INSTALLED/include" >> $GITHUB_ENV
-      #     echo "GDAL_DATA=$VCPKG_INSTALLED/share/gdal" >> $GITHUB_ENV
-
-      #     echo "GEOS_LIB_DIR=$VCPKG_INSTALLED/lib" >> $GITHUB_ENV
-      #     echo "GEOS_INCLUDE_DIR=$VCPKG_INSTALLED/include" >> $GITHUB_ENV
-
-      #     echo "PROJ_LIB=$VCPKG_INSTALLED/share/proj" >> $GITHUB_ENV
-      #     echo "PKG_CONFIG_PATH=$VCPKG_INSTALLED/lib/pkgconfig" >> $GITHUB_ENV
-
-      #     echo "$VCPKG_INSTALLED/bin" >> $GITHUB_PATH
-      #     echo "$VCPKG_INSTALLED/tools" >> $GITHUB_PATH
-      #     echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      #     choco install llvm -y
-      #   env:
-      #     CHOCOLATEY_NO_PROMPT: 1
-
       - name: Install LLVM (Windows)
-        if: matrix.os == 'windows-latest'
         run: choco install llvm -y
         env:
           CHOCOLATEY_NO_PROMPT: 1
 
       - name: Remove WindowsApps from PATH (Windows)
-        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'WindowsApps' }) -join ';'
@@ -227,46 +150,11 @@ jobs:
 
       - name: Set Rust target
         id: target
-        run: |
-          if [[ "${{ matrix.architecture }}" == "aarch64" ]]; then
-            if [[ "${{ matrix.os }}" == "macos-15" ]]; then
-              echo "target=aarch64-apple-darwin" >> $GITHUB_OUTPUT
-            else
-              echo "target=aarch64-unknown-linux-gnu" >> $GITHUB_OUTPUT
-            fi
-          elif [[ "${{ matrix.architecture }}" == "x86-64" ]]; then
-            if [[ "${{ matrix.os }}" == "macos-15-intel" ]]; then
-              echo "target=x86_64-apple-darwin" >> $GITHUB_OUTPUT
-            elif [[ "${{ matrix.os }}" == "macos-26" ]]; then
-              echo "target=x86_64-apple-darwin" >> $GITHUB_OUTPUT
-            elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-              echo "target=x86_64-pc-windows-msvc" >> $GITHUB_OUTPUT
-            else
-              echo "target=x86_64-unknown-linux-gnu" >> $GITHUB_OUTPUT
-            fi
-          fi
+        run: echo "target=x86_64-pc-windows-msvc" >> $GITHUB_OUTPUT
 
       - name: Install Rust target
         run: rustup target add ${{ steps.target.outputs.target }}
 
-      # - name: Build wheel
-      #   uses: PyO3/maturin-action@v1
-      #   with:
-      #     command: build
-      #     target: ${{ steps.target.outputs.target }}
-      #     args: >
-      #       --release
-      #       --manifest-path pymdurs/Cargo.toml
-      #       --out dist
-      #     manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
-      #     maturin-version: 1.11.4
-      #     before-script-linux: |
-      #       set -ex
-      #       dnf install -y clang-devel gdal-devel geos-devel sqlite-devel proj-devel  || \
-      #       (yum install -y epel-release && yum install -y clang-devel gdal-devel)
-      #       LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
-      #       export LIBCLANG_PATH=$(dirname "$LIBCLANG")
-      #       echo "Found libclang at: $LIBCLANG_PATH"
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -276,49 +164,20 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
-          #manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
           maturin-version: 1.11.4
-          # before-script-linux: |
-          #   set -ex
-
-          #   # Installer miniconda
-          #   curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh
-          #   bash miniconda.sh -b -p /opt/conda
-          #   export PATH="/opt/conda/bin:$PATH"
-
-          #   # Installer les libs GIS via conda-forge (versions récentes)
-          #   conda install -y -c conda-forge \
-          #     gdal \
-          #     geos \
-          #     proj \
-          #     sqlite
-
-          #   # Exposer les libs pour Rust/pkg-config
-          #   export CONDA_PREFIX=/opt/conda
-          #   export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig"
-          #   export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
-          #   export GDAL_HOME="$CONDA_PREFIX"
-          #   export GEOS_LIB_DIR="$CONDA_PREFIX/lib"
-          #   export PROJ_LIB="$CONDA_PREFIX/share/proj"
-
-          #   # clang reste depuis dnf (plus simple)
-          #   dnf install -y clang-devel
-
-          #   LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
-          #   export LIBCLANG_PATH=$(dirname "$LIBCLANG")
 
       - name: Test wheel
         run: |
           pip install --force-reinstall --verbose dist/*.whl
-          cd /tmp
-          python -c 'import pymdurs; print("pymdurs imported successfully")'
-          python -c 'import pymdurs; print("Available classes:", [x for x in dir(pymdurs.geometric) if not x.startswith("_")])'
-          python -c 'import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print("PyBoundingBox works:", bbox.min_x)'
+          cd $RUNNER_TEMP
+          python -c "import pymdurs; print('pymdurs imported successfully')"
+          python -c "import pymdurs; print('Available classes:', [x for x in dir(pymdurs.geometric) if not x.startswith('_')])"
+          python -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works:', bbox.min_x)"
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.os }}-${{ matrix.architecture }}
+          name: wheel-windows-latest-${{ matrix.architecture }}
           path: dist/*.whl
 
   publish-to-pypi:
@@ -327,7 +186,6 @@ jobs:
       name: release-python
       url: https://pypi.org/project/pymdurs
     runs-on: ubuntu-latest
-    #runs-on: self-hosted
     permissions:
       id-token: write
 
@@ -349,7 +207,6 @@ jobs:
     needs: [publish-to-pypi]
     if: inputs.dry-run == false
     runs-on: ubuntu-latest
-    #runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
         with:
