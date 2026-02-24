@@ -90,28 +90,28 @@ jobs:
         shell: pwsh
         run: choco install llvm -y
 
-      - name: Install SQLite (requis pour compiler proj depuis les sources)
+      - name: Install SQLite
         shell: pwsh
         run: choco install sqlite -y
 
       - name: Set environment for static build
-        shell: bash
+        shell: pwsh
         run: |
           # Forcer compilation statique — évite le besoin de gdal_i.lib système
-          echo "GDAL_STATIC=1" >> $GITHUB_ENV
-          echo "PROJ_STATIC=1" >> $GITHUB_ENV
-          echo "GEOS_STATIC=1" >> $GITHUB_ENV
+          "GDAL_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_STATIC=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUST_BACKTRACE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-          # Trouver libclang pour bindgen
-          LLVM_PATH=$(find "C:/Program Files/LLVM" -name "libclang.dll" 2>/dev/null | head -1)
-          if [ -n "$LLVM_PATH" ]; then
-            echo "LIBCLANG_PATH=$(dirname $LLVM_PATH)" >> $GITHUB_ENV
-            echo "Found libclang at: $(dirname $LLVM_PATH)"
-          else
-            echo "WARNING: libclang.dll not found"
-          fi
-
-          echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
+          # Trouver libclang — PowerShell gère bien les espaces dans les chemins
+          $llvm = Get-ChildItem "C:\Program Files\LLVM\bin\libclang.dll" -ErrorAction SilentlyContinue
+          if ($llvm) {
+            $path = $llvm.DirectoryName
+            "LIBCLANG_PATH=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "Found libclang at: $path"
+          } else {
+            Write-Host "WARNING: libclang.dll not found"
+          }
 
       - name: Install maturin
         run: pip install maturin
@@ -167,8 +167,6 @@ jobs:
     needs: [publish-to-pypi]
     if: inputs.dry-run == false
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -203,28 +201,28 @@ jobs:
             ## Python Package Release ${{ steps.version.outputs.version }}
 
             ### Installation
-              ```bash
-                          pip install pymdurs
-              ```
+            ```bash
+                        pip install pymdurs
+            ```
 
-                ### Available Classes
+            ### Available Classes
 
-                - `pymdurs.geometric.Building` - Building data collection
-                - `pymdurs.geometric.Dem` - Digital Elevation Model
-                - `pymdurs.geometric.Cadastre` - Cadastral parcel data
-                - `pymdurs.geometric.Iris` - IRIS statistical units
-                - `pymdurs.geometric.Lcz` - Local Climate Zone
-                - `pymdurs.BoundingBox` - Bounding box operations
-                - `pymdurs.GeoCore` - CRS and geographic operations
+            - `pymdurs.geometric.Building` - Building data collection
+            - `pymdurs.geometric.Dem` - Digital Elevation Model
+            - `pymdurs.geometric.Cadastre` - Cadastral parcel data
+            - `pymdurs.geometric.Iris` - IRIS statistical units
+            - `pymdurs.geometric.Lcz` - Local Climate Zone
+            - `pymdurs.BoundingBox` - Bounding box operations
+            - `pymdurs.GeoCore` - CRS and geographic operations
 
-                ### Changes
+            ### Changes
 
-                See the [changelog](https://github.com/rupeelab17/pymdurs/blob/main/CHANGELOG.md) for details.
+            See the [changelog](https://github.com/rupeelab17/pymdurs/blob/main/CHANGELOG.md) for details.
 
-                ### Requirements
+            ### Requirements
 
-                - Python >= 3.8
-                - pandas >= 2.0.0
-                - numpy < 2.0.0
+            - Python >= 3.8
+            - pandas >= 2.0.0
+            - numpy < 2.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

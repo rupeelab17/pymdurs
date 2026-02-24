@@ -301,11 +301,16 @@ def main():
             start="2025-07-01 07:00",
             end="2025-07-01 19:00",
         )
-        physics = solweig.load_physics("parametersforsolweig.json")
+        physics = solweig.load_physics("physics_defaults.json")
+        materials = solweig.load_materials("default_materials.json")
+        config = solweig.ModelConfig.defaults()
+        config.save("my_config.json")
+
         # Calculate timeseries
         results = solweig.calculate(
             surface=surface,
             physics=physics,
+            materials=materials,
             human=solweig.HumanParams(
                 abs_k=0.65,  # Lower shortwave absorption
                 abs_l=0.97,  # Higher longwave absorption
