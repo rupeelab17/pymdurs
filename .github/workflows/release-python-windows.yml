@@ -167,6 +167,8 @@ jobs:
     needs: [publish-to-pypi]
     if: inputs.dry-run == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
