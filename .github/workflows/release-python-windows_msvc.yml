@@ -157,6 +157,16 @@ jobs:
           Write-Host "Native libraries OK."
           Write-Host ""
 
+          if (-not (Test-Path (Join-Path $libDir "gdal_i.lib"))) {
+              if (Test-Path (Join-Path $libDir "gdal.lib")) {
+                  Write-Host "Creating gdal_i.lib alias from gdal.lib"
+                  Copy-Item (Join-Path $libDir "gdal.lib") `
+                            (Join-Path $libDir "gdal_i.lib")
+              } else {
+                  throw "Neither gdal_i.lib nor gdal.lib found"
+              }
+          }
+
           # =========================
           # Export env vars (correct for MSVC)
           # =========================
