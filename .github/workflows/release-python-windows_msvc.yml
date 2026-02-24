@@ -111,10 +111,11 @@ jobs:
           $libDir   = "$libRoot\lib"
           $incDir   = "$libRoot\include"
           $binDir   = "$libRoot\bin"
+          $pkgcfg   = "$libDir\pkgconfig"
 
           Write-Host "Active env : $condaEnv"
 
-          # Créer gdal_i.lib depuis gdal.lib (conda-forge ne fournit pas gdal_i.lib)
+          # Créer gdal_i.lib depuis gdal.lib
           if (-not (Test-Path "$libDir\gdal_i.lib")) {
             if (Test-Path "$libDir\gdal.lib") {
               Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
@@ -130,21 +131,31 @@ jobs:
           }
           Write-Host "✅ GDAL headers OK"
 
-          # Récupérer GEOS_VERSION depuis conda (obligatoire pour geos-sys)
-          $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
-          Write-Host "GEOS version: $geosVersion"
+          # Vérifier proj.pc
+          Write-Host "=== pkgconfig files ==="
+          Get-ChildItem "$pkgcfg" -ErrorAction SilentlyContinue
 
-          # Export variables
-          "GDAL_HOME=$condaEnv"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_LIB_DIR=$libDir"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_INCLUDE_DIR=$incDir"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_VERSION=3"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_LIB_DIR=$libDir"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_INCLUDE_DIR=$incDir"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_VERSION=$geosVersion"    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_LIB=$libRoot\share\proj" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RUST_BACKTRACE=1"             | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$binDir"                      | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Récupérer les versions
+          $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
+          $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
+          Write-Host "GEOS version : $geosVersion"
+          Write-Host "PROJ version : $projVersion"
+
+          # Export toutes les variables
+          "GDAL_HOME=$condaEnv"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_LIB_DIR=$libDir"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_VERSION=3"                    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_LIB_DIR=$libDir"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_VERSION=$geosVersion"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_LIB=$libRoot\share\proj"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_LIB_DIR=$libDir"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_VERSION=$projVersion"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PKG_CONFIG_PATH=$pkgcfg"           | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUST_BACKTRACE=1"                  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$binDir"                           | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
