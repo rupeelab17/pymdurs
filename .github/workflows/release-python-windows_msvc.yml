@@ -165,7 +165,7 @@ jobs:
           "SQLite3_LIBRARY=$libDir\sqlite3.lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CMAKE_PREFIX_PATH=$libRoot"        | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RUST_BACKTRACE=1"                  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$binDir"                           | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append                         | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "$binDir"                           | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append                   | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
