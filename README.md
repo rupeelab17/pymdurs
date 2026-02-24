@@ -25,6 +25,14 @@
 
 ## Installation
 
+**Install GDAL (prerequisite)**
+
+| Platform    | Command                                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **macOS**   | `brew install gdal` or `ARCHFLAGS="-arch arm64" uv pip install --no-cache-dir gdal`                                                                                |
+| **Linux**   | `sudo apt-get update && sudo apt-get install -y libgdal-dev gdal-bin libclang-dev`                                                                                 |
+| **Windows** | [OSGeo4W](https://trac.osgeo.org/osgeo4w/) (GDAL, GEOS, PROJ, SQLite3) + `choco install llvm pkgconfiglite sqlite -y` + set `GDAL_HOME`, `PKG_CONFIG_PATH`, `PATH` |
+
 ### Depuis PyPI (recommandé)
 
 Le paquet est publié sur [PyPI](https://pypi.org/project/pymdurs/). Pour installer la dernière version :
@@ -68,6 +76,27 @@ After installation, restart your terminal or run:
 
 ```bash
 source $HOME/.cargo/env
+```
+
+**Build (maturin develop)**
+
+| Platform                  | Target                      | Command                                                                  |
+| ------------------------- | --------------------------- | ------------------------------------------------------------------------ |
+| **macOS** (Apple Silicon) | `aarch64-apple-darwin`      | `maturin develop --target aarch64-apple-darwin`                          |
+| **macOS** (Intel)         | `x86_64-apple-darwin`       | `maturin develop --target x86_64-apple-darwin`                           |
+| **Linux** (x86_64)        | `x86_64-unknown-linux-gnu`  | `maturin develop --target x86_64-unknown-linux-gnu` or `maturin develop` |
+| **Linux** (ARM64)         | `aarch64-unknown-linux-gnu` | `maturin develop --target aarch64-unknown-linux-gnu`                     |
+| **Windows**               | `x86_64-pc-windows-msvc`    | `maturin develop --target x86_64-pc-windows-msvc`                        |
+
+With uv: `uv run maturin develop --target <target>`
+
+**macOS: linker can't find GDAL / "library 'gdal' not found"**  
+If you upgraded GDAL or PROJ with Homebrew, the linker may still use old paths. Clean and point pkg-config at the current install, then rebuild:
+
+```bash
+cd pymdurs && cargo clean && cd ..
+export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
+maturin develop --target aarch64-apple-darwin
 ```
 
 **Compilation et installation :**
