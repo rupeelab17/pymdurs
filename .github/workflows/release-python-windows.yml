@@ -67,7 +67,7 @@ jobs:
   build-wheels:
     needs: [build-sdist]
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -78,71 +78,49 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
           cache: "pip"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Rust GNU target
-        run: |
-          rustup target add x86_64-pc-windows-gnu
-          rustup toolchain install stable-x86_64-pc-windows-gnu
-
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
         with:
-          auto-update-conda: true
-          python-version: ${{ env.PYTHON_VERSION }}
-          channels: conda-forge
-          channel-priority: strict
+          targets: x86_64-pc-windows-msvc
 
-      - name: Install GDAL via Conda
-        shell: bash -el {0}
+      - name: Install LLVM
+        shell: pwsh
+        run: choco install llvm -y
+
+      - name: Install SQLite (requis pour compiler proj depuis les sources)
+        shell: pwsh
+        run: choco install sqlite -y
+
+      - name: Set environment for static build
+        shell: bash
         run: |
-          conda install -c conda-forge \
-            libgdal \
-            geos \
-            proj \
-            sqlite -y
+          # Forcer compilation statique — évite le besoin de gdal_i.lib système
+          echo "GDAL_STATIC=1" >> $GITHUB_ENV
+          echo "PROJ_STATIC=1" >> $GITHUB_ENV
+          echo "GEOS_STATIC=1" >> $GITHUB_ENV
 
-          CONDA_PREFIX=$(conda info --base)
-          CONDA_LIB="$CONDA_PREFIX/Library"
-
-          echo "=== Searching for gdal lib files ==="
-          find "$CONDA_LIB" -name "*gdal*" 2>/dev/null
-
-          # Créer gdal_i.lib depuis gdal.dll si manquant
-          if [ ! -f "$CONDA_LIB/lib/gdal_i.lib" ]; then
-            echo "gdal_i.lib not found, creating from gdal.dll..."
-            GDAL_DLL=$(find "$CONDA_LIB/bin" -name "gdal*.dll" | head -1)
-            echo "Found DLL: $GDAL_DLL"
-            cd "$CONDA_LIB/lib"
-            lib.exe /def:"$GDAL_DLL" /out:gdal_i.lib /machine:x64 || true
+          # Trouver libclang pour bindgen
+          LLVM_PATH=$(find "C:/Program Files/LLVM" -name "libclang.dll" 2>/dev/null | head -1)
+          if [ -n "$LLVM_PATH" ]; then
+            echo "LIBCLANG_PATH=$(dirname $LLVM_PATH)" >> $GITHUB_ENV
+            echo "Found libclang at: $(dirname $LLVM_PATH)"
+          else
+            echo "WARNING: libclang.dll not found"
           fi
 
-          echo "GDAL_HOME=$CONDA_LIB" >> $GITHUB_ENV
-          echo "GDAL_LIB_DIR=$CONDA_LIB/lib" >> $GITHUB_ENV
-          echo "GDAL_INCLUDE_DIR=$CONDA_LIB/include" >> $GITHUB_ENV
-          echo "GEOS_LIB_DIR=$CONDA_LIB/lib" >> $GITHUB_ENV
-          echo "PROJ_LIB=$CONDA_LIB/share/proj" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$CONDA_LIB/lib/pkgconfig" >> $GITHUB_ENV
-          echo "$CONDA_LIB/bin" >> $GITHUB_PATH
+          echo "RUST_BACKTRACE=1" >> $GITHUB_ENV
 
       - name: Install maturin
         run: pip install maturin
-
-      - name: Set Rust target
-        id: target
-        run: echo "target=x86_64-pc-windows-gnu" >> $GITHUB_OUTPUT
-
-      - name: Install Rust target
-        run: rustup target add ${{ steps.target.outputs.target }}
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          target: ${{ steps.target.outputs.target }}
+          target: x86_64-pc-windows-msvc
           args: >
             --release
             --manifest-path pymdurs/Cargo.toml
@@ -227,24 +205,24 @@ jobs:
                           pip install pymdurs
               ```
 
-            ### Available Classes
+                ### Available Classes
 
-            - `pymdurs.geometric.Building` - Building data collection
-            - `pymdurs.geometric.Dem` - Digital Elevation Model
-            - `pymdurs.geometric.Cadastre` - Cadastral parcel data
-            - `pymdurs.geometric.Iris` - IRIS statistical units
-            - `pymdurs.geometric.Lcz` - Local Climate Zone
-            - `pymdurs.BoundingBox` - Bounding box operations
-            - `pymdurs.GeoCore` - CRS and geographic operations
+                - `pymdurs.geometric.Building` - Building data collection
+                - `pymdurs.geometric.Dem` - Digital Elevation Model
+                - `pymdurs.geometric.Cadastre` - Cadastral parcel data
+                - `pymdurs.geometric.Iris` - IRIS statistical units
+                - `pymdurs.geometric.Lcz` - Local Climate Zone
+                - `pymdurs.BoundingBox` - Bounding box operations
+                - `pymdurs.GeoCore` - CRS and geographic operations
 
-            ### Changes
+                ### Changes
 
-            See the [changelog](https://github.com/rupeelab17/pymdurs/blob/main/CHANGELOG.md) for details.
+                See the [changelog](https://github.com/rupeelab17/pymdurs/blob/main/CHANGELOG.md) for details.
 
-            ### Requirements
+                ### Requirements
 
-            - Python >= 3.8
-            - pandas >= 2.0.0
-            - numpy < 2.0.0
+                - Python >= 3.8
+                - pandas >= 2.0.0
+                - numpy < 2.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
