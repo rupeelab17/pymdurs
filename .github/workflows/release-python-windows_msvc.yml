@@ -125,47 +125,56 @@ jobs:
             }
           }
 
-          # Vérifier headers GDAL
           if (-not (Test-Path "$incDir\cpl_atomic_ops.h")) {
             throw "❌ GDAL headers not found in $incDir"
           }
           Write-Host "✅ GDAL headers OK"
 
-          # Vérifier sqlite
-          Write-Host "=== SQLite files ==="
-          Get-ChildItem "$libDir" -Filter "*sqlite*" -ErrorAction SilentlyContinue
-          Get-ChildItem "$incDir" -Filter "*sqlite*" -ErrorAction SilentlyContinue
-
-          # Vérifier proj.pc
-          Write-Host "=== pkgconfig files ==="
-          Get-ChildItem "$pkgcfg" -ErrorAction SilentlyContinue
-
-          # Récupérer les versions
           $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
           $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
           Write-Host "GEOS version : $geosVersion"
           Write-Host "PROJ version : $projVersion"
 
-          # Export toutes les variables
-          "GDAL_HOME=$condaEnv"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_LIB_DIR=$libDir"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_VERSION=3"                    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_LIB_DIR=$libDir"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_VERSION=$geosVersion"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_LIB=$libRoot\share\proj"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_LIB_DIR=$libDir"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_INCLUDE_DIR=$incDir"          | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_VERSION=$projVersion"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PKG_CONFIG_PATH=$pkgcfg"           | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          # Aider CMake à trouver SQLite (utilisé par proj-sys en bundled_build)
-          "SQLite3_ROOT=$libRoot"             | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "SQLite3_INCLUDE_DIR=$incDir"       | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "SQLite3_LIBRARY=$libDir\sqlite3.lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CMAKE_PREFIX_PATH=$libRoot"        | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RUST_BACKTRACE=1"                  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$binDir"                           | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append                   | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Export variables env
+          $envVars = @(
+            "GDAL_HOME=$condaEnv",
+            "GDAL_LIB_DIR=$libDir",
+            "GDAL_INCLUDE_DIR=$incDir",
+            "GDAL_VERSION=3",
+            "GEOS_LIB_DIR=$libDir",
+            "GEOS_INCLUDE_DIR=$incDir",
+            "GEOS_VERSION=$geosVersion",
+            "PROJ_LIB=$libRoot\share\proj",
+            "PROJ_LIB_DIR=$libDir",
+            "PROJ_INCLUDE_DIR=$incDir",
+            "PROJ_VERSION=$projVersion",
+            "PKG_CONFIG_PATH=$pkgcfg",
+            "SQLite3_ROOT=$libRoot",
+            "SQLite3_INCLUDE_DIR=$incDir",
+            "SQLite3_LIBRARY=$libDir\sqlite3.lib",
+            "CMAKE_PREFIX_PATH=$libRoot",
+            "RUST_BACKTRACE=1"
+          )
+          $envVars | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+
+          # PATH séparé avec retry pour éviter le conflit d'accès fichier
+          $maxRetries = 5
+          $retryCount = 0
+          $success = $false
+          while (-not $success -and $retryCount -lt $maxRetries) {
+            try {
+              Add-Content -Path $env:GITHUB_PATH -Value $binDir -Encoding utf8
+              $success = $true
+              Write-Host "✅ PATH updated"
+            } catch {
+              $retryCount++
+              Write-Host "Retry $retryCount/$maxRetries for GITHUB_PATH..."
+              Start-Sleep -Milliseconds 500
+            }
+          }
+          if (-not $success) {
+            throw "❌ Failed to update GITHUB_PATH after $maxRetries retries"
+          }                  | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
