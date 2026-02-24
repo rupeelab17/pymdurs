@@ -105,14 +105,21 @@ jobs:
         run: |
           conda install -c conda-forge libgdal geos proj sqlite -y
 
-          $condaBase = conda info --base
-          $lib = "$condaBase\Library"
+          # Utiliser l'env actif (pas base) — c'est là que conda installe les libs
+          $condaEnv = (conda info --json | ConvertFrom-Json).active_prefix
+          $lib = "$condaEnv\Library"
 
-          Write-Host "=== GDAL headers ==="
-          Get-ChildItem "$lib\include" -Filter "cpl*" -ErrorAction SilentlyContinue | Select-Object -First 5
+          Write-Host "Active conda env: $condaEnv"
+          Write-Host "Library path: $lib"
 
-          Write-Host "=== GDAL libs ==="
-          Get-ChildItem "$lib\lib" -Filter "*gdal*" -ErrorAction SilentlyContinue
+          # Vérifier que les headers GDAL sont bien là
+          $header = Get-ChildItem "$lib\include" -Filter "cpl_atomic_ops.h" -ErrorAction SilentlyContinue
+          if ($header) {
+            Write-Host "✅ cpl_atomic_ops.h found at: $($header.FullName)"
+          } else {
+            Write-Host "❌ cpl_atomic_ops.h NOT found — listing include dir:"
+            Get-ChildItem "$lib\include" -ErrorAction SilentlyContinue | Select-Object -First 20
+          }
 
           "GDAL_HOME=$lib"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -122,30 +129,10 @@ jobs:
           "PROJ_LIB=$lib\share\proj"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RUST_BACKTRACE=1"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$lib\bin"                       | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-          # Ajouter MinGW au PATH
           "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
-
-      - name: Debug conda GDAL paths
-        shell: pwsh
-        run: |
-          $condaBase = conda info --base
-          Write-Host "Conda base: $condaBase"
-
-          Write-Host "=== Searching cpl_atomic_ops.h ==="
-          Get-ChildItem -Path $condaBase -Filter "cpl_atomic_ops.h" -Recurse -ErrorAction SilentlyContinue
-
-          Write-Host "=== include dir contents ==="
-          Get-ChildItem "$condaBase\Library\include" -ErrorAction SilentlyContinue | Select-Object -First 20
-
-          Write-Host "=== GDAL_INCLUDE_DIR env ==="
-          Write-Host $env:GDAL_INCLUDE_DIR
-
-          Write-Host "=== All GDAL related files ==="
-          Get-ChildItem -Path "$condaBase\Library" -Filter "*gdal*" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 20
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -232,9 +219,9 @@ jobs:
             ## Python Package Release ${{ steps.version.outputs.version }}
 
             ### Installation
-            ```bash
-                        pip install pymdurs
-            ```
+              ```bash
+                          pip install pymdurs
+              ```
 
             ### Available Classes
 
