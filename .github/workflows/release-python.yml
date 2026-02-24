@@ -249,6 +249,24 @@ jobs:
       - name: Install Rust target
         run: rustup target add ${{ steps.target.outputs.target }}
 
+      # - name: Build wheel
+      #   uses: PyO3/maturin-action@v1
+      #   with:
+      #     command: build
+      #     target: ${{ steps.target.outputs.target }}
+      #     args: >
+      #       --release
+      #       --manifest-path pymdurs/Cargo.toml
+      #       --out dist
+      #     manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || (matrix.architecture == 'aarch64' && '2_28' || 'auto') }}
+      #     maturin-version: 1.11.4
+      #     before-script-linux: |
+      #       set -ex
+      #       dnf install -y clang-devel gdal-devel geos-devel sqlite-devel proj-devel  || \
+      #       (yum install -y epel-release && yum install -y clang-devel gdal-devel)
+      #       LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
+      #       export LIBCLANG_PATH=$(dirname "$LIBCLANG")
+      #       echo "Found libclang at: $LIBCLANG_PATH"
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -262,19 +280,40 @@ jobs:
           maturin-version: 1.11.4
           before-script-linux: |
             set -ex
-            dnf install -y clang-devel gdal-devel geos-devel sqlite-devel proj-devel  || \
-            (yum install -y epel-release && yum install -y clang-devel gdal-devel)
+
+            # Installer miniconda
+            curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh
+            bash miniconda.sh -b -p /opt/conda
+            export PATH="/opt/conda/bin:$PATH"
+
+            # Installer les libs GIS via conda-forge (versions récentes)
+            conda install -y -c conda-forge \
+              gdal \
+              geos \
+              proj \
+              sqlite
+
+            # Exposer les libs pour Rust/pkg-config
+            export CONDA_PREFIX=/opt/conda
+            export PKG_CONFIG_PATH="$CONDA_PREFIX/lib/pkgconfig"
+            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+            export GDAL_HOME="$CONDA_PREFIX"
+            export GEOS_LIB_DIR="$CONDA_PREFIX/lib"
+            export PROJ_LIB="$CONDA_PREFIX/share/proj"
+
+            # clang reste depuis dnf (plus simple)
+            dnf install -y clang-devel
+
             LIBCLANG=$(find /usr -name "libclang.so*" 2>/dev/null | head -1)
             export LIBCLANG_PATH=$(dirname "$LIBCLANG")
-            echo "Found libclang at: $LIBCLANG_PATH"
 
       - name: Test wheel
         run: |
           pip install --force-reinstall --verbose dist/*.whl
           cd /tmp
-          python -c 'import pymdurs; print("✅ pymdurs imported successfully")'
+          python -c 'import pymdurs; print("pymdurs imported successfully")'
           python -c 'import pymdurs; print("Available classes:", [x for x in dir(pymdurs.geometric) if not x.startswith("_")])'
-          python -c 'import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print("✅ PyBoundingBox works:", bbox.min_x)'
+          python -c 'import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print("PyBoundingBox works:", bbox.min_x)'
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4

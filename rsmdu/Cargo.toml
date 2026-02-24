@@ -29,7 +29,6 @@ rstar = "0.12"
 
 # Data processing
 polars = { version = "0.51", features = ["lazy", "temporal", "strings"], optional = true }
-# wkb = "0.3"  # Not needed - using geos for WKB conversion instead
 
 # HTTP and serialization
 # Use rustls instead of default-tls (OpenSSL) for manylinux CI compatibility
@@ -59,9 +58,6 @@ las = { version = "0.9", features = ["laz-parallel"], optional = true }
 laz = { version = "0.10", optional = true }
 memmap2 = { version = "0.9", optional = true }
 
-# UMEP integration (optional - only when umep feature is enabled)
-# Note: umep_rust may not be available as a crate, comment out if not needed
-# umep_rust = { version = "0.1", optional = true }
 
 # [[bin]]
 # name = "rsmdu"
