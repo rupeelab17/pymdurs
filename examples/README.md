@@ -291,6 +291,27 @@ python examples/umep_workflow_new.py
 
 ---
 
+### 15. `wind_field_from_ign.py`
+
+Urban wind field (Röckle model) without QGIS: computes `wind_speed.tif` and `wind_direction.tif` from DEM, DSM, and buildings for use in UTCI/SOLWEIG pipelines.
+
+**Run:**
+
+```bash
+python examples/wind_field_from_ign.py
+```
+
+**What this example does:**
+
+- Optionally downloads DEM and/or generates DSM from LiDAR if not present in `./output`
+- Loads buildings from the IGN API
+- Runs the Röckle wind solver (`pymdurs.thermal.WindField`) in parallel
+- Writes `wind_speed.tif` and `wind_direction.tif` to the output folder
+
+**Output:** `./output/wind_speed.tif`, `./output/wind_direction.tif` (same grid as DEM/DSM).
+
+---
+
 ## Prerequisites
 
 ### Rust installation

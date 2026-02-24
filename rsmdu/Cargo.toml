@@ -9,7 +9,7 @@ homepage = "https://github.com/rupeelab17/rsmdu"
 documentation = "https://github.com/rupeelab17/rsmdu#readme"
 
 [features]
-default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "zip", "tempfile", "geos", "chrono", "quick-xml", "indicatif", "rayon", "laz-memmap"]
+default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "zip", "tempfile", "geos", "chrono", "quick-xml", "indicatif", "rayon", "laz-memmap", "ndarray"]
 wasm = []
 umep = []
 # Use memory-mapped I/O for large cached LAZ files (>50 MiB) to reduce RAM usage
@@ -51,6 +51,7 @@ zip = { version = "0.6", optional = true }
 tempfile = { version = "3.8", optional = true }
 indicatif = { version = "0.17", optional = true }
 rayon = { version = "1.10", optional = true }
+ndarray = { version = "0.16", optional = true }
 
 # LiDAR processing
 las = { version = "0.9", features = ["laz-parallel"], optional = true }

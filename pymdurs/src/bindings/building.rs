@@ -40,7 +40,7 @@ fn option_vec_f64_to_pylist<'a>(
 /// BuildingCollection Python binding (exposed as Building to match Python API)
 #[pyclass]
 pub struct PyBuilding {
-    inner: BuildingCollection,
+    pub(crate) inner: BuildingCollection,
 }
 
 #[pymethods]
