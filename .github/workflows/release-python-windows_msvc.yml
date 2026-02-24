@@ -119,24 +119,24 @@ jobs:
           if (-not (Test-Path "$libDir\gdal_i.lib")) {
             if (Test-Path "$libDir\gdal.lib") {
               Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
-              Write-Host "✅ gdal_i.lib created"
+              Write-Host "gdal_i.lib created"
             } else {
               throw "Neither gdal_i.lib nor gdal.lib found"
             }
           }
 
           if (-not (Test-Path "$incDir\cpl_atomic_ops.h")) {
-            throw "❌ GDAL headers not found in $incDir"
+            throw "GDAL headers not found in $incDir"
           }
-          Write-Host "✅ GDAL headers OK"
+          Write-Host "GDAL headers OK"
 
           $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
           $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
           Write-Host "GEOS version : $geosVersion"
           Write-Host "PROJ version : $projVersion"
 
-          # Export variables env
-          $envVars = @(
+          # Ecrire toutes les variables d'env d'un coup
+          $envLines = @(
             "GDAL_HOME=$condaEnv",
             "GDAL_LIB_DIR=$libDir",
             "GDAL_INCLUDE_DIR=$incDir",
@@ -155,26 +155,20 @@ jobs:
             "CMAKE_PREFIX_PATH=$libRoot",
             "RUST_BACKTRACE=1"
           )
-          $envVars | Add-Content -Path $env:GITHUB_ENV -Encoding utf8
+          [System.IO.File]::AppendAllLines($env:GITHUB_ENV, $envLines)
 
-          # PATH séparé avec retry pour éviter le conflit d'accès fichier
-          $maxRetries = 5
-          $retryCount = 0
-          $success = $false
-          while (-not $success -and $retryCount -lt $maxRetries) {
+          # PATH avec retry
+          $retries = 5
+          for ($i = 0; $i -lt $retries; $i++) {
             try {
-              Add-Content -Path $env:GITHUB_PATH -Value $binDir -Encoding utf8
-              $success = $true
-              Write-Host "✅ PATH updated"
+              [System.IO.File]::AppendAllText($env:GITHUB_PATH, "$binDir`n")
+              Write-Host "PATH updated"
+              break
             } catch {
-              $retryCount++
-              Write-Host "Retry $retryCount/$maxRetries for GITHUB_PATH..."
+              Write-Host "Retry $($i+1)/$retries..."
               Start-Sleep -Milliseconds 500
             }
           }
-          if (-not $success) {
-            throw "❌ Failed to update GITHUB_PATH after $maxRetries retries"
-          }                  | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install maturin
         run: pip install maturin
