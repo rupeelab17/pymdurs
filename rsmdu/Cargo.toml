@@ -12,6 +12,7 @@ documentation = "https://github.com/rupeelab17/rsmdu#readme"
 default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "zip", "tempfile", "geos", "chrono", "quick-xml", "indicatif", "rayon", "laz-memmap", "ndarray"]
 wasm = []
 umep = []
+gdal_src = ["gdal/gdal_src"]
 # Use memory-mapped I/O for large cached LAZ files (>50 MiB) to reduce RAM usage
 laz-memmap = ["memmap2"]
 # COPC (Cloud Optimized Point Cloud) support via las::copc::CopcEntryReader
