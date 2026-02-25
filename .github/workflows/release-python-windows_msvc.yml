@@ -82,21 +82,16 @@ jobs:
           architecture: x64
           cache: "pip"
 
-      # ✅ Rust MSVC (pas de MinGW, pas de windows-gnu)
       - name: Install Rust MSVC toolchain
         shell: pwsh
         run: |
           rustup toolchain install stable-x86_64-pc-windows-msvc
           rustup target add x86_64-pc-windows-msvc
           rustup default stable-x86_64-pc-windows-msvc
-          rustc -V
-          cargo -V
 
-      # ✅ (Optionnel mais sécurisant) Visual Studio Build Tools dans l'environnement
       - name: Setup MSVC dev environment
         uses: ilammy/msvc-dev-cmd@v1
 
-      # ✅ Conda-forge : libs Windows généralement MSVC -> cohérent avec la toolchain
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -106,130 +101,54 @@ jobs:
           channel-priority: strict
           auto-activate-base: false
 
-      - name: Install GDAL/GEOS/PROJ via Conda (MSVC)
+      - name: Install GDAL/GEOS/PROJ via Conda
         shell: pwsh
         run: |
-          # =========================
-          # Install native deps (MSVC)
-          # =========================
           conda install -y -c conda-forge gdal libgdal geos proj sqlite
 
           $condaEnv = (conda info --json | ConvertFrom-Json).active_prefix
-          if (-not $condaEnv) { throw "No active conda environment detected" }
+          $libRoot  = "$condaEnv\Library"
+          $libDir   = "$libRoot\lib"
+          $incDir   = "$libRoot\include"
+          $binDir   = "$libRoot\bin"
+          $pkgcfg   = "$libDir\pkgconfig"
 
-          $libRoot = Join-Path $condaEnv "Library"
-          $libDir  = Join-Path $libRoot "lib"
-          $incDir  = Join-Path $libRoot "include"
-          $binDir  = Join-Path $libRoot "bin"
-          $share   = Join-Path $libRoot "share"
+          Write-Host "Active env : $condaEnv"
 
-          Write-Host "===== CONDA ENV ====="
-          Write-Host "Active env: $condaEnv"
-          Write-Host "Lib root : $libRoot"
-          Write-Host "Lib dir  : $libDir"
-          Write-Host "Inc dir  : $incDir"
-          Write-Host "Bin dir  : $binDir"
-          Write-Host ""
-
-          # =========================
-          # Sanity checks
-          # =========================
-          if (-not (Test-Path (Join-Path $incDir "gdal.h"))) {
-              throw "Missing gdal.h in $incDir"
+          # Créer gdal_i.lib depuis gdal.lib
+          if (-not (Test-Path "$libDir\gdal_i.lib")) {
+            Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
+            Write-Host "gdal_i.lib created"
           }
 
-          if (-not (Test-Path (Join-Path $incDir "geos_c.h"))) {
-              throw "Missing geos_c.h in $incDir"
-          }
+          $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
+          $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
+          $gdalVersion = (conda list gdal --json | ConvertFrom-Json | Where-Object { $_.name -eq "gdal" }).version
+          Write-Host "GDAL=$gdalVersion GEOS=$geosVersion PROJ=$projVersion"
 
-          if (-not (Test-Path (Join-Path $libDir "gdal_i.lib"))) {
-              Write-Host "Contents of $libDir :"
-              Get-ChildItem $libDir | Where-Object { $_.Name -like "gdal*" }
-              throw "gdal_i.lib NOT FOUND in $libDir (required for MSVC build)"
-          }
+          echo "GDAL_HOME=$condaEnv"                 >> $env:GITHUB_ENV
+          echo "GDAL_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "GDAL_VERSION=$gdalVersion"           >> $env:GITHUB_ENV
+          echo "GEOS_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "GEOS_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "GEOS_VERSION=$geosVersion"           >> $env:GITHUB_ENV
+          echo "PROJ_LIB=$libRoot\share\proj"        >> $env:GITHUB_ENV
+          echo "PROJ_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "PROJ_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "PROJ_VERSION=$projVersion"           >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$pkgcfg"             >> $env:GITHUB_ENV
+          echo "SQLite3_ROOT=$libRoot"               >> $env:GITHUB_ENV
+          echo "SQLite3_INCLUDE_DIR=$incDir"         >> $env:GITHUB_ENV
+          echo "SQLite3_LIBRARY=$libDir\sqlite3.lib" >> $env:GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$libRoot"          >> $env:GITHUB_ENV
+          echo "RUST_BACKTRACE=1"                     >> $env:GITHUB_ENV
+          echo "$binDir"                              >> $env:GITHUB_PATH
 
-          if (-not (Test-Path (Join-Path $libDir "geos_c.lib"))) {
-              Write-Host "Contents of $libDir :"
-              Get-ChildItem $libDir | Where-Object { $_.Name -like "geos*" }
-              throw "geos_c.lib NOT FOUND in $libDir"
-          }
-
-          Write-Host "Native libraries OK."
-          Write-Host ""
-
-          # =========================
-          # Export env vars (correct for MSVC)
-          # =========================
-          "GDAL_HOME=$condaEnv"        | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_LIB_DIR=$libDir"       | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_INCLUDE_DIR=$incDir"   | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          "GEOS_LIB_DIR=$libDir"       | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_INCLUDE_DIR=$incDir"   | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          "PROJ_LIB=$(Join-Path $share 'proj')" |
-              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          # Runtime DLL path
-          "$binDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-          # Debug
-          "RUST_BACKTRACE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          # =========================
-          # GEOS_VERSION (robuste)
-          # =========================
-          $geosInfo = conda list geos | Select-String -Pattern "^geos\s+"
-          if (-not $geosInfo) {
-              throw "GEOS not found in conda environment"
-          }
-
-          $geosVer = ($geosInfo -split "\s+")[1]
-          "GEOS_VERSION=$geosVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "GEOS_VERSION=$geosVer"
-
-      - name: DEBUG GDAL / GEOS ENV
-        shell: pwsh
-        run: |
-
-          Write-Host "===== LIB DIRECTORY CONTENT ====="
-          $libDir = "$condaEnv\Library\lib"
-          Write-Host "LibDir: $libDir"
-          if (Test-Path $libDir) {
-              Get-ChildItem $libDir | Select-Object -First 50
-          } else {
-              Write-Host "❌ Library\lib does not exist"
-          }
-          Write-Host ""
-
-          Write-Host "===== BIN DIRECTORY CONTENT ====="
-          $binDir = "$condaEnv\Library\bin"
-          Write-Host "BinDir: $binDir"
-          if (Test-Path $binDir) {
-              Get-ChildItem $binDir | Where-Object { $_.Name -like "gdal*" }
-          } else {
-              Write-Host "❌ Library\bin does not exist"
-          }
-          Write-Host ""
-
-          Write-Host "===== CHECK gdal_i.lib ====="
-          if (Test-Path "$libDir\gdal_i.lib") {
-              Write-Host "✅ gdal_i.lib FOUND"
-          } else {
-              Write-Host "❌ gdal_i.lib NOT FOUND"
-          }
-          Write-Host ""
-
-          Write-Host "===== CHECK geos_c.lib ====="
-          if (Test-Path "$libDir\geos_c.lib") {
-              Write-Host "✅ geos_c.lib FOUND"
-          } else {
-              Write-Host "❌ geos_c.lib NOT FOUND"
-          }
       - name: Install maturin
         run: pip install maturin
 
-      - name: Build wheel (MSVC)
+      - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           command: build
@@ -316,7 +235,7 @@ jobs:
 
             ### Installation
             ```bash
-            pip install pymdurs
+                        pip install pymdurs
             ```
 
             ### Available Classes
@@ -327,9 +246,6 @@ jobs:
             - `pymdurs.geometric.Lcz` - Local Climate Zone
             - `pymdurs.BoundingBox` - Bounding box operations
             - `pymdurs.GeoCore` - CRS and geographic operations
-
-            ### Changes
-            See the changelog in the repository for details.
 
             ### Requirements
             - Python >= 3.8
