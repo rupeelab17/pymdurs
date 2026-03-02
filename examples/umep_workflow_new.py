@@ -79,8 +79,8 @@ def main():
 
     # Bounding box (La Rochelle area, France)
     # Format: min_x, min_y, max_x, max_y (WGS84, EPSG:4326)
-    bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
-
+    # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
+    bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
     # Convert bbox to Lambert-93 (EPSG:2154) with GeoPandas
     minx, miny, maxx, maxy = bbox_wgs84
     geom_wgs84 = box(minx, miny, maxx, maxy)
@@ -311,9 +311,9 @@ def main():
         )  # La Rochelle
 
         # Calculate timeseries (use calculate_timeseries for a list of Weather)
-        results = solweig.calculate_timeseries(
+        results = solweig.calculate(
             surface=surface,
-            weather_series=weather_list,
+            weather=weather_list,
             location=location,
             physics=physics,
             materials=materials,

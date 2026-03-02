@@ -164,7 +164,7 @@ def main():
         resolution_m=2.0,  # used for metadata; actual resolution from DEM/DSM
     )
 
-    speed_path, direction_path = wind.run(
+    speed_path, direction_path, zone_path = wind.run(
         config,
         str(dem_for_wind),
         str(dsm_path),
@@ -174,6 +174,8 @@ def main():
     print("✅ Wind field complete!")
     print(f"📁 Wind speed:    {speed_path}")
     print(f"📁 Wind direction: {direction_path}")
+    if zone_path is not None:
+        print(f"📁 Röckle zones:  {zone_path}")
 
     if os.path.exists(speed_path):
         size_mb = os.path.getsize(speed_path) / (1024 * 1024)

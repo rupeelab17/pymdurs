@@ -21,8 +21,10 @@ Usage:
    python examples/utci_rockle_epw.py
 
 Output:
-   ./output/utci_rockle/utci/utci_YYYYMMDD_HHMM.tif  (per timestep)
-   ./output/utci_rockle/utci_mean.tif                (mean over timesteps)
+   ./output/utci_rockle/utci/utci_YYYYMMDD_HHMM.tif       (per timestep)
+   ./output/utci_rockle/utci_mean.tif                     (mean over timesteps)
+   ./output/utci_rockle/wind_speed_scaled/wind_speed_scaled_YYYYMMDD_HHMM.tif  (wind m/s scaled by EPW, per timestep)
+   ./output/utci_rockle/wind_10dir/dir_XXX/rockle_zone.tif (Röckle zones: cavity, wake, etc.; when save_rockle_zone=True)
 """
 
 from __future__ import annotations
@@ -69,7 +71,8 @@ except ImportError:
 
 
 # 10 wind directions (degrees): 0, 36, ..., 324
-WIND_DIRECTIONS_DEG = [0, 36, 72, 108, 144, 180, 216, 252, 288, 324]
+# WIND_DIRECTIONS_DEG = [0, 36, 72, 108, 144, 180, 216, 252, 288, 324]
+WIND_DIRECTIONS_DEG = [0, 180]
 WIND_SPEED_REF_ROCKLE = (
     1.0  # m/s; Röckle rasters computed with this, then scaled by EPW ws
 )
@@ -264,7 +267,8 @@ def main() -> None:
 
     # Bbox (La Rochelle, same as umep_workflow_new)
     # WGS84 for DEM/Lidar IGN API; 2154 for Building + WindField (must match DEM/DSM CRS)
-    min_x, min_y, max_x, max_y = -1.152704, 46.181627, -1.139893, 46.18699
+    min_x, min_y, max_x, max_y = -1.152223, 46.183282, -1.149637, 46.185459
+    # min_x, min_y, max_x, max_y = -1.152704, 46.181627, -1.139893, 46.18699
     if _has_gpd:
         gdf_bbox = gpd.GeoDataFrame(
             geometry=[box(min_x, min_y, max_x, max_y)], crs="EPSG:4326"
@@ -373,26 +377,41 @@ def main() -> None:
     wind_10dir_dir = output_folder / "wind_10dir"
     wind_10dir_dir.mkdir(parents=True, exist_ok=True)
 
+    # Without buildings in the domain, the wind field does not vary with direction (freestream only).
+    if len(buildings) == 0:
+        print(
+            "  Warning: no buildings in bbox — wind rasters will be identical for all directions."
+        )
+
     for d in WIND_DIRECTIONS_DEG:
         dir_sub = output_folder / "wind_10dir" / f"dir_{d:03d}"
         dir_sub.mkdir(parents=True, exist_ok=True)
         wind_dir_str = str(dir_sub)
-        # Temporarily use a WindField that writes to this subfolder
         wind_per_dir = pymdurs.thermal.WindField(output_path=wind_dir_str)
         wind_per_dir.set_bbox(min_x_2154, min_y_2154, max_x_2154, max_y_2154)
         cfg = pymdurs.thermal.WindConfig(
             wind_speed_ref=WIND_SPEED_REF_ROCKLE,
             wind_direction=float(d),
             z_ref=10.0,
-            resolution_m=2.0,
+            profile_type="urban",
+            resolution_m=1.0,
+            use_mass_consistent_solver=True,
+            solver_epsilon=0.01,
+            solver_max_iter=500,
+            output_height=1.5,
+            solver_dx=1.0,
+            solver_dy=1.0,
+            solver_dz=1.0,
+            save_rockle_zone=True,
         )
         wind_per_dir.run(cfg, str(dem_for_wind), str(dsm_path), buildings)
-        # Copy to canonical name
         src = dir_sub / "wind_speed.tif"
         dst = wind_10dir_dir / f"wind_speed_{d:03d}.tif"
         if src.exists():
             shutil.copy2(src, dst)
-        print(f"  Röckle direction {d}° -> {dst.name}")
+        print(
+            f"  Röckle direction {d}° (wind_direction={cfg.wind_direction}) -> {dst.name}"
+        )
 
     # 2) Load weather and wind direction from EPW
     epw_path = base / "examples" / "la_rochelle_2025.epw"
@@ -425,9 +444,9 @@ def main() -> None:
         land_cover=str(lc_path) if lc_path and lc_path.exists() else None,
     )
     # Must use calculate_timeseries (not calculate) for a list of Weather + output_dir/outputs
-    solweig.calculate_timeseries(
+    solweig.calculate(
         surface=surface,
-        weather_series=weather_list,
+        weather=weather_list,
         output_dir=str(output_folder),
         outputs=["tmrt"],
     )
@@ -437,6 +456,9 @@ def main() -> None:
     # 4) For each timestep: select wind raster, scale, compute UTCI, write TIFF
     utci_dir = output_folder / "utci"
     utci_dir.mkdir(parents=True, exist_ok=True)
+    wind_scaled_dir = output_folder / "wind_speed_scaled"
+    wind_scaled_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Wind speed scaled (m/s, EPW) GeoTIFFs in {wind_scaled_dir}")
 
     with rasterio.open(dsm_path) as dsm_ref:
         profile = dsm_ref.profile.copy()
@@ -502,6 +524,11 @@ def main() -> None:
         # Scale Röckle wind by EPW wind speed (Röckle was computed with WIND_SPEED_REF_ROCKLE)
         ws_epw = max(weather.ws, 0.01)
         v_pixel = wind_speed_raster * (ws_epw / WIND_SPEED_REF_ROCKLE)
+
+        # Write wind_speed_scaled per timestep (m/s actually used for UTCI)
+        wind_scaled_path = wind_scaled_dir / f"wind_speed_scaled_{ts_str}.tif"
+        with rasterio.open(wind_scaled_path, "w", **profile) as dst:
+            dst.write(v_pixel.astype(np.float32), 1)
 
         utci_grid = _compute_utci_raster(
             weather.ta,
