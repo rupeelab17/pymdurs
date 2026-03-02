@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use laz::laszip::LazVlr;
 use proj::Proj;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,18 +28,29 @@ struct GridCellKey {
 /// Uses a regular grid to bucket points by location
 #[derive(Debug)]
 struct SpatialGridIndex {
+    /// Cell size in coordinate units (e.g., meters)
     cell_size: f64,
+    /// Origin X coordinate
     origin_x: f64,
+    /// Origin Y coordinate  
     origin_y: f64,
+    /// Grid cells containing point indices
     cells: HashMap<GridCellKey, Vec<usize>>,
+    /// Total number of indexed points
     point_count: usize,
 }
 
 impl SpatialGridIndex {
+    /// Create a new spatial grid index
+    ///
+    /// # Arguments
+    /// * `cell_size` - Size of each grid cell (larger = fewer cells, more points per cell)
+    /// * `bounds` - Optional (min_x, min_y, max_x, max_y) to set origin
     fn new(cell_size: f64, bounds: Option<(f64, f64, f64, f64)>) -> Self {
         let (origin_x, origin_y) = bounds
             .map(|(min_x, min_y, _, _)| (min_x, min_y))
             .unwrap_or((0.0, 0.0));
+
         SpatialGridIndex {
             cell_size,
             origin_x,
@@ -50,6 +60,7 @@ impl SpatialGridIndex {
         }
     }
 
+    /// Get the grid cell key for a point
     #[inline]
     fn cell_key(&self, x: f64, y: f64) -> GridCellKey {
         GridCellKey {
@@ -58,32 +69,43 @@ impl SpatialGridIndex {
         }
     }
 
+    /// Build index from a slice of points
     fn build_from_points(points: &[LidarPoint], cell_size: f64) -> Self {
+        // First pass: find bounds
         let mut min_x = f64::INFINITY;
         let mut min_y = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut max_y = f64::NEG_INFINITY;
+
         for p in points {
             min_x = min_x.min(p.x);
             min_y = min_y.min(p.y);
             max_x = max_x.max(p.x);
             max_y = max_y.max(p.y);
         }
+
         let mut index = SpatialGridIndex::new(cell_size, Some((min_x, min_y, max_x, max_y)));
+
+        // Second pass: insert points
         for (i, p) in points.iter().enumerate() {
             let key = index.cell_key(p.x, p.y);
             index.cells.entry(key).or_insert_with(Vec::new).push(i);
         }
+
         index.point_count = points.len();
         index
     }
 
+    /// Query points within a bounding box
+    /// Returns indices of points that MAY be within the bbox (need final filtering)
     fn query_bbox(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Vec<usize> {
         let min_col = ((min_x - self.origin_x) / self.cell_size).floor() as i64;
         let max_col = ((max_x - self.origin_x) / self.cell_size).floor() as i64;
         let min_row = ((min_y - self.origin_y) / self.cell_size).floor() as i64;
         let max_row = ((max_y - self.origin_y) / self.cell_size).floor() as i64;
+
         let mut result = Vec::new();
+
         for col in min_col..=max_col {
             for row in min_row..=max_row {
                 let key = GridCellKey { col, row };
@@ -92,9 +114,11 @@ impl SpatialGridIndex {
                 }
             }
         }
+
         result
     }
 
+    /// Get statistics about the index
     fn stats(&self) -> SpatialIndexStats {
         let cell_count = self.cells.len();
         let total_points = self.point_count;
@@ -104,6 +128,7 @@ impl SpatialGridIndex {
             0.0
         };
         let max_points_in_cell = self.cells.values().map(|v| v.len()).max().unwrap_or(0);
+
         SpatialIndexStats {
             cell_count,
             total_points,
@@ -114,6 +139,7 @@ impl SpatialGridIndex {
     }
 }
 
+/// Statistics about a spatial index
 #[derive(Debug)]
 struct SpatialIndexStats {
     cell_count: usize,
@@ -137,18 +163,26 @@ impl std::fmt::Display for SpatialIndexStats {
     }
 }
 
+/// Octree node for hierarchical spatial indexing (similar to COPC structure)
 #[derive(Debug)]
 struct OctreeNode {
-    bounds: (f64, f64, f64, f64, f64, f64),
+    /// Bounding box of this node
+    bounds: (f64, f64, f64, f64, f64, f64), // min_x, min_y, min_z, max_x, max_y, max_z
+    /// Point indices stored in this node (leaf nodes only)
     points: Vec<usize>,
+    /// Child nodes (8 children for 3D octree, but we use 4 for 2D quadtree)
     children: Option<Box<[Option<OctreeNode>; 4]>>,
+    /// Depth of this node
     depth: u8,
 }
 
 impl OctreeNode {
+    /// Maximum points per leaf node before splitting
     const MAX_POINTS_PER_NODE: usize = 1000;
+    /// Maximum depth to prevent infinite recursion
     const MAX_DEPTH: u8 = 12;
 
+    /// Create a new leaf node
     fn new_leaf(bounds: (f64, f64, f64, f64, f64, f64), depth: u8) -> Self {
         OctreeNode {
             bounds,
@@ -158,11 +192,13 @@ impl OctreeNode {
         }
     }
 
+    /// Check if a point is within this node's XY bounds
     #[inline]
     fn contains_xy(&self, x: f64, y: f64) -> bool {
         x >= self.bounds.0 && x <= self.bounds.3 && y >= self.bounds.1 && y <= self.bounds.4
     }
 
+    /// Check if this node's bounds intersect with a query bbox
     #[inline]
     fn intersects_bbox(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> bool {
         !(self.bounds.3 < min_x
@@ -171,20 +207,27 @@ impl OctreeNode {
             || self.bounds.1 > max_y)
     }
 
+    /// Get the quadrant index for a point (0-3)
     fn quadrant_for_point(&self, x: f64, y: f64) -> usize {
         let mid_x = (self.bounds.0 + self.bounds.3) / 2.0;
         let mid_y = (self.bounds.1 + self.bounds.4) / 2.0;
-        match (x >= mid_x, y >= mid_y) {
-            (false, false) => 0,
-            (true, false) => 1,
-            (false, true) => 2,
-            (true, true) => 3,
+
+        let right = x >= mid_x;
+        let top = y >= mid_y;
+
+        match (right, top) {
+            (false, false) => 0, // SW
+            (true, false) => 1,  // SE
+            (false, true) => 2,  // NW
+            (true, true) => 3,   // NE
         }
     }
 
+    /// Get bounds for a child quadrant
     fn child_bounds(&self, quadrant: usize) -> (f64, f64, f64, f64, f64, f64) {
         let mid_x = (self.bounds.0 + self.bounds.3) / 2.0;
         let mid_y = (self.bounds.1 + self.bounds.4) / 2.0;
+
         match quadrant {
             0 => (
                 self.bounds.0,
@@ -193,7 +236,7 @@ impl OctreeNode {
                 mid_x,
                 mid_y,
                 self.bounds.5,
-            ),
+            ), // SW
             1 => (
                 mid_x,
                 self.bounds.1,
@@ -201,7 +244,7 @@ impl OctreeNode {
                 self.bounds.3,
                 mid_y,
                 self.bounds.5,
-            ),
+            ), // SE
             2 => (
                 self.bounds.0,
                 mid_y,
@@ -209,7 +252,7 @@ impl OctreeNode {
                 mid_x,
                 self.bounds.4,
                 self.bounds.5,
-            ),
+            ), // NW
             3 => (
                 mid_x,
                 mid_y,
@@ -217,20 +260,26 @@ impl OctreeNode {
                 self.bounds.3,
                 self.bounds.4,
                 self.bounds.5,
-            ),
+            ), // NE
             _ => unreachable!(),
         }
     }
 
+    /// Insert a point index into the tree
     fn insert(&mut self, point_idx: usize, points: &[LidarPoint]) {
         let point = &points[point_idx];
+
         if !self.contains_xy(point.x, point.y) {
             return;
         }
+
+        // If we have children, delegate to the appropriate child
         if self.children.is_some() {
+            // Calculate quadrant and bounds BEFORE borrowing children mutably
             let quadrant = self.quadrant_for_point(point.x, point.y);
             let child_bounds = self.child_bounds(quadrant);
             let depth = self.depth;
+
             let children = self.children.as_mut().unwrap();
             if children[quadrant].is_none() {
                 children[quadrant] = Some(OctreeNode::new_leaf(child_bounds, depth + 1));
@@ -240,25 +289,38 @@ impl OctreeNode {
             }
             return;
         }
+
+        // Add to this leaf node
         self.points.push(point_idx);
+
+        // Check if we need to split
         if self.points.len() > Self::MAX_POINTS_PER_NODE && self.depth < Self::MAX_DEPTH {
             self.split(points);
         }
     }
 
+    /// Split this node into 4 children
     fn split(&mut self, points: &[LidarPoint]) {
+        // Create children array
         self.children = Some(Box::new([None, None, None, None]));
+
+        // Move points to children
         let old_points = std::mem::take(&mut self.points);
         for point_idx in old_points {
             self.insert(point_idx, points);
         }
     }
 
+    /// Query points within a bounding box
     fn query_bbox(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64, result: &mut Vec<usize>) {
         if !self.intersects_bbox(min_x, min_y, max_x, max_y) {
             return;
         }
+
+        // Add points from this node
         result.extend(&self.points);
+
+        // Recurse into children
         if let Some(ref children) = self.children {
             for child in children.iter().flatten() {
                 child.query_bbox(min_x, min_y, max_x, max_y, result);
@@ -266,6 +328,7 @@ impl OctreeNode {
         }
     }
 
+    /// Count total points in this subtree
     fn count_points(&self) -> usize {
         let mut count = self.points.len();
         if let Some(ref children) = self.children {
@@ -276,6 +339,7 @@ impl OctreeNode {
         count
     }
 
+    /// Count nodes in this subtree
     fn count_nodes(&self) -> usize {
         let mut count = 1;
         if let Some(ref children) = self.children {
@@ -287,19 +351,23 @@ impl OctreeNode {
     }
 }
 
+/// Quadtree-based spatial index for LiDAR points
 #[derive(Debug)]
 pub struct QuadtreeSpatialIndex {
     root: OctreeNode,
 }
 
 impl QuadtreeSpatialIndex {
+    /// Build a quadtree index from points
     pub(crate) fn build(points: &[LidarPoint]) -> Self {
+        // Find bounds
         let mut min_x = f64::INFINITY;
         let mut min_y = f64::INFINITY;
         let mut min_z = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut max_y = f64::NEG_INFINITY;
         let mut max_z = f64::NEG_INFINITY;
+
         for p in points {
             min_x = min_x.min(p.x);
             min_y = min_y.min(p.y);
@@ -308,18 +376,25 @@ impl QuadtreeSpatialIndex {
             max_y = max_y.max(p.y);
             max_z = max_z.max(p.z);
         }
+
+        // Add small padding to ensure all points fit
         let padding = 0.001;
         min_x -= padding;
         min_y -= padding;
         max_x += padding;
         max_y += padding;
+
         let mut root = OctreeNode::new_leaf((min_x, min_y, min_z, max_x, max_y, max_z), 0);
+
+        // Insert all points
         for i in 0..points.len() {
             root.insert(i, points);
         }
+
         QuadtreeSpatialIndex { root }
     }
 
+    /// Query points within a bounding box
     pub fn query_bbox(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Vec<usize> {
         let mut result = Vec::new();
         self.root
@@ -327,6 +402,7 @@ impl QuadtreeSpatialIndex {
         result
     }
 
+    /// Get statistics
     pub fn stats(&self) -> String {
         format!(
             "Quadtree: {} nodes, {} points indexed",
@@ -334,331 +410,6 @@ impl QuadtreeSpatialIndex {
             self.root.count_points()
         )
     }
-}
-
-// ============================================================================
-// COPC NATIVE READER
-//
-// Implémentation directe de la spec COPC 1.0 (https://copc.io/),
-// inspirée de copc-rs 0.5.0 (pka/copc-rs) mais sans aucune dépendance externe.
-//
-// Problème résolu : las::CopcEntryReader échoue sur 99.9% des entries des
-// fichiers IGN LiDAR HD car il réinitialise le décompresseur par entry, ce qui
-// est incompatible avec LAS 1.4 Format 6+ (LAZ chunked sans chunk table par entry).
-//
-// Solution (identique à copc-rs/decompressor.rs) :
-//   Utiliser laz::record::LayeredPointRecordDecompressor SANS lire de chunk table.
-//   Chaque entry COPC est un chunk LAZ autonome adressé par son offset absolu.
-//   On crée un décompresseur frais par chunk, on pointe sur chunk_buf, on lit
-//   entry.point_count points — sans jamais toucher à un chunk table global.
-//
-// Structure du fichier COPC :
-//   [LAS 1.4 header       : 375 bytes @ offset 0]
-//   [COPC Info VLR header : 54 bytes  @ offset 375]   user_id="copc" record_id=1
-//   [COPC Info VLR data   : 160 bytes @ offset 429]
-//   [LAZ VLR              : quelque part après 375]    user_id="laszip encoded" record_id=22204
-//   [Point data (LAZ)     : @ header.offset_to_point_data]
-//   [COPC Hierarchy EVLR  : @ header.evlr_offset]      entries de 32 bytes chacune
-// ============================================================================
-
-/// LAS 1.4 public header (375 bytes).
-#[derive(Debug, Clone)]
-struct Las14Header {
-    /// Format de point (bits 7-6 masqués = flag LAZ)
-    point_format: u8,
-    /// Taille d'un enregistrement de point en bytes
-    point_record_len: u16,
-    /// Offset vers les données de points (bytes 96-99, u32 LE)
-    offset_to_point_data: u64,
-    /// Nombre de VLRs (bytes 100-103)
-    vlr_count: u32,
-    /// Échelles XYZ (bytes 131/139/147, f64 LE)
-    scale: [f64; 3],
-    /// Offsets de coordonnées XYZ (bytes 155/163/171, f64 LE)
-    coord_offset: [f64; 3],
-    /// Offset vers le premier EVLR (bytes 235-242, u64 LE)
-    evlr_offset: u64,
-    /// Nombre de points 64-bit LAS 1.4 (bytes 247-254, u64 LE)
-    point_count: u64,
-}
-
-/// COPC Info VLR — 160 bytes de données (offset fichier 429).
-#[derive(Debug, Clone)]
-struct CopcInfo {
-    center_x: f64,
-    center_y: f64,
-    center_z: f64,
-    halfsize: f64,
-    #[allow(dead_code)]
-    spacing: f64,
-    /// Offset absolu dans le fichier vers la page racine de hiérarchie
-    root_hier_offset: u64,
-    /// Taille en bytes de la page racine
-    root_hier_size: u64,
-}
-
-/// Une entrée dans la hiérarchie COPC (32 bytes).
-#[derive(Debug, Clone)]
-struct CopcEntry {
-    /// Niveau de l'octree (0 = racine)
-    level: i32,
-    /// Coordonnées de voxel X
-    vx: i32,
-    /// Coordonnées de voxel Y
-    vy: i32,
-    #[allow(dead_code)]
-    vz: i32,
-    /// Offset absolu dans le fichier vers le chunk LAZ compressé
-    offset: u64,
-    /// Taille compressée en bytes ; si -1 = page enfant de hiérarchie
-    byte_size: i32,
-    /// Nombre de points ; -1 = page enfant ; 0 = nœud vide
-    point_count: i32,
-}
-
-// --- helpers binaires little-endian ---
-#[inline]
-fn ru16(b: &[u8], o: usize) -> u16 {
-    u16::from_le_bytes(b[o..o + 2].try_into().unwrap())
-}
-#[inline]
-fn ru32(b: &[u8], o: usize) -> u32 {
-    u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
-}
-#[inline]
-fn ru64(b: &[u8], o: usize) -> u64 {
-    u64::from_le_bytes(b[o..o + 8].try_into().unwrap())
-}
-#[inline]
-fn ri32(b: &[u8], o: usize) -> i32 {
-    i32::from_le_bytes(b[o..o + 4].try_into().unwrap())
-}
-#[inline]
-fn rf64(b: &[u8], o: usize) -> f64 {
-    f64::from_le_bytes(b[o..o + 8].try_into().unwrap())
-}
-
-/// Parse le LAS 1.4 public header depuis un buffer ≥ 375 bytes.
-fn parse_las14_header(buf: &[u8]) -> Result<Las14Header> {
-    if buf.len() < 375 {
-        anyhow::bail!("Buffer trop court pour LAS 1.4 header: {} bytes", buf.len());
-    }
-    if &buf[0..4] != b"LASF" {
-        anyhow::bail!("Signature LASF manquante");
-    }
-    if buf[25] < 4 {
-        anyhow::bail!("COPC requiert LAS 1.4, trouvé 1.{}", buf[25]);
-    }
-    Ok(Las14Header {
-        point_format: buf[104] & 0x3F,
-        point_record_len: ru16(buf, 105),
-        offset_to_point_data: ru32(buf, 96) as u64,
-        vlr_count: ru32(buf, 100),
-        scale: [rf64(buf, 131), rf64(buf, 139), rf64(buf, 147)],
-        coord_offset: [rf64(buf, 155), rf64(buf, 163), rf64(buf, 171)],
-        evlr_offset: ru64(buf, 235),
-        point_count: ru64(buf, 247),
-    })
-}
-
-/// Parse le COPC Info VLR depuis 160 bytes (data seule, sans les 54 bytes de VLR header).
-fn parse_copc_info(buf: &[u8]) -> Result<CopcInfo> {
-    if buf.len() < 160 {
-        anyhow::bail!("COPC Info VLR trop court: {} bytes", buf.len());
-    }
-    Ok(CopcInfo {
-        center_x: rf64(buf, 0),
-        center_y: rf64(buf, 8),
-        center_z: rf64(buf, 16),
-        halfsize: rf64(buf, 24),
-        spacing: rf64(buf, 32),
-        root_hier_offset: ru64(buf, 40),
-        root_hier_size: ru64(buf, 48),
-    })
-}
-
-/// Parse une page de hiérarchie COPC (entrées de 32 bytes chacune).
-fn parse_hierarchy_page(buf: &[u8]) -> Vec<CopcEntry> {
-    let n = buf.len() / 32;
-    let mut entries = Vec::with_capacity(n);
-    for i in 0..n {
-        let b = i * 32;
-        entries.push(CopcEntry {
-            level: ri32(buf, b),
-            vx: ri32(buf, b + 4),
-            vy: ri32(buf, b + 8),
-            vz: ri32(buf, b + 12),
-            offset: ru64(buf, b + 16),
-            byte_size: ri32(buf, b + 24),
-            point_count: ri32(buf, b + 28),
-        });
-    }
-    entries
-}
-
-/// Lit toutes les entrées de hiérarchie COPC en suivant les pages enfants.
-/// Les entrées avec point_count == -1 sont des pages enfants à lire récursivement.
-fn read_all_hierarchy_entries(file_buf: &[u8], info: &CopcInfo) -> Result<Vec<CopcEntry>> {
-    let mut all_entries = Vec::new();
-    let mut pages_to_read: Vec<(u64, u64)> = vec![(info.root_hier_offset, info.root_hier_size)];
-
-    while let Some((page_offset, page_size)) = pages_to_read.pop() {
-        let start = page_offset as usize;
-        let end = start + page_size as usize;
-        if end > file_buf.len() {
-            eprintln!(
-                "  ⚠️  Page hiérarchie COPC hors limites: offset={} size={} file_len={}",
-                page_offset,
-                page_size,
-                file_buf.len()
-            );
-            continue;
-        }
-        for entry in parse_hierarchy_page(&file_buf[start..end]) {
-            if entry.point_count == -1 {
-                // Page enfant — lire récursivement
-                pages_to_read.push((entry.offset, entry.byte_size as u64));
-            } else {
-                all_entries.push(entry);
-            }
-        }
-    }
-    Ok(all_entries)
-}
-
-/// Calcule le bounding box XY d'un nœud COPC.
-/// Formule spec COPC 1.0 : nodeSize = halfsize / 2^level
-fn copc_entry_bounds_xy(entry: &CopcEntry, info: &CopcInfo) -> (f64, f64, f64, f64) {
-    let node_size = info.halfsize / (1i64 << entry.level.max(0)) as f64;
-    let min_x = info.center_x - info.halfsize + entry.vx as f64 * node_size;
-    let min_y = info.center_y - info.halfsize + entry.vy as f64 * node_size;
-    (min_x, min_y, min_x + node_size, min_y + node_size)
-}
-
-/// Teste si un nœud COPC intersecte le bbox de requête (XY uniquement).
-fn copc_entry_intersects(
-    entry: &CopcEntry,
-    info: &CopcInfo,
-    qx_min: f64,
-    qy_min: f64,
-    qx_max: f64,
-    qy_max: f64,
-) -> bool {
-    let (nx_min, ny_min, nx_max, ny_max) = copc_entry_bounds_xy(entry, info);
-    !(nx_max < qx_min || nx_min > qx_max || ny_max < qy_min || ny_min > qy_max)
-}
-
-/// Cherche et parse le LazVlr dans le buffer du fichier.
-/// user_id = "laszip encoded" (16 bytes null-padded), record_id = 22204.
-/// Les VLRs commencent à l'offset 375 (taille du LAS 1.4 header).
-fn find_laz_vlr(file_buf: &[u8], vlr_count: u32) -> Result<LazVlr> {
-    const LAS14_HEADER_SIZE: usize = 375;
-    const VLR_HEADER_SIZE: usize = 54;
-
-    let mut pos = LAS14_HEADER_SIZE;
-
-    for _ in 0..vlr_count {
-        if pos + VLR_HEADER_SIZE > file_buf.len() {
-            break;
-        }
-        // VLR header layout:
-        //   reserved (2) | user_id (16) | record_id (2) | record_len (2) | description (32)
-        let user_id = std::str::from_utf8(&file_buf[pos + 2..pos + 18])
-            .unwrap_or("")
-            .trim_end_matches('\0');
-        let record_id = ru16(file_buf, pos + 18);
-        let record_len = ru16(file_buf, pos + 20) as usize;
-        let data_start = pos + VLR_HEADER_SIZE;
-        let data_end = data_start + record_len;
-
-        if user_id == "laszip encoded" && record_id == 22204 {
-            if data_end > file_buf.len() {
-                anyhow::bail!(
-                    "LAZ VLR data tronquée (data_end={} > file_len={})",
-                    data_end,
-                    file_buf.len()
-                );
-            }
-            let vlr = LazVlr::from_buffer(&file_buf[data_start..data_end])
-                .map_err(|e| anyhow::anyhow!("Échec parse LazVlr: {}", e))?;
-            return Ok(vlr);
-        }
-        pos = data_end;
-    }
-    anyhow::bail!(
-        "LazVlr introuvable parmi {} VLRs (user_id='laszip encoded', record_id=22204)",
-        vlr_count
-    )
-}
-
-/// Décompresse un chunk COPC en bytes bruts.
-///
-/// Implémentation clé tirée de copc-rs/decompressor.rs :
-///   - On crée un LayeredPointRecordDecompressor sur chunk_buf (Cursor)
-///   - On appelle set_fields_from(vlr.items()) pour configurer les canaux
-///   - On lit point_count fois decompress_next() — SANS lire de chunk table
-///
-/// C'est fondamentalement différent de LasZipDecompressor qui attend un
-/// chunk table en début de données. Les chunks COPC n'ont pas de chunk table
-/// individuel : ils font partie d'un pool géré par le fichier global.
-fn decompress_copc_chunk(
-    chunk_buf: &[u8],
-    vlr: &LazVlr,
-    point_record_len: u16,
-    point_count: i32,
-) -> Result<Vec<u8>> {
-    use laz::record::{LayeredPointRecordDecompressor, RecordDecompressor};
-    use std::io::Cursor;
-
-    let mut cursor = Cursor::new(chunk_buf);
-    let mut decompressor = LayeredPointRecordDecompressor::new(&mut cursor);
-    decompressor
-        .set_fields_from(vlr.items())
-        .map_err(|e| anyhow::anyhow!("set_fields_from: {}", e))?;
-
-    let point_size = point_record_len as usize;
-    let n = point_count as usize;
-    let mut out = vec![0u8; n * point_size];
-
-    for i in 0..n {
-        let slice = &mut out[i * point_size..(i + 1) * point_size];
-        decompressor
-            .decompress_next(slice)
-            .map_err(|e| anyhow::anyhow!("Décompression point {}/{}: {}", i + 1, n, e))?;
-    }
-    Ok(out)
-}
-
-/// Décode un point LAS 1.4 Format 6/7/8 depuis des bytes bruts.
-///
-/// Layout Format 6 (20 bytes minimum) :
-///   bytes  0- 3 : X (i32 LE)
-///   bytes  4- 7 : Y (i32 LE)
-///   bytes  8-11 : Z (i32 LE)
-///   bytes 12-13 : intensity (u16) — non utilisé
-///   byte  14    : return number bits — non utilisé
-///   byte  15    : flags — non utilisé
-///   byte  16    : classification (u8)
-///   ...          (scanner channel, scan angle, user data, point source, gps time, etc.)
-#[inline]
-fn decode_las14_point(raw: &[u8], scale: &[f64; 3], coord_offset: &[f64; 3]) -> LidarPoint {
-    let xi = i32::from_le_bytes(raw[0..4].try_into().unwrap());
-    let yi = i32::from_le_bytes(raw[4..8].try_into().unwrap());
-    let zi = i32::from_le_bytes(raw[8..12].try_into().unwrap());
-    LidarPoint {
-        x: xi as f64 * scale[0] + coord_offset[0],
-        y: yi as f64 * scale[1] + coord_offset[1],
-        z: zi as f64 * scale[2] + coord_offset[2],
-        classification: raw[16],
-    }
-}
-
-/// Statistiques de lecture COPC
-struct CopcReadStats {
-    points: Vec<LidarPoint>,
-    entries_processed: usize,
-    entries_success: usize,
-    entries_failed: usize,
 }
 
 // ============================================================================
@@ -673,14 +424,23 @@ fn progress_style() -> ProgressStyle {
         .progress_chars("##-")
 }
 
+/// Lidar structure
+/// Following Python implementation from pymdu.image.Lidar
+/// Provides methods to collect and process LiDAR point cloud data
 pub struct Lidar {
+    /// GeoCore for CRS handling
     pub geo_core: GeoCore,
+    /// Output path for processed data
     output_path: PathBuf,
+    /// Classification filter (optional)
     classification: Option<u8>,
+    /// List of LAZ file URLs (populated by get_lidar_points)
     list_path_laz: Option<Vec<String>>,
+    /// Loaded LiDAR points (populated by load_lidar_points)
     loaded_points: Option<Vec<LidarPoint>>,
 }
 
+/// Point structure for LiDAR data
 #[derive(Debug, Clone)]
 pub(crate) struct LidarPoint {
     pub(crate) x: f64,
@@ -689,17 +449,26 @@ pub(crate) struct LidarPoint {
     pub(crate) classification: u8,
 }
 
+/// Minimum bytes needed to parse LAS public header (offset to point data at 94-97, number of points at 107-110).
 const LAS_HEADER_MIN_BYTES: usize = 111;
+
+/// LAS public header: offset to point data at bytes 94-97 (u32 LE).
 const LAS_OFFSET_TO_POINT_DATA: usize = 94;
+/// LAS public header: number of point records at bytes 107-110 (u32 LE) for LAS 1.0-1.2.
 const LAS_NUMBER_OF_POINT_RECORDS: usize = 107;
 
+/// Parsed LAS/LAZ header from a partial buffer (e.g. first 4KB from Range request).
 #[derive(Debug)]
 struct LasHeaderParsed {
+    /// Byte offset from start of file where point data begins.
     offset_to_point_data: u32,
+    /// Total number of point records (for LAS 1.0-1.2; 4-byte field). Used for logging/progress.
     #[allow(dead_code)]
     number_of_points: u64,
 }
 
+/// Parse LAS/LAZ public header from a buffer (at least 111 bytes).
+/// Returns offset to point data and number of point records for use with HTTP Range.
 fn parse_las_header_from_slice(buf: &[u8]) -> Result<LasHeaderParsed> {
     if buf.len() < LAS_HEADER_MIN_BYTES {
         anyhow::bail!(
@@ -727,6 +496,8 @@ fn parse_las_header_from_slice(buf: &[u8]) -> Result<LasHeaderParsed> {
     })
 }
 
+/// Wrapper around memory-mapped file that implements Read + Seek for las::Reader.
+/// Used for large cached LAZ files when feature "laz-memmap" is enabled.
 #[cfg(feature = "laz-memmap")]
 struct MmapReader {
     mmap: memmap2::Mmap,
@@ -773,9 +544,14 @@ impl std::io::Seek for MmapReader {
     }
 }
 
+/// Threshold above which to use memory-mapped I/O for cached LAZ (50 MiB).
 #[cfg(feature = "laz-memmap")]
 const LAZ_MMAP_THRESHOLD_BYTES: u64 = 50 * 1024 * 1024;
 
+/// Download a byte range of a LAZ file via HTTP Range request (blocking).
+/// Returns `Ok(data)` only when server responds with 206 Partial Content.
+/// Returns `Err` on 200 (Range not supported) or other failure so caller can fall back to full GET.
+/// If `on_progress` is provided, it is called with the number of bytes read so far (cumulative).
 #[cfg(feature = "reqwest")]
 fn download_partial_laz<F>(
     client: &reqwest::blocking::Client,
@@ -795,6 +571,7 @@ where
         .context("Range request failed")?;
     let status = response.status();
     if status == reqwest::StatusCode::OK {
+        // Server ignored Range and may have sent full body; caller should use full GET instead
         return Err(anyhow::anyhow!(
             "Server returned 200 (Range not supported), use full GET"
         ));
@@ -823,12 +600,14 @@ where
     Ok(data)
 }
 
+/// Fetch Content-Length via HEAD request. Returns None if HEAD fails or header is missing.
 #[cfg(feature = "reqwest")]
 fn head_content_length(client: &reqwest::blocking::Client, url: &str) -> Option<u64> {
     let response = client.head(url).send().ok()?;
     response.content_length()
 }
 
+/// Map las classification enum to u8 (for parallel conversion).
 #[inline]
 fn classification_to_u8(c: &las::point::Classification) -> u8 {
     match c {
@@ -846,45 +625,70 @@ fn classification_to_u8(c: &las::point::Classification) -> u8 {
     }
 }
 
+/// Processed raster data
 struct ProcessedRasters {
-    dsm: Vec<Vec<f64>>,
-    dtm: Vec<Vec<f64>>,
-    chm: Vec<Vec<f64>>,
+    dsm: Vec<Vec<f64>>, // Digital Surface Model
+    dtm: Vec<Vec<f64>>, // Digital Terrain Model
+    chm: Vec<Vec<f64>>, // Canopy Height Model
     width: usize,
     height: usize,
-    transform: [f64; 6],
+    transform: [f64; 6], // GDAL-style transform
+}
+
+/// Result of COPC entry reading for statistics
+#[cfg(feature = "lidar-copc")]
+struct CopcReadResult {
+    points: Vec<LidarPoint>,
+    entries_processed: usize,
+    entries_success: usize,
+    entries_failed: usize,
 }
 
 impl Lidar {
+    /// Create a new Lidar instance
+    /// Following Python: def __init__(self, output_path=None, classification=None)
+    /// If bbox is provided, get_lidar_points() is called immediately
     pub fn new(
         output_path: Option<String>,
         classification: Option<u8>,
         bbox: Option<(f64, f64, f64, f64)>,
     ) -> Result<Self> {
         use crate::collect::global_variables::TEMP_PATH;
+
         let output_path_buf = PathBuf::from(
             output_path
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or(TEMP_PATH),
         );
+
         let mut lidar = Lidar {
-            geo_core: GeoCore::default(),
+            geo_core: GeoCore::default(), // Default to EPSG:2154 (Lambert-93)
             output_path: output_path_buf,
             classification,
             list_path_laz: None,
             loaded_points: None,
         };
+
+        // If bbox is provided, set it and get LiDAR points immediately
         if let Some((min_x, min_y, max_x, max_y)) = bbox {
             lidar.set_bbox(min_x, min_y, max_x, max_y)?;
         }
+
         Ok(lidar)
     }
 
+    /// Set bounding box and get LiDAR points URLs, then load the points
+    /// Following Python: lidar.bbox = [min_x, min_y, max_x, max_y]
+    /// This also calls get_lidar_points() and load_lidar_points() to fetch and load LAZ files
     pub fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<()> {
         self.geo_core
             .set_bbox(Some(BoundingBox::new(min_x, min_y, max_x, max_y)));
+
+        // Get LiDAR points URLs and bbox in EPSG:2154 immediately when bbox is set
         let (min_x, min_y, max_x, max_y, _) = self.get_lidar_points()?;
+
+        // Load LiDAR points from URLs with early spatial filter
         if let Some(ref laz_urls) = self.list_path_laz {
             if !laz_urls.is_empty() {
                 let filter_bbox = Some((min_x, min_y, max_x, max_y));
@@ -892,17 +696,22 @@ impl Lidar {
                 self.loaded_points = Some(points);
             }
         }
+
         Ok(())
     }
 
+    /// Set classification filter
+    /// Following Python: lidar.classification = value
     pub fn set_classification(&mut self, classification: Option<u8>) {
         self.classification = classification;
     }
 
+    /// Get output path
     pub fn get_output_path(&self) -> &Path {
         &self.output_path
     }
 
+    /// Compute cache file path for a LAZ URL. Uses last path segment, sanitized for filesystem.
     fn cache_path_for_url(cache_dir: &Path, url: &str) -> PathBuf {
         let segment = url::Url::parse(url)
             .ok()
@@ -927,21 +736,29 @@ impl Lidar {
         cache_dir.join(filename)
     }
 
+    /// Returns true if the URL is for a COPC file (Cloud Optimized Point Cloud).
     fn is_copc_url(url: &str) -> bool {
         url.ends_with(".copc.laz") || url.contains(".copc.")
     }
 
+    /// Verify that a cached file is valid (has correct LAS signature and reasonable size)
     fn verify_cached_file(cache_path: &Path) -> Result<bool> {
         let metadata = std::fs::metadata(cache_path)?;
+
+        // File should be at least large enough for a LAS header
         if metadata.len() < LAS_HEADER_MIN_BYTES as u64 {
             return Ok(false);
         }
+
+        // Check LAS signature
         let mut file = std::fs::File::open(cache_path)?;
         let mut signature = [0u8; 4];
         std::io::Read::read_exact(&mut file, &mut signature)?;
+
         Ok(&signature == b"LASF")
     }
 
+    /// Download a file with integrity verification
     #[cfg(feature = "reqwest")]
     fn download_with_verification(
         client: &reqwest::blocking::Client,
@@ -949,7 +766,10 @@ impl Lidar {
         cache_path: &Path,
     ) -> Result<Vec<u8>> {
         use std::io::Read;
+
         println!("  📥 Downloading from: {}", url);
+
+        // Get expected size first via HEAD request
         let expected_size = head_content_length(client, url);
         if let Some(size) = expected_size {
             println!(
@@ -958,6 +778,8 @@ impl Lidar {
                 size as f64 / 1_048_576.0
             );
         }
+
+        // Download with retries
         let mut retries = 3;
         let data = loop {
             let response = match client.get(url).send() {
@@ -972,19 +794,24 @@ impl Lidar {
                     return Err(anyhow::anyhow!("Failed to download after retries: {}", e));
                 }
             };
+
             if !response.status().is_success() {
                 return Err(anyhow::anyhow!("HTTP error: {}", response.status()));
             }
+
             let mut data = Vec::new();
-            let mut buffer = [0u8; 65536];
+            let mut buffer = [0u8; 65536]; // 64KB buffer for faster downloads
             let mut response = response;
             let mut bytes_read = 0u64;
+
             loop {
                 match response.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
                         data.extend_from_slice(&buffer[..n]);
                         bytes_read += n as u64;
+
+                        // Progress every 10MB
                         if bytes_read % (10 * 1024 * 1024) < 65536 {
                             if let Some(expected) = expected_size {
                                 println!(
@@ -1005,7 +832,9 @@ impl Lidar {
                     }
                 }
             }
+
             if !data.is_empty() {
+                // Verify size if we know expected
                 if let Some(expected) = expected_size {
                     if data.len() as u64 != expected {
                         retries -= 1;
@@ -1027,6 +856,7 @@ impl Lidar {
                 }
                 break data;
             }
+
             retries -= 1;
             if retries == 0 {
                 return Err(anyhow::anyhow!("Empty response after retries"));
@@ -1034,85 +864,320 @@ impl Lidar {
             eprintln!("  Empty response (retrying)");
             std::thread::sleep(std::time::Duration::from_secs(2));
         };
+
+        // Verify LAS signature before caching
         if data.len() < 4 || &data[0..4] != b"LASF" {
             return Err(anyhow::anyhow!(
                 "Downloaded file is not a valid LAS/LAZ file (missing LASF signature)"
             ));
         }
+
         println!(
             "  Downloaded {} bytes ({:.2} MB)",
             data.len(),
             data.len() as f64 / 1_048_576.0
         );
+
+        // Cache the file
         std::fs::write(cache_path, &data).context("Failed to write cache file")?;
         println!("  Cached to: {:?}", cache_path);
+
         Ok(data)
     }
 
+    /// Load a single point file (COPC or LAZ) from URL or cache. Dispatches to COPC or LAZ loader.
     fn load_single_point_file(
         &self,
         url: &str,
         cache_dir: &Path,
         filter_bbox: Option<(f64, f64, f64, f64)>,
     ) -> Result<Vec<LidarPoint>> {
-        if Self::is_copc_url(url) {
-            self.load_single_copc_file(url, cache_dir, filter_bbox)
-        } else {
+        if !Self::is_copc_url(url) {
+            return self.load_single_laz_file(url, cache_dir, filter_bbox);
+        }
+        #[cfg(feature = "lidar-copc")]
+        return self.load_single_copc_file(url, cache_dir, filter_bbox);
+        #[cfg(not(feature = "lidar-copc"))]
+        {
+            eprintln!(
+                "COPC URL detected but lidar-copc feature disabled; loading as LAZ: {}",
+                url
+            );
             self.load_single_laz_file(url, cache_dir, filter_bbox)
         }
     }
 
-    // -----------------------------------------------------------------------
-    // COPC NATIVE LOADER
-    //
-    // Remplace entièrement las::CopcEntryReader par une implémentation directe
-    // de la spec COPC 1.0, en utilisant LayeredPointRecordDecompressor du crate laz.
-    //
-    // Flux :
-    //   1. Télécharger le fichier entier (cache disque)
-    //   2. Vérifier signature LASF + version LAS 1.4
-    //   3. Parser COPC Info VLR (offset 429, 160 bytes)
-    //   4. Trouver le LazVlr (user_id="laszip encoded", record_id=22204)
-    //   5. Lire la hiérarchie d'octree depuis l'EVLR
-    //   6. Filtrer les entrées qui intersectent le bbox de requête
-    //   7. Pour chaque entrée : décompresser avec LayeredPointRecordDecompressor
-    //      (sans chunk table — clé de la compatibilité avec IGN LiDAR HD)
-    //   8. Décoder les bytes bruts en LidarPoint (LAS 1.4 Format 6)
-    //   9. Si trop d'erreurs : fallback read_as_standard_laz
-    // -----------------------------------------------------------------------
+    /// Read points from a byte buffer as a standard LAZ file
+    /// This is the fallback method when COPC reading fails
+    /// Uses spatial indexing for efficient bbox filtering
+    fn read_as_standard_laz(
+        bytes: Vec<u8>,
+        filter_bbox: Option<(f64, f64, f64, f64)>,
+    ) -> Result<Vec<LidarPoint>> {
+        use std::io::Cursor;
+
+        println!("  📖 Reading as standard LAZ file...");
+
+        let cursor = Cursor::new(bytes);
+        let mut reader = las::Reader::new(cursor)
+            .map_err(|e| anyhow::anyhow!("Failed to create LAZ reader: {}", e))?;
+
+        let point_count = reader.header().number_of_points();
+        println!("  Header declares {} points", point_count);
+
+        // Read all points first
+        let mut raw_points: Vec<las::Point> = Vec::with_capacity(point_count as usize);
+        let mut errors = 0;
+
+        for point_result in reader.points() {
+            match point_result {
+                Ok(p) => raw_points.push(p),
+                Err(_) => {
+                    errors += 1;
+                }
+            }
+        }
+
+        if errors > 0 {
+            eprintln!("  {} point read errors", errors);
+        }
+
+        println!("  Read {} points from LAZ", raw_points.len());
+
+        // Convert to LidarPoint first (needed for spatial indexing)
+        #[cfg(feature = "rayon")]
+        let all_points: Vec<LidarPoint> = raw_points
+            .par_iter()
+            .map(|point| LidarPoint {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+                classification: classification_to_u8(&point.classification),
+            })
+            .collect();
+
+        #[cfg(not(feature = "rayon"))]
+        let all_points: Vec<LidarPoint> = raw_points
+            .iter()
+            .map(|point| LidarPoint {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+                classification: classification_to_u8(&point.classification),
+            })
+            .collect();
+
+        // Apply spatial filtering using index if we have a bbox
+        let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
+            Self::filter_points_with_spatial_index(&all_points, x_min, y_min, x_max, y_max)
+        } else {
+            all_points
+        };
+
+        println!("  Loaded {} points after spatial filter", file_points.len());
+
+        Ok(file_points)
+    }
+
+    /// Filter points using spatial indexing for better performance on large datasets
+    /// Chooses between grid index (faster to build) and quadtree (faster queries) based on data size
+    fn filter_points_with_spatial_index(
+        points: &[LidarPoint],
+        x_min: f64,
+        y_min: f64,
+        x_max: f64,
+        y_max: f64,
+    ) -> Vec<LidarPoint> {
+        let point_count = points.len();
+
+        // For small datasets, just do linear scan
+        if point_count < 10_000 {
+            return points
+                .iter()
+                .filter(|p| p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max)
+                .cloned()
+                .collect();
+        }
+
+        println!("  Building spatial index for {} points...", point_count);
+        let start = std::time::Instant::now();
+
+        // Choose index type based on expected selectivity
+        // Grid index is faster to build, quadtree is better for very selective queries
+        let query_area = (x_max - x_min) * (y_max - y_min);
+
+        // Estimate data bounds from sample
+        let sample_size = (point_count / 100).max(100).min(point_count);
+        let step = point_count / sample_size;
+        let mut data_min_x = f64::INFINITY;
+        let mut data_min_y = f64::INFINITY;
+        let mut data_max_x = f64::NEG_INFINITY;
+        let mut data_max_y = f64::NEG_INFINITY;
+
+        for i in (0..point_count).step_by(step.max(1)) {
+            let p = &points[i];
+            data_min_x = data_min_x.min(p.x);
+            data_min_y = data_min_y.min(p.y);
+            data_max_x = data_max_x.max(p.x);
+            data_max_y = data_max_y.max(p.y);
+        }
+
+        let data_area = (data_max_x - data_min_x) * (data_max_y - data_min_y);
+        let selectivity = if data_area > 0.0 {
+            query_area / data_area
+        } else {
+            1.0
+        };
+
+        println!("  📐 Query selectivity: {:.1}%", selectivity * 100.0);
+
+        // Use grid index for moderate selectivity, quadtree for very selective queries
+        let result = if selectivity > 0.5 || point_count < 100_000 {
+            // Grid index - faster to build
+            // Cell size based on expected point density
+            let cell_size = ((data_max_x - data_min_x) / 100.0)
+                .max((data_max_y - data_min_y) / 100.0)
+                .max(10.0); // Minimum 10m cells
+
+            let grid_index = SpatialGridIndex::build_from_points(points, cell_size);
+            println!("  {}", grid_index.stats());
+
+            let candidate_indices = grid_index.query_bbox(x_min, y_min, x_max, y_max);
+            println!(
+                "  🔍 Grid query returned {} candidates",
+                candidate_indices.len()
+            );
+
+            // Final precise filtering
+            candidate_indices
+                .into_iter()
+                .filter_map(|i| {
+                    let p = &points[i];
+                    if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
+                        Some(p.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            // Quadtree - better for very selective queries on large datasets
+            let quadtree = QuadtreeSpatialIndex::build(points);
+            println!("  {}", quadtree.stats());
+
+            let candidate_indices = quadtree.query_bbox(x_min, y_min, x_max, y_max);
+            println!(
+                "  🔍 Quadtree query returned {} candidates",
+                candidate_indices.len()
+            );
+
+            // Final precise filtering
+            candidate_indices
+                .into_iter()
+                .filter_map(|i| {
+                    let p = &points[i];
+                    if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
+                        Some(p.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        let elapsed = start.elapsed();
+        println!(
+            "  Spatial indexing and query took {:.2}s",
+            elapsed.as_secs_f64()
+        );
+
+        result
+    }
+
+    /// Filter points using parallel spatial indexing (for very large datasets)
+    #[cfg(feature = "rayon")]
+    fn filter_points_with_spatial_index_parallel(
+        points: &[LidarPoint],
+        x_min: f64,
+        y_min: f64,
+        x_max: f64,
+        y_max: f64,
+    ) -> Vec<LidarPoint> {
+        let point_count = points.len();
+
+        // For datasets over 1M points, use chunked parallel processing
+        if point_count < 1_000_000 {
+            return Self::filter_points_with_spatial_index(points, x_min, y_min, x_max, y_max);
+        }
+
+        println!(
+            "  🚀 Using parallel spatial indexing for {} points...",
+            point_count
+        );
+        let start = std::time::Instant::now();
+
+        // Split into chunks and process in parallel
+        let chunk_size = 500_000;
+        let chunks: Vec<_> = points.chunks(chunk_size).collect();
+
+        let results: Vec<Vec<LidarPoint>> = chunks
+            .par_iter()
+            .map(|chunk| Self::filter_points_with_spatial_index(chunk, x_min, y_min, x_max, y_max))
+            .collect();
+
+        let result: Vec<LidarPoint> = results.into_iter().flatten().collect();
+
+        let elapsed = start.elapsed();
+        println!(
+            "  Parallel spatial filtering took {:.2}s",
+            elapsed.as_secs_f64()
+        );
+
+        result
+    }
+
+    /// Load a single COPC file with proper error handling and fallback to standard LAZ
+    #[cfg(feature = "lidar-copc")]
     fn load_single_copc_file(
         &self,
         url: &str,
         cache_dir: &Path,
         filter_bbox: Option<(f64, f64, f64, f64)>,
     ) -> Result<Vec<LidarPoint>> {
+        use std::io::Cursor;
+
         let cache_path = Self::cache_path_for_url(cache_dir, url);
 
-        // --- 1. Obtenir les bytes (cache ou téléchargement) ---
+        // Try to load from cache or download
         let bytes: Vec<u8> = if cache_path.exists() {
+            // Verify cached file integrity
             match Self::verify_cached_file(&cache_path) {
                 Ok(true) => {
                     println!("Reading COPC from cache: {:?}", cache_path);
-                    std::fs::read(&cache_path).context("Failed to read cached COPC file")?
+                    std::fs::read(&cache_path).context("Failed to read cached file")?
                 }
-                _ => {
+                Ok(false) | Err(_) => {
                     eprintln!("  Cached file appears corrupted, re-downloading...");
                     let _ = std::fs::remove_file(&cache_path);
+
                     let client = reqwest::blocking::Client::builder()
                         .connect_timeout(std::time::Duration::from_secs(30))
-                        .timeout(std::time::Duration::from_secs(900))
+                        .timeout(std::time::Duration::from_secs(900)) // 15 min timeout for large files
                         .build()
                         .context("Failed to create HTTP client")?;
+
                     Self::download_with_verification(&client, url, &cache_path)?
                 }
             }
         } else {
             println!("🌐 Downloading COPC: {}", url);
+
             let client = reqwest::blocking::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(30))
                 .timeout(std::time::Duration::from_secs(900))
                 .build()
                 .context("Failed to create HTTP client")?;
+
             Self::download_with_verification(&client, url, &cache_path)?
         };
 
@@ -1122,268 +1187,140 @@ impl Lidar {
             bytes.len() as f64 / 1_048_576.0
         );
 
-        // --- 2. Parser le LAS 1.4 header ---
-        let hdr = match parse_las14_header(&bytes) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!(
-                    "  ⚠️  Pas un fichier LAS 1.4 valide ({}), fallback LAZ standard",
-                    e
-                );
-                return Self::read_as_standard_laz(bytes, filter_bbox);
+        // Try COPC reader first
+        let cursor = Cursor::new(bytes.clone());
+        match las::CopcEntryReader::new(cursor) {
+            Ok(mut entry_reader) => {
+                // Check for COPC info VLR
+                if entry_reader.header().copc_info_vlr().is_none() {
+                    println!("  File missing COPC VLR, falling back to standard LAZ reader");
+                    return Self::read_as_standard_laz(bytes, filter_bbox);
+                }
+
+                // Get hierarchy entries
+                let entries = match entry_reader.hierarchy_entries() {
+                    Some(e) => e,
+                    None => {
+                        println!(
+                            "  Could not read COPC hierarchy, falling back to standard LAZ reader"
+                        );
+                        return Self::read_as_standard_laz(bytes, filter_bbox);
+                    }
+                };
+
+                println!("  COPC hierarchy: {} entries", entries.len());
+
+                if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
+                    println!(
+                        "  Spatial filter: [{:.2}, {:.2}] -> [{:.2}, {:.2}]",
+                        x_min, y_min, x_max, y_max
+                    );
+                }
+
+                // Try to read entries
+                let result = Self::read_copc_entries(&mut entry_reader, &entries, filter_bbox);
+
+                // Check if we had too many failures
+                let failure_rate = if result.entries_processed > 0 {
+                    result.entries_failed as f64 / result.entries_processed as f64
+                } else {
+                    0.0
+                };
+
+                println!("  COPC Results:");
+                println!("     - Entries processed: {}", result.entries_processed);
+                println!("     - Successfully read: {}", result.entries_success);
+                if result.entries_failed > 0 {
+                    println!(
+                        "     - Failed to read: {} ({:.1}%)",
+                        result.entries_failed,
+                        failure_rate * 100.0
+                    );
+                }
+                println!("     - Points loaded: {}", result.points.len());
+
+                // If more than 50% failures, fall back to standard LAZ on the same cached bytes (no re-download)
+                if failure_rate > 0.5 {
+                    eprintln!(
+                        "  High failure rate ({:.1}%), falling back to standard LAZ reader (using cached file)",
+                        failure_rate * 100.0
+                    );
+                    return Self::read_as_standard_laz(bytes, filter_bbox);
+                }
+
+                // If we got no points but had successful reads, the bbox might be outside the data
+                if result.points.is_empty() && result.entries_success > 0 {
+                    println!("  No points found in bbox (data may be outside the query area)");
+                }
+
+                Ok(result.points)
             }
-        };
-
-        println!(
-            "  LAS 1.4 | format={} record_len={} points={} vlrs={}",
-            hdr.point_format, hdr.point_record_len, hdr.point_count, hdr.vlr_count
-        );
-
-        // Vérification : COPC supporte uniquement formats 6, 7, 8
-        if hdr.point_format < 6 || hdr.point_format > 8 {
-            eprintln!(
-                "  Format de point non supporté par COPC: {} (attendu 6-8), fallback LAZ",
-                hdr.point_format
-            );
-            return Self::read_as_standard_laz(bytes, filter_bbox);
-        }
-
-        // --- 3. Parser le COPC Info VLR (offset 429, 160 bytes) ---
-        // Spec : "The info VLR MUST be the first VLR (must begin at offset 375)"
-        // VLR header = 54 bytes → data commence à 375 + 54 = 429
-        const COPC_INFO_DATA_OFFSET: usize = 429;
-        const COPC_INFO_DATA_LEN: usize = 160;
-
-        if bytes.len() < COPC_INFO_DATA_OFFSET + COPC_INFO_DATA_LEN {
-            eprintln!("  Fichier trop court pour COPC Info VLR, fallback LAZ standard");
-            return Self::read_as_standard_laz(bytes, filter_bbox);
-        }
-
-        // Vérifier que le premier VLR est bien "copc" / 1
-        let first_vlr_user_id = std::str::from_utf8(&bytes[377..393])
-            .unwrap_or("")
-            .trim_end_matches('\0');
-        let first_vlr_record_id = ru16(&bytes, 393);
-        if first_vlr_user_id != "copc" || first_vlr_record_id != 1 {
-            eprintln!(
-                "  Premier VLR inattendu: user_id='{}' record_id={} (attendu 'copc'/1), fallback LAZ",
-                first_vlr_user_id, first_vlr_record_id
-            );
-            return Self::read_as_standard_laz(bytes, filter_bbox);
-        }
-
-        let copc_info = match parse_copc_info(
-            &bytes[COPC_INFO_DATA_OFFSET..COPC_INFO_DATA_OFFSET + COPC_INFO_DATA_LEN],
-        ) {
-            Ok(i) => i,
             Err(e) => {
-                eprintln!("  Échec parse COPC Info VLR: {}, fallback LAZ standard", e);
-                return Self::read_as_standard_laz(bytes, filter_bbox);
+                eprintln!("  COPC reader failed: {}", e);
+                eprintln!("  📖 Falling back to standard LAZ reader");
+                Self::read_as_standard_laz(bytes, filter_bbox)
             }
-        };
-
-        println!(
-            "  COPC octree: centre=({:.1},{:.1},{:.1}) halfsize={:.1}",
-            copc_info.center_x, copc_info.center_y, copc_info.center_z, copc_info.halfsize
-        );
-        println!(
-            "  Hiérarchie racine: offset={} size={}",
-            copc_info.root_hier_offset, copc_info.root_hier_size
-        );
-
-        // --- 4. Trouver le LazVlr ---
-        let laz_vlr = match find_laz_vlr(&bytes, hdr.vlr_count) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("  LazVlr introuvable: {}, fallback LAZ standard", e);
-                return Self::read_as_standard_laz(bytes, filter_bbox);
-            }
-        };
-
-        // --- 5. Lire toutes les entrées de la hiérarchie ---
-        let all_entries = match read_all_hierarchy_entries(&bytes, &copc_info) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!(
-                    "  Échec lecture hiérarchie COPC: {}, fallback LAZ standard",
-                    e
-                );
-                return Self::read_as_standard_laz(bytes, filter_bbox);
-            }
-        };
-
-        println!("  Hiérarchie COPC: {} entrées totales", all_entries.len());
-
-        // --- 6. Filtrer les entrées qui intersectent le bbox ---
-        let entries_to_process: Vec<&CopcEntry> =
-            if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
-                println!(
-                    "  Spatial filter: [{:.2}, {:.2}] -> [{:.2}, {:.2}]",
-                    qx_min, qy_min, qx_max, qy_max
-                );
-                all_entries
-                    .iter()
-                    .filter(|e| {
-                        e.point_count > 0
-                            && copc_entry_intersects(e, &copc_info, qx_min, qy_min, qx_max, qy_max)
-                    })
-                    .collect()
-            } else {
-                all_entries.iter().filter(|e| e.point_count > 0).collect()
-            };
-
-        println!(
-            "  {} entries à décompresser (sur {})",
-            entries_to_process.len(),
-            all_entries.len()
-        );
-
-        // --- 7 & 8. Décompresser chaque chunk et décoder les points ---
-        let stats =
-            Self::decompress_copc_entries(&bytes, &entries_to_process, &laz_vlr, &hdr, filter_bbox);
-
-        println!("  COPC Results:");
-        println!("     - Entries processed: {}", stats.entries_processed);
-        println!("     - Successfully read: {}", stats.entries_success);
-        if stats.entries_failed > 0 {
-            let failure_rate = stats.entries_failed as f64 / stats.entries_processed.max(1) as f64;
-            println!(
-                "     - Failed to read: {} ({:.1}%)",
-                stats.entries_failed,
-                failure_rate * 100.0
-            );
         }
-        println!("     - Points loaded: {}", stats.points.len());
-
-        // --- 9. Fallback si taux d'échec trop élevé ---
-        let failure_rate = stats.entries_failed as f64 / stats.entries_processed.max(1) as f64;
-        if failure_rate > 0.5 && stats.entries_processed > 0 {
-            eprintln!(
-                "  High failure rate ({:.1}%), falling back to standard LAZ reader (using cached file)",
-                failure_rate * 100.0
-            );
-            return Self::read_as_standard_laz(bytes, filter_bbox);
-        }
-
-        if stats.points.is_empty() && stats.entries_success > 0 {
-            println!("  No points found in bbox (data may be outside the query area)");
-        }
-
-        Ok(stats.points)
     }
 
-    /// Décompresse les entries COPC sélectionnées et retourne les points avec statistiques.
-    fn decompress_copc_entries(
-        file_buf: &[u8],
-        entries: &[&CopcEntry],
-        laz_vlr: &LazVlr,
-        hdr: &Las14Header,
+    /// Read COPC entries and return statistics
+    #[cfg(feature = "lidar-copc")]
+    fn read_copc_entries<R: std::io::Read + std::io::Seek>(
+        entry_reader: &mut las::CopcEntryReader<R>,
+        entries: &[las::copc::Entry],
         filter_bbox: Option<(f64, f64, f64, f64)>,
-    ) -> CopcReadStats {
-        let mut result_points: Vec<LidarPoint> = Vec::new();
-        let mut entries_processed = 0usize;
-        let mut entries_success = 0usize;
-        let mut entries_failed = 0usize;
+    ) -> CopcReadResult {
+        let mut all_points: Vec<las::Point> = Vec::new();
+        let mut chunk = Vec::new();
 
-        for (idx, entry) in entries.iter().enumerate() {
-            let chunk_start = entry.offset as usize;
-            let chunk_end = chunk_start + entry.byte_size as usize;
+        let mut entries_processed = 0;
+        let mut entries_success = 0;
+        let mut entries_failed = 0;
 
-            if chunk_end > file_buf.len() {
-                eprintln!(
-                    "  ⚠️  Chunk {} hors limites (offset={} size={} file_len={})",
-                    idx,
-                    entry.offset,
-                    entry.byte_size,
-                    file_buf.len()
-                );
-                entries_processed += 1;
-                entries_failed += 1;
+        for entry in entries {
+            if entry.point_count <= 0 {
                 continue;
             }
 
             entries_processed += 1;
-            let chunk_buf = &file_buf[chunk_start..chunk_end];
+            chunk.clear();
 
-            match decompress_copc_chunk(chunk_buf, laz_vlr, hdr.point_record_len, entry.point_count)
-            {
-                Ok(raw_points) => {
+            match entry_reader.read_entry_points(entry, &mut chunk) {
+                Ok(_) => {
                     entries_success += 1;
-                    let point_size = hdr.point_record_len as usize;
-                    let n = entry.point_count as usize;
 
-                    for i in 0..n {
-                        let raw = &raw_points[i * point_size..(i + 1) * point_size];
-                        let pt = decode_las14_point(raw, &hdr.scale, &hdr.coord_offset);
-
-                        // Filtre spatial précis post-décompression
-                        if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
-                            if pt.x < qx_min || pt.x > qx_max || pt.y < qy_min || pt.y > qy_max {
-                                continue;
-                            }
-                        }
-                        result_points.push(pt);
+                    // Apply spatial filter if provided
+                    if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
+                        let filtered: Vec<las::Point> = chunk
+                            .drain(..)
+                            .filter(|p| {
+                                p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max
+                            })
+                            .collect();
+                        all_points.extend(filtered);
+                    } else {
+                        all_points.extend(chunk.drain(..));
                     }
                 }
-                Err(e) => {
+                Err(_) => {
                     entries_failed += 1;
-                    // Log seulement les 10 premières erreurs pour ne pas noyer les logs
-                    if entries_failed <= 10 {
-                        eprintln!(
-                            "  ⚠️  Chunk {} (level={} vx={} vy={}): {}",
-                            idx, entry.level, entry.vx, entry.vy, e
-                        );
-                    }
                 }
             }
 
-            // Progress tous les 500 chunks
-            if (idx + 1) % 500 == 0 {
+            // Progress every 500 entries
+            if entries_processed % 500 == 0 {
                 println!(
                     "  Progress: {}/{} entries, {} points",
-                    idx + 1,
+                    entries_processed,
                     entries.len(),
-                    result_points.len()
+                    all_points.len()
                 );
             }
         }
 
-        CopcReadStats {
-            points: result_points,
-            entries_processed,
-            entries_success,
-            entries_failed,
-        }
-    }
-
-    fn read_as_standard_laz(
-        bytes: Vec<u8>,
-        filter_bbox: Option<(f64, f64, f64, f64)>,
-    ) -> Result<Vec<LidarPoint>> {
-        use std::io::Cursor;
-        println!("  📖 Reading as standard LAZ file...");
-        let cursor = Cursor::new(bytes);
-        let mut reader = las::Reader::new(cursor)
-            .map_err(|e| anyhow::anyhow!("Failed to create LAZ reader: {}", e))?;
-        let point_count = reader.header().number_of_points();
-        println!("  Header declares {} points", point_count);
-        let mut raw_points: Vec<las::Point> = Vec::with_capacity(point_count as usize);
-        let mut errors = 0;
-        for point_result in reader.points() {
-            match point_result {
-                Ok(p) => raw_points.push(p),
-                Err(_) => {
-                    errors += 1;
-                }
-            }
-        }
-        if errors > 0 {
-            eprintln!("  {} point read errors", errors);
-        }
-        println!("  Read {} points from LAZ", raw_points.len());
-
+        // Convert to LidarPoint
         #[cfg(feature = "rayon")]
-        let all_points: Vec<LidarPoint> = raw_points
+        let points: Vec<LidarPoint> = all_points
             .par_iter()
             .map(|p| LidarPoint {
                 x: p.x,
@@ -1394,7 +1331,7 @@ impl Lidar {
             .collect();
 
         #[cfg(not(feature = "rayon"))]
-        let all_points: Vec<LidarPoint> = raw_points
+        let points: Vec<LidarPoint> = all_points
             .iter()
             .map(|p| LidarPoint {
                 x: p.x,
@@ -1404,133 +1341,15 @@ impl Lidar {
             })
             .collect();
 
-        let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
-            Self::filter_points_with_spatial_index(&all_points, x_min, y_min, x_max, y_max)
-        } else {
-            all_points
-        };
-        println!("  Loaded {} points after spatial filter", file_points.len());
-        Ok(file_points)
+        CopcReadResult {
+            points,
+            entries_processed,
+            entries_success,
+            entries_failed,
+        }
     }
 
-    fn filter_points_with_spatial_index(
-        points: &[LidarPoint],
-        x_min: f64,
-        y_min: f64,
-        x_max: f64,
-        y_max: f64,
-    ) -> Vec<LidarPoint> {
-        let point_count = points.len();
-        if point_count < 10_000 {
-            return points
-                .iter()
-                .filter(|p| p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max)
-                .cloned()
-                .collect();
-        }
-        println!("  Building spatial index for {} points...", point_count);
-        let start = std::time::Instant::now();
-        let query_area = (x_max - x_min) * (y_max - y_min);
-        let sample_size = (point_count / 100).max(100).min(point_count);
-        let step = point_count / sample_size;
-        let mut data_min_x = f64::INFINITY;
-        let mut data_min_y = f64::INFINITY;
-        let mut data_max_x = f64::NEG_INFINITY;
-        let mut data_max_y = f64::NEG_INFINITY;
-        for i in (0..point_count).step_by(step.max(1)) {
-            let p = &points[i];
-            data_min_x = data_min_x.min(p.x);
-            data_min_y = data_min_y.min(p.y);
-            data_max_x = data_max_x.max(p.x);
-            data_max_y = data_max_y.max(p.y);
-        }
-        let data_area = (data_max_x - data_min_x) * (data_max_y - data_min_y);
-        let selectivity = if data_area > 0.0 {
-            query_area / data_area
-        } else {
-            1.0
-        };
-        println!("  📐 Query selectivity: {:.1}%", selectivity * 100.0);
-        let result = if selectivity > 0.5 || point_count < 100_000 {
-            let cell_size = ((data_max_x - data_min_x) / 100.0)
-                .max((data_max_y - data_min_y) / 100.0)
-                .max(10.0);
-            let grid_index = SpatialGridIndex::build_from_points(points, cell_size);
-            println!("  {}", grid_index.stats());
-            let candidate_indices = grid_index.query_bbox(x_min, y_min, x_max, y_max);
-            println!(
-                "  🔍 Grid query returned {} candidates",
-                candidate_indices.len()
-            );
-            candidate_indices
-                .into_iter()
-                .filter_map(|i| {
-                    let p = &points[i];
-                    if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
-                        Some(p.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        } else {
-            let quadtree = QuadtreeSpatialIndex::build(points);
-            println!("  {}", quadtree.stats());
-            let candidate_indices = quadtree.query_bbox(x_min, y_min, x_max, y_max);
-            println!(
-                "  🔍 Quadtree query returned {} candidates",
-                candidate_indices.len()
-            );
-            candidate_indices
-                .into_iter()
-                .filter_map(|i| {
-                    let p = &points[i];
-                    if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
-                        Some(p.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
-        println!(
-            "  Spatial indexing and query took {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-        result
-    }
-
-    #[cfg(feature = "rayon")]
-    fn filter_points_with_spatial_index_parallel(
-        points: &[LidarPoint],
-        x_min: f64,
-        y_min: f64,
-        x_max: f64,
-        y_max: f64,
-    ) -> Vec<LidarPoint> {
-        let point_count = points.len();
-        if point_count < 1_000_000 {
-            return Self::filter_points_with_spatial_index(points, x_min, y_min, x_max, y_max);
-        }
-        println!(
-            "  🚀 Using parallel spatial indexing for {} points...",
-            point_count
-        );
-        let start = std::time::Instant::now();
-        let chunk_size = 500_000;
-        let chunks: Vec<_> = points.chunks(chunk_size).collect();
-        let results: Vec<Vec<LidarPoint>> = chunks
-            .par_iter()
-            .map(|chunk| Self::filter_points_with_spatial_index(chunk, x_min, y_min, x_max, y_max))
-            .collect();
-        let result: Vec<LidarPoint> = results.into_iter().flatten().collect();
-        println!(
-            "  Parallel spatial filtering took {:.2}s",
-            start.elapsed().as_secs_f64()
-        );
-        result
-    }
-
+    /// Download full LAZ file with a single GET (fallback when Range is not supported).
     #[cfg(feature = "reqwest")]
     #[allow(dead_code)]
     fn download_laz_full_get(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
@@ -1586,9 +1405,12 @@ impl Lidar {
         }
     }
 
+    /// Download LAZ via HTTP Range: header first, then point data. Returns full file bytes.
+    /// Fails with Err if server does not support Range (206) or HEAD Content-Length.
     #[cfg(feature = "reqwest")]
     fn download_laz_via_range(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
-        const HEADER_RANGE_END: u64 = 4095;
+        const HEADER_RANGE_END: u64 = 4095; // bytes 0..4096
+
         let header_bytes = download_partial_laz(client, url, 0, HEADER_RANGE_END, None::<fn(u64)>)
             .map_err(|e| anyhow::anyhow!("Range request for header failed: {}", e))?;
         let parsed = parse_las_header_from_slice(&header_bytes)?;
@@ -1602,6 +1424,7 @@ impl Lidar {
                 content_length
             );
         }
+
         let header_buf: Vec<u8> = if offset <= (HEADER_RANGE_END + 1) {
             header_bytes.into_iter().take(offset as usize).collect()
         } else {
@@ -1646,6 +1469,8 @@ impl Lidar {
         Ok(full)
     }
 
+    /// Load a single LAZ file from URL or cache; used for parallel and sequential loading.
+    /// Creates its own HTTP client when downloading (safe for use from multiple threads).
     fn load_single_laz_file(
         &self,
         url: &str,
@@ -1653,14 +1478,18 @@ impl Lidar {
         filter_bbox: Option<(f64, f64, f64, f64)>,
     ) -> Result<Vec<LidarPoint>> {
         use std::io::Cursor;
+
         let cache_path = Self::cache_path_for_url(cache_dir, url);
+
         let map_reader_err = |e: las::Error| {
             if cache_path.exists() {
                 let _ = std::fs::remove_file(&cache_path);
             }
             anyhow::anyhow!("Failed to create LAS reader for {}: {}", url, e)
         };
+
         let mut reader = if cache_path.exists() {
+            // Verify cached file first
             match Self::verify_cached_file(&cache_path) {
                 Ok(true) => {
                     println!("Reading LAZ from cache: {:?}", cache_path);
@@ -1668,35 +1497,37 @@ impl Lidar {
                 Ok(false) | Err(_) => {
                     eprintln!("  Cached file appears corrupted, removing...");
                     let _ = std::fs::remove_file(&cache_path);
+                    // Fall through to download
                 }
             }
+
             if cache_path.exists() {
                 #[cfg(feature = "laz-memmap")]
-                {
-                    let use_mmap = std::fs::metadata(&cache_path)
-                        .map(|m| m.len() >= LAZ_MMAP_THRESHOLD_BYTES)
-                        .unwrap_or(false);
-                    if use_mmap {
-                        let file = std::fs::File::open(&cache_path)
-                            .context("Failed to open cached LAZ file")?;
-                        let mmap = unsafe {
-                            memmap2::Mmap::map(&file).context("Failed to mmap LAZ file")?
-                        };
-                        let wrapper = MmapReader { mmap, pos: 0 };
-                        las::Reader::new(wrapper).map_err(map_reader_err)?
-                    } else {
-                        las::Reader::from_path(&cache_path).map_err(map_reader_err)?
-                    }
+                let use_mmap = std::fs::metadata(&cache_path)
+                    .map(|m| m.len() >= LAZ_MMAP_THRESHOLD_BYTES)
+                    .unwrap_or(false);
+                #[cfg(feature = "laz-memmap")]
+                if use_mmap {
+                    let file = std::fs::File::open(&cache_path)
+                        .context("Failed to open cached LAZ file")?;
+                    let mmap =
+                        unsafe { memmap2::Mmap::map(&file).context("Failed to mmap LAZ file")? };
+                    let wrapper = MmapReader { mmap, pos: 0 };
+                    las::Reader::new(wrapper).map_err(map_reader_err)?
+                } else {
+                    las::Reader::from_path(&cache_path).map_err(map_reader_err)?
                 }
                 #[cfg(not(feature = "laz-memmap"))]
                 las::Reader::from_path(&cache_path).map_err(map_reader_err)?
             } else {
+                // File was removed, need to download
                 println!("🌐 Downloading LAZ: {} ...", url);
                 let client = reqwest::blocking::Client::builder()
                     .connect_timeout(std::time::Duration::from_secs(30))
                     .timeout(std::time::Duration::from_secs(600))
                     .build()
                     .context("Failed to create HTTP client")?;
+
                 let compressed_data = Self::download_with_verification(&client, url, &cache_path)?;
                 las::Reader::new(Cursor::new(compressed_data)).map_err(map_reader_err)?
             }
@@ -1707,8 +1538,10 @@ impl Lidar {
                 .timeout(std::time::Duration::from_secs(600))
                 .build()
                 .context("Failed to create HTTP client")?;
+
             let compressed_data: Vec<u8> = match Self::download_laz_via_range(&client, url) {
                 Ok(data) => {
+                    // Verify and cache
                     if data.len() < 4 || &data[0..4] != b"LASF" {
                         return Err(anyhow::anyhow!("Downloaded file is not a valid LAS/LAZ"));
                     }
@@ -1716,43 +1549,51 @@ impl Lidar {
                     println!("  Cached to: {:?}", cache_path);
                     data
                 }
-                Err(_) => Self::download_with_verification(&client, url, &cache_path)?,
+                Err(_) => {
+                    // Fallback: full GET (Range not supported or HEAD/parse failed)
+                    Self::download_with_verification(&client, url, &cache_path)?
+                }
             };
+
             las::Reader::new(Cursor::new(compressed_data)).map_err(map_reader_err)?
         };
 
         let point_count = reader.header().number_of_points() as usize;
         println!("  Header declares {} points", point_count);
+
         let mut raw_points: Vec<las::Point> = Vec::with_capacity(point_count);
         for point_result in reader.points() {
             if let Ok(p) = point_result {
                 raw_points.push(p);
             }
         }
+
         println!("  Read {} points", raw_points.len());
 
+        // Convert to LidarPoint
         #[cfg(feature = "rayon")]
         let all_points: Vec<LidarPoint> = raw_points
             .par_iter()
-            .map(|p| LidarPoint {
-                x: p.x,
-                y: p.y,
-                z: p.z,
-                classification: classification_to_u8(&p.classification),
+            .map(|point| LidarPoint {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+                classification: classification_to_u8(&point.classification),
             })
             .collect();
 
         #[cfg(not(feature = "rayon"))]
         let all_points: Vec<LidarPoint> = raw_points
             .iter()
-            .map(|p| LidarPoint {
-                x: p.x,
-                y: p.y,
-                z: p.z,
-                classification: classification_to_u8(&p.classification),
+            .map(|point| LidarPoint {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+                classification: classification_to_u8(&point.classification),
             })
             .collect();
 
+        // Apply spatial filtering using index if we have a bbox
         let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
             #[cfg(feature = "rayon")]
             {
@@ -1771,28 +1612,41 @@ impl Lidar {
         } else {
             all_points
         };
+
         println!("  Loaded {} points after spatial filter", file_points.len());
+
         Ok(file_points)
     }
 
+    /// Get LiDAR point cloud URLs from WFS service
+    /// Following Python: def _get_lidar_points(self)
+    /// Returns transformed bbox and list of LAZ file URLs
     fn get_lidar_points(&mut self) -> Result<(f64, f64, f64, f64, Vec<String>)> {
         let bbox = self
             .geo_core
             .get_bbox()
             .context("Bounding box must be set before getting LiDAR points")?;
+
         println!("Bounding box set");
+
+        // Transform bbox from EPSG:4326 to EPSG:2154
+        // Python: transformer = Transformer.from_crs("EPSG:4326", "EPSG:2154", always_xy=True)
         let transformer = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
             .context("Failed to create coordinate transformer")?;
+
         let (min_x, min_y) = transformer
             .convert((bbox.min_x, bbox.min_y))
             .context("Failed to transform min coordinates")?;
         let (max_x, max_y) = transformer
             .convert((bbox.max_x, bbox.max_y))
             .context("Failed to transform max coordinates")?;
+
+        // Create bbox string for WFS request
         let bbox_string = format!(
             "{},{},{},{}",
             bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x
         );
+
         let url = "https://data.geopf.fr/wfs/ows";
         let params = [
             ("service", "WFS"),
@@ -1802,16 +1656,21 @@ impl Lidar {
             ("outputFormat", "application/json"),
             ("bbox", &bbox_string),
         ];
+
         println!("🌐 Requesting LiDAR data from WFS...");
+
         let response = reqwest::blocking::Client::new()
             .get(url)
             .query(&params)
             .header("Accept", "application/json")
             .send()
             .context("Failed to send WFS request")?;
+
         let json: serde_json::Value = response
             .json()
             .context("Failed to parse WFS JSON response")?;
+
+        // Extract URLs from features
         let mut list_path_laz = Vec::new();
         if let Some(features) = json
             .get("features")
@@ -1827,12 +1686,21 @@ impl Lidar {
                 }
             }
         }
+
         println!("📍 Found {} LAZ file(s)", list_path_laz.len());
         println!("CRS: {}", self.geo_core.get_epsg());
+
+        // Store the URLs
         self.list_path_laz = Some(list_path_laz.clone());
+
         Ok((min_x, min_y, max_x, max_y, list_path_laz))
     }
 
+    /// Download and load LiDAR points from LAZ URLs (internal method)
+    /// Following Python: def load_lidar_points(self, laz_urls)
+    /// Returns vector of LidarPoint with (x, y, z, classification)
+    /// Uses las crate with laz-parallel feature for LAZ decompression.
+    /// If filter_bbox is Some((x_min, y_min, x_max, y_max)) in EPSG:2154, points outside are skipped during conversion.
     fn load_lidar_points_internal(
         &self,
         laz_urls: &[String],
@@ -1854,72 +1722,17 @@ impl Lidar {
                 None
             };
 
-            // COPC : séquentiel pour éviter le rate-limiting IGN (HTTP 429)
-            // LAZ standard : parallèle comme avant
-            let (copc_urls, laz_only_urls): (Vec<_>, Vec<_>) =
-                laz_urls.iter().partition(|u| Self::is_copc_url(u));
-
-            let mut all_points: Vec<LidarPoint> = Vec::new();
-
-            // --- COPC séquentiel avec retry/backoff ---
-            for (idx, url) in copc_urls.iter().enumerate() {
-                println!("\n📦 COPC {}/{}: {}", idx + 1, copc_urls.len(), url);
-                let mut attempt = 0u32;
-                loop {
-                    attempt += 1;
-                    match self.load_single_copc_file(url, &cache_dir, filter_bbox) {
-                        Ok(pts) => {
-                            println!("  ✅ {} points chargés", pts.len());
-                            all_points.extend(pts);
-                            break;
-                        }
-                        Err(e) => {
-                            let msg = e.to_string();
-                            let retryable = msg.contains("429")
-                                || msg.contains("Too Many Requests")
-                                || msg.contains("timed out")
-                                || msg.contains("connection reset");
-                            if retryable && attempt < 5 {
-                                let wait = 2u64.pow(attempt);
-                                eprintln!(
-                                    "  ⚠️  Erreur (tentative {}/5): {}. Retry dans {}s...",
-                                    attempt, msg, wait
-                                );
-                                std::thread::sleep(std::time::Duration::from_secs(wait));
-                            } else {
-                                eprintln!("  ❌ Échec COPC après {} tentative(s): {}", attempt, e);
-                                break;
-                            }
-                        }
+            let results: Vec<Result<Vec<LidarPoint>>> = laz_urls
+                .par_iter()
+                .map(|url| {
+                    let res = self.load_single_point_file(url, &cache_dir, filter_bbox);
+                    #[cfg(feature = "indicatif")]
+                    if let Some(ref pb) = overall_pb {
+                        pb.lock().unwrap().inc(1);
                     }
-                }
-                // Pause entre fichiers pour éviter 429
-                if idx + 1 < copc_urls.len() {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-                #[cfg(feature = "indicatif")]
-                if let Some(ref pb) = overall_pb {
-                    pb.lock().unwrap().inc(1);
-                }
-            }
-
-            // --- LAZ standard : parallèle ---
-            if !laz_only_urls.is_empty() {
-                let results: Vec<Result<Vec<LidarPoint>>> = laz_only_urls
-                    .par_iter()
-                    .map(|url| {
-                        let res = self.load_single_laz_file(url, &cache_dir, filter_bbox);
-                        #[cfg(feature = "indicatif")]
-                        if let Some(ref pb) = overall_pb {
-                            pb.lock().unwrap().inc(1);
-                        }
-                        res
-                    })
-                    .collect();
-                let vecs: Vec<Vec<LidarPoint>> =
-                    results.into_iter().collect::<Result<Vec<_>, _>>()?;
-                all_points.extend(vecs.into_iter().flatten());
-            }
+                    res
+                })
+                .collect();
 
             #[cfg(feature = "indicatif")]
             if let Some(ref pb) = overall_pb {
@@ -1928,6 +1741,8 @@ impl Lidar {
                     .finish_with_message("All files processed");
             }
 
+            let vecs: Vec<Vec<LidarPoint>> = results.into_iter().collect::<Result<Vec<_>, _>>()?;
+            let all_points: Vec<LidarPoint> = vecs.into_iter().flatten().collect();
             if all_points.is_empty() {
                 anyhow::bail!("No LiDAR points were loaded from any file");
             }
@@ -1952,32 +1767,18 @@ impl Lidar {
 
             for (idx, url) in laz_urls.iter().enumerate() {
                 println!("\nProcessing file {}/{}: {}", idx + 1, laz_urls.len(), url);
-                let mut attempt = 0u32;
-                loop {
-                    attempt += 1;
-                    match self.load_single_point_file(url, &cache_dir, filter_bbox) {
-                        Ok(points) => {
-                            println!("  Loaded {} points", points.len());
-                            all_points.extend(points);
-                            break;
-                        }
-                        Err(e) => {
-                            let msg = e.to_string();
-                            let retryable = Self::is_copc_url(url)
-                                && (msg.contains("429")
-                                    || msg.contains("Too Many Requests")
-                                    || msg.contains("timed out"));
-                            if retryable && attempt < 5 {
-                                let wait = 2u64.pow(attempt);
-                                eprintln!("  ⚠️  Retry {}/5 dans {}s: {}", attempt, wait, msg);
-                                std::thread::sleep(std::time::Duration::from_secs(wait));
-                            } else {
-                                eprintln!("  ❌ Failed to load: {}", e);
-                                break;
-                            }
-                        }
+
+                match self.load_single_point_file(url, &cache_dir, filter_bbox) {
+                    Ok(points) => {
+                        println!("  Loaded {} points", points.len());
+                        all_points.extend(points);
+                    }
+                    Err(e) => {
+                        eprintln!("  ❌ Failed to load: {}", e);
+                        // Continue with other files
                     }
                 }
+
                 #[cfg(feature = "indicatif")]
                 if let Some(ref pb) = overall_pb {
                     pb.inc(1);
@@ -1993,11 +1794,15 @@ impl Lidar {
             if all_points.is_empty() {
                 anyhow::bail!("No LiDAR points were loaded from any file");
             }
+
             println!("\nTotal points loaded: {}", all_points.len());
             Ok(all_points)
         }
     }
 
+    /// Process LiDAR points to create DSM, DTM, and CHM rasters
+    /// Following Python: def process_lidar_points(self, points, bbox, classification_list, resolution)
+    /// Returns ProcessedRasters with DSM, DTM, and CHM grids
     fn process_lidar_points(
         &self,
         points: Vec<LidarPoint>,
@@ -2006,11 +1811,16 @@ impl Lidar {
         resolution: f64,
     ) -> Result<ProcessedRasters> {
         let (x_min, y_min, x_max, y_max) = bbox;
+
+        // Filter points by spatial bbox
         let filtered_points: Vec<LidarPoint> = points
             .into_iter()
             .filter(|p| p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max)
             .collect();
+
         println!("Filtered {} points within bbox", filtered_points.len());
+
+        // Apply classification filter if provided
         let filtered_points: Vec<LidarPoint> = if let Some(ref class_list) = classification_list {
             filtered_points
                 .into_iter()
@@ -2019,25 +1829,38 @@ impl Lidar {
         } else {
             filtered_points
         };
+
         println!(
             "After classification filter: {} points",
             filtered_points.len()
         );
+
+        // Calculate grid dimensions
         let width = ((x_max - x_min) / resolution).ceil() as usize;
         let height = ((y_max - y_min) / resolution).ceil() as usize;
+
         println!(
             "Grid dimensions: {}x{} (resolution: {}m)",
             width, height, resolution
         );
+
+        // Initialize grids
         let mut dsm = vec![vec![f64::NEG_INFINITY; width]; height];
         let mut dtm = vec![vec![f64::NEG_INFINITY; width]; height];
+
+        // Process points to fill grids
         for point in &filtered_points {
+            // Calculate grid indices
             let col = ((point.x - x_min) / resolution).floor() as usize;
-            let row = ((y_max - point.y) / resolution).floor() as usize;
+            let row = ((y_max - point.y) / resolution).floor() as usize; // Y is inverted in raster
+
             if col < width && row < height {
+                // DSM: maximum z value per cell (all points)
                 if point.z > dsm[row][col] || dsm[row][col] == f64::NEG_INFINITY {
                     dsm[row][col] = point.z;
                 }
+
+                // DTM: maximum z value per cell for ground points only (classification 2)
                 if point.classification == 2 {
                     if point.z > dtm[row][col] || dtm[row][col] == f64::NEG_INFINITY {
                         dtm[row][col] = point.z;
@@ -2045,10 +1868,14 @@ impl Lidar {
                 }
             }
         }
+
+        // Fill DTM gaps using interpolation (simple: use nearest neighbor)
+        // For now, we'll use a simple approach: if a cell has no ground point, use the minimum of neighbors
         let mut dtm_filled = dtm.clone();
         for row in 0..height {
             for col in 0..width {
                 if dtm_filled[row][col] == f64::NEG_INFINITY {
+                    // Find minimum value from neighbors
                     let mut min_neighbor = f64::INFINITY;
                     for dr in [-1, 0, 1] {
                         for dc in [-1, 0, 1] {
@@ -2062,32 +1889,53 @@ impl Lidar {
                             }
                         }
                     }
-                    dtm_filled[row][col] = if min_neighbor != f64::INFINITY {
-                        min_neighbor
+                    if min_neighbor != f64::INFINITY {
+                        dtm_filled[row][col] = min_neighbor;
                     } else {
-                        0.0
-                    };
+                        dtm_filled[row][col] = 0.0; // Fallback
+                    }
                 }
             }
         }
+
+        // Calculate CHM = DSM - DTM
         let mut chm = vec![vec![0.0; width]; height];
         for row in 0..height {
             for col in 0..width {
                 if dsm[row][col] != f64::NEG_INFINITY && dtm_filled[row][col] != f64::NEG_INFINITY {
-                    chm[row][col] = (dsm[row][col] - dtm_filled[row][col]).max(0.0);
+                    chm[row][col] = dsm[row][col] - dtm_filled[row][col];
+                    // Ensure non-negative
+                    if chm[row][col] < 0.0 {
+                        chm[row][col] = 0.0;
+                    }
                 }
             }
         }
+
+        // Create GDAL-style transform
+        // [x_origin, pixel_width, 0, y_origin, 0, -pixel_height]
+        let transform = [
+            x_min,       // x_origin
+            resolution,  // pixel_width
+            0.0,         // rotation (not used)
+            y_max,       // y_origin
+            0.0,         // rotation (not used)
+            -resolution, // pixel_height (negative because Y increases downward)
+        ];
+
         Ok(ProcessedRasters {
             dsm,
             dtm: dtm_filled,
             chm,
             width,
             height,
-            transform: [x_min, resolution, 0.0, y_max, 0.0, -resolution],
+            transform,
         })
     }
 
+    /// Convert processed rasters to GeoTIFF file
+    /// Following Python: def to_tif(self, write_out_file, classification_list)
+    /// Creates a multi-band GeoTIFF with DSM, DTM, and CHM
     fn to_tif(
         &self,
         rasters: &ProcessedRasters,
@@ -2096,58 +1944,114 @@ impl Lidar {
     ) -> Result<PathBuf> {
         use gdal::raster::Buffer;
         use gdal::spatial_ref::SpatialRef;
+
+        // Create output directory if needed
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)
                 .context(format!("Failed to create output directory: {:?}", parent))?;
         }
+
         if write_out_file {
+            // Get GTiff driver
             let driver = gdal::DriverManager::get_driver_by_name("GTiff")
                 .context("Failed to get GTiff driver")?;
+
+            // Create dataset
             let mut dataset = driver
-                .create_with_band_type::<f64, _>(output_path, rasters.width, rasters.height, 3)
+                .create_with_band_type::<f64, _>(
+                    output_path,
+                    rasters.width,
+                    rasters.height,
+                    3, // 3 bands: DSM, DTM, CHM
+                )
                 .context("Failed to create GeoTIFF dataset")?;
+
+            // Set geotransform
             dataset
                 .set_geo_transform(&rasters.transform)
                 .context("Failed to set geotransform")?;
+
+            // Set spatial reference (EPSG:2154)
             let srs = SpatialRef::from_epsg(self.geo_core.get_epsg() as u32)
                 .context("Failed to create spatial reference")?;
             dataset
                 .set_spatial_ref(&srs)
                 .context("Failed to set spatial reference")?;
-            for (band_idx, (grid, nodata)) in [
-                (&rasters.dsm, f64::NAN),
-                (&rasters.dtm, f64::NAN),
-                (&rasters.chm, 0.0f64),
-            ]
-            .iter()
-            .enumerate()
+
+            // Write bands
+            // Band 1: DSM
             {
-                let mut band = dataset
-                    .rasterband(band_idx + 1)
-                    .context(format!("Failed to get band {}", band_idx + 1))?;
-                let data: Vec<f64> = grid
-                    .iter()
-                    .flat_map(|row| {
-                        row.iter().map(|&val| {
-                            if val == f64::NEG_INFINITY {
-                                *nodata
-                            } else {
-                                val
-                            }
-                        })
-                    })
-                    .collect();
+                let mut band = dataset.rasterband(1).context("Failed to get band 1")?;
+
+                // Convert 2D vec to flat array (row-major)
+                let mut data = Vec::with_capacity(rasters.width * rasters.height);
+                for row in &rasters.dsm {
+                    for &val in row {
+                        data.push(if val == f64::NEG_INFINITY {
+                            f64::NAN
+                        } else {
+                            val
+                        });
+                    }
+                }
+
                 let mut buffer = Buffer::new((rasters.width, rasters.height), data);
                 band.write((0, 0), (rasters.width, rasters.height), &mut buffer)
-                    .context(format!("Failed to write band {}", band_idx + 1))?;
-                band.set_no_data_value(Some(*nodata))
-                    .context(format!("Failed to set nodata for band {}", band_idx + 1))?;
+                    .context("Failed to write DSM band")?;
+                band.set_no_data_value(Some(f64::NAN))
+                    .context("Failed to set no data value for DSM")?;
             }
+
+            // Band 2: DTM
+            {
+                let mut band = dataset.rasterband(2).context("Failed to get band 2")?;
+
+                let mut data = Vec::with_capacity(rasters.width * rasters.height);
+                for row in &rasters.dtm {
+                    for &val in row {
+                        data.push(if val == f64::NEG_INFINITY {
+                            f64::NAN
+                        } else {
+                            val
+                        });
+                    }
+                }
+
+                let mut buffer = Buffer::new((rasters.width, rasters.height), data);
+                band.write((0, 0), (rasters.width, rasters.height), &mut buffer)
+                    .context("Failed to write DTM band")?;
+                band.set_no_data_value(Some(f64::NAN))
+                    .context("Failed to set no data value for DTM")?;
+            }
+
+            // Band 3: CHM
+            {
+                let mut band = dataset.rasterband(3).context("Failed to get band 3")?;
+
+                let mut data = Vec::with_capacity(rasters.width * rasters.height);
+                for row in &rasters.chm {
+                    for &val in row {
+                        data.push(val);
+                    }
+                }
+
+                let mut buffer = Buffer::new((rasters.width, rasters.height), data);
+                band.write((0, 0), (rasters.width, rasters.height), &mut buffer)
+                    .context("Failed to write CHM band")?;
+                band.set_no_data_value(Some(0.0))
+                    .context("Failed to set no data value for CHM")?;
+            }
+
             println!("GeoTIFF saved to: {:?}", output_path);
         }
+
         Ok(output_path.to_path_buf())
     }
 
+    /// Run the complete LiDAR processing workflow
+    /// Following Python workflow: load points → process → create GeoTIFF
+    /// Note: get_lidar_points() is now called in set_bbox(), so URLs are already available
+    /// Returns path to the created GeoTIFF file
     pub fn run(
         &mut self,
         file_name: Option<String>,
@@ -2156,43 +2060,60 @@ impl Lidar {
         write_out_file: bool,
     ) -> Result<PathBuf> {
         let resolution = resolution.unwrap_or(1.0);
+
+        // Get LAZ file URLs (already fetched in set_bbox)
         let laz_urls = self
             .list_path_laz
             .as_ref()
             .context("No LAZ URLs available. Call set_bbox() first.")?;
+
         if laz_urls.is_empty() {
             anyhow::bail!("No LAZ files found for the specified bounding box");
         }
+
+        // Get bbox for processing (already transformed in get_lidar_points)
         let bbox = self
             .geo_core
             .get_bbox()
             .context("Bounding box must be set")?;
+
+        // Transform bbox from EPSG:4326 to EPSG:2154 (same as in get_lidar_points)
         let transformer = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
             .context("Failed to create coordinate transformer")?;
+
         let (min_x, min_y) = transformer
             .convert((bbox.min_x, bbox.min_y))
             .context("Failed to transform min coordinates")?;
         let (max_x, max_y) = transformer
             .convert((bbox.max_x, bbox.max_y))
             .context("Failed to transform max coordinates")?;
+
+        // Use already loaded points (loaded in set_bbox)
         let points = self
             .loaded_points
             .as_ref()
             .context("No LiDAR points loaded. Call set_bbox() first.")?
             .clone();
+
+        // Process points to create rasters
         let rasters = self.process_lidar_points(
             points,
             (min_x, min_y, max_x, max_y),
             classification_list,
             resolution,
         )?;
+
+        // Create GeoTIFF
         let output_file = self
             .output_path
             .join(file_name.unwrap_or("lidar_cdsm.tif".to_string()));
         let output_path = self.to_tif(&rasters, &output_file, write_out_file)?;
+
         Ok(output_path)
     }
 
+    /// Export loaded LiDAR points (ROI of the current BBOX) to a LAS file.
+    /// Call set_bbox() first to load points. Use .las for uncompressed or .laz for compressed output.
     #[cfg(feature = "las")]
     pub fn save_las(&self, path: &Path) -> Result<PathBuf> {
         let points = self
@@ -2202,6 +2123,7 @@ impl Lidar {
         if points.is_empty() {
             anyhow::bail!("No LiDAR points to export. Call set_bbox() first.");
         }
+
         let (min_x, min_y, min_z, _max_x, _max_y, _max_z) = points.iter().fold(
             (
                 f64::INFINITY,
@@ -2222,7 +2144,9 @@ impl Lidar {
                 )
             },
         );
+
         let mut builder = las::Builder::from((1, 4));
+        // Format 0: no GPS time, no RGB — matches our Point (classification + return_number only).
         builder.point_format = las::point::Format::new(0).context("Invalid point format")?;
         builder.transforms = las::Vector {
             x: las::Transform {
@@ -2241,16 +2165,20 @@ impl Lidar {
         let header = builder
             .into_header()
             .context("Failed to build LAS header")?;
+
         let out_path: PathBuf = if path.is_absolute() {
             path.to_path_buf()
         } else {
             self.output_path.join(path)
         };
+
         if let Some(parent) = out_path.parent() {
             std::fs::create_dir_all(parent).context("Failed to create output directory for LAS")?;
         }
+
         let mut writer =
             las::Writer::from_path(&out_path, header).context("Failed to create LAS writer")?;
+
         for p in points {
             let classification = las::point::Classification::new(p.classification)
                 .unwrap_or(las::point::Classification::Unclassified);
@@ -2263,10 +2191,14 @@ impl Lidar {
                 number_of_returns: 1,
                 ..Default::default()
             };
-            writer
-                .write_point(las_point)
-                .map_err(|e| anyhow::anyhow!("Failed to write LAS point: {}", e))?;
+            writer.write_point(las_point).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to write LAS point (check coordinates/format): {}",
+                    e
+                )
+            })?;
         }
+
         writer.close().context("Failed to close LAS writer")?;
         Ok(out_path)
     }
@@ -2308,131 +2240,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_copc_info() {
-        let mut buf = vec![0u8; 160];
-        buf[0..8].copy_from_slice(&1.0f64.to_le_bytes());
-        buf[8..16].copy_from_slice(&2.0f64.to_le_bytes());
-        buf[16..24].copy_from_slice(&3.0f64.to_le_bytes());
-        buf[24..32].copy_from_slice(&500.0f64.to_le_bytes());
-        buf[32..40].copy_from_slice(&1.0f64.to_le_bytes());
-        buf[40..48].copy_from_slice(&1024u64.to_le_bytes());
-        buf[48..56].copy_from_slice(&256u64.to_le_bytes());
-        let info = parse_copc_info(&buf).unwrap();
-        assert_eq!(info.center_x, 1.0);
-        assert_eq!(info.center_y, 2.0);
-        assert_eq!(info.halfsize, 500.0);
-        assert_eq!(info.root_hier_offset, 1024);
-        assert_eq!(info.root_hier_size, 256);
-    }
-
-    #[test]
-    fn test_copc_entry_bounds_xy() {
-        let info = CopcInfo {
-            center_x: 0.0,
-            center_y: 0.0,
-            center_z: 0.0,
-            halfsize: 1000.0,
-            spacing: 1.0,
-            root_hier_offset: 0,
-            root_hier_size: 0,
-        };
-        // Niveau 0 (racine) : node_size = 1000 / 2^0 = 1000
-        // vx=0 vy=0 → min_x = 0 - 1000 + 0*1000 = -1000, max_x = 0
-        // Attendu : min=-1000, max=1000? Non : le nœud racine entier couvre [-1000,1000]
-        // Formule : min_x = center_x - halfsize + vx * node_size = 0 - 1000 + 0*1000 = -1000
-        //           max_x = min_x + node_size = -1000 + 1000 = 0  ← le nœud (0,0) à level 0
-        // MAIS avec level 0, il n'y a qu'un seul nœud racine. Dans la spec COPC :
-        // "The root node (level 0) covers [center - halfsize, center + halfsize]"
-        // La formule donne pour (0,0,0) : min_x=-1000, max_x=0 ← incorrect pour la racine unique.
-        // Ceci est correct pour une décomposition en 4 quadrants à level 0.
-        // Pour level 1, vx=1, vy=1 : node_size=500, min_x = -1000+1*500=-500, max_x=0
-        let entry_root = CopcEntry {
-            level: 0,
-            vx: 0,
-            vy: 0,
-            vz: 0,
-            offset: 0,
-            byte_size: 0,
-            point_count: 1,
-        };
-        let (min_x, min_y, max_x, max_y) = copc_entry_bounds_xy(&entry_root, &info);
-        assert!((min_x - (-1000.0)).abs() < 1e-9);
-        assert!((min_y - (-1000.0)).abs() < 1e-9);
-        assert!(
-            (max_x - 0.0).abs() < 1e-9,
-            "max_x should be 0, got {}",
-            max_x
-        );
-        assert!((max_y - 0.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_copc_entry_intersects() {
-        let info = CopcInfo {
-            center_x: 0.0,
-            center_y: 0.0,
-            center_z: 0.0,
-            halfsize: 1000.0,
-            spacing: 1.0,
-            root_hier_offset: 0,
-            root_hier_size: 0,
-        };
-        // Level 1, vx=1, vy=1 : node_size=500, min=(-500,-500), max=(0,0)
-        let entry = CopcEntry {
-            level: 1,
-            vx: 1,
-            vy: 1,
-            vz: 0,
-            offset: 0,
-            byte_size: 0,
-            point_count: 1,
-        };
-        assert!(copc_entry_intersects(
-            &entry, &info, -600.0, -600.0, -100.0, -100.0
-        ));
-        assert!(!copc_entry_intersects(
-            &entry, &info, 100.0, 100.0, 500.0, 500.0
-        ));
-    }
-
-    #[test]
-    fn test_parse_hierarchy_page() {
-        let mut buf = vec![0u8; 32];
-        buf[0..4].copy_from_slice(&1i32.to_le_bytes());
-        buf[4..8].copy_from_slice(&2i32.to_le_bytes());
-        buf[8..12].copy_from_slice(&3i32.to_le_bytes());
-        buf[12..16].copy_from_slice(&4i32.to_le_bytes());
-        buf[16..24].copy_from_slice(&1000u64.to_le_bytes());
-        buf[24..28].copy_from_slice(&500i32.to_le_bytes());
-        buf[28..32].copy_from_slice(&100i32.to_le_bytes());
-        let entries = parse_hierarchy_page(&buf);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].level, 1);
-        assert_eq!(entries[0].vx, 2);
-        assert_eq!(entries[0].vy, 3);
-        assert_eq!(entries[0].offset, 1000);
-        assert_eq!(entries[0].byte_size, 500);
-        assert_eq!(entries[0].point_count, 100);
-    }
-
-    #[test]
-    fn test_decode_las14_point() {
-        let scale = [0.01, 0.01, 0.01];
-        let coord_offset = [0.0, 0.0, 0.0];
-        let mut raw = vec![0u8; 20];
-        raw[0..4].copy_from_slice(&10000i32.to_le_bytes()); // X=100.0
-        raw[4..8].copy_from_slice(&20000i32.to_le_bytes()); // Y=200.0
-        raw[8..12].copy_from_slice(&5000i32.to_le_bytes()); // Z=50.0
-        raw[16] = 2; // classification = Ground
-        let pt = decode_las14_point(&raw, &scale, &coord_offset);
-        assert!((pt.x - 100.0).abs() < 1e-9);
-        assert!((pt.y - 200.0).abs() < 1e-9);
-        assert!((pt.z - 50.0).abs() < 1e-9);
-        assert_eq!(pt.classification, 2);
-    }
-
-    #[test]
     fn test_spatial_grid_index() {
+        // Create test points
         let points = vec![
             LidarPoint {
                 x: 0.0,
@@ -2465,16 +2274,25 @@ mod tests {
                 classification: 2,
             },
         ];
+
+        // Build index with 10m cell size
         let index = SpatialGridIndex::build_from_points(&points, 10.0);
+
+        // Query for points in [0, 0] to [12, 12]
         let candidates = index.query_bbox(0.0, 0.0, 12.0, 12.0);
+
+        // Should return indices for first 3 points
         assert!(candidates.contains(&0));
         assert!(candidates.contains(&1));
         assert!(candidates.contains(&2));
+
+        // Point at (100, 100) should not be in results
         assert!(!candidates.contains(&4));
     }
 
     #[test]
     fn test_quadtree_spatial_index() {
+        // Create test points in a grid pattern
         let mut points = Vec::new();
         for i in 0..100 {
             for j in 0..100 {
@@ -2486,12 +2304,21 @@ mod tests {
                 });
             }
         }
+
+        // Build quadtree
         let quadtree = QuadtreeSpatialIndex::build(&points);
+
+        // Query small bbox
         let candidates = quadtree.query_bbox(45.0, 45.0, 55.0, 55.0);
+
+        // Should have ~4 points (those at 50,50 area)
         assert!(!candidates.is_empty());
-        assert!(candidates.len() < 100);
+        assert!(candidates.len() < 100); // Much less than total
+
+        // Verify all candidates are actually in or near bbox
         for &idx in &candidates {
             let p = &points[idx];
+            // Points should be near the query bbox (within one cell)
             assert!(p.x >= 40.0 && p.x <= 60.0);
             assert!(p.y >= 40.0 && p.y <= 60.0);
         }
@@ -2500,12 +2327,15 @@ mod tests {
     #[test]
     fn test_grid_cell_key() {
         let index = SpatialGridIndex::new(10.0, Some((0.0, 0.0, 100.0, 100.0)));
+
         let key1 = index.cell_key(5.0, 5.0);
         assert_eq!(key1.col, 0);
         assert_eq!(key1.row, 0);
+
         let key2 = index.cell_key(15.0, 25.0);
         assert_eq!(key2.col, 1);
         assert_eq!(key2.row, 2);
+
         let key3 = index.cell_key(-5.0, -5.0);
         assert_eq!(key3.col, -1);
         assert_eq!(key3.row, -1);
@@ -2513,6 +2343,7 @@ mod tests {
 
     #[test]
     fn test_filter_points_with_spatial_index_small() {
+        // Small dataset - should use linear scan
         let points: Vec<LidarPoint> = (0..100)
             .map(|i| LidarPoint {
                 x: i as f64,
@@ -2521,13 +2352,17 @@ mod tests {
                 classification: 2,
             })
             .collect();
+
         let filtered = Lidar::filter_points_with_spatial_index(&points, 25.0, 25.0, 75.0, 75.0);
+
+        // Should have points from 25 to 75 inclusive
         assert_eq!(filtered.len(), 51);
         assert!(filtered.iter().all(|p| p.x >= 25.0 && p.x <= 75.0));
     }
 
     #[test]
     fn test_filter_points_with_spatial_index_large() {
+        // Large dataset - should use spatial index
         let points: Vec<LidarPoint> = (0..50_000)
             .map(|i| LidarPoint {
                 x: (i % 1000) as f64,
@@ -2536,7 +2371,10 @@ mod tests {
                 classification: 2,
             })
             .collect();
+
         let filtered = Lidar::filter_points_with_spatial_index(&points, 100.0, 100.0, 200.0, 200.0);
+
+        // All filtered points should be in bbox
         assert!(filtered
             .iter()
             .all(|p| p.x >= 100.0 && p.x <= 200.0 && p.y >= 100.0 && p.y <= 200.0));
@@ -2545,9 +2383,14 @@ mod tests {
     #[test]
     fn test_octree_node_quadrant() {
         let node = OctreeNode::new_leaf((0.0, 0.0, 0.0, 100.0, 100.0, 100.0), 0);
+
+        // SW quadrant
         assert_eq!(node.quadrant_for_point(25.0, 25.0), 0);
+        // SE quadrant
         assert_eq!(node.quadrant_for_point(75.0, 25.0), 1);
+        // NW quadrant
         assert_eq!(node.quadrant_for_point(25.0, 75.0), 2);
+        // NE quadrant
         assert_eq!(node.quadrant_for_point(75.0, 75.0), 3);
     }
 }

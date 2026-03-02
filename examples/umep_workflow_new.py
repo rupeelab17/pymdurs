@@ -79,8 +79,8 @@ def main():
 
     # Bounding box (La Rochelle area, France)
     # Format: min_x, min_y, max_x, max_y (WGS84, EPSG:4326)
-    # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
-    bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
+    bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
+
     # Convert bbox to Lambert-93 (EPSG:2154) with GeoPandas
     minx, miny, maxx, maxy = bbox_wgs84
     geom_wgs84 = box(minx, miny, maxx, maxy)
@@ -306,15 +306,9 @@ def main():
         config = solweig.ModelConfig.defaults()
         config.save("my_config.json")
 
-        location = solweig.Location(
-            latitude=46.1843, longitude=-1.1437, utc_offset=1
-        )  # La Rochelle
-
-        # Calculate timeseries (use calculate_timeseries for a list of Weather)
+        # Calculate timeseries
         results = solweig.calculate(
             surface=surface,
-            weather=weather_list,
-            location=location,
             physics=physics,
             materials=materials,
             human=solweig.HumanParams(
@@ -324,6 +318,7 @@ def main():
                 height=1.65,  # 165 cmrm
                 posture="sitting",
             ),
+            weather=weather_list,
             use_anisotropic_sky=True,  # Uses SVF (computed automatically if needed)
             conifer=False,  # Use seasonal leaf on/off (set True for evergreen trees)
             output_dir=str(output_path),

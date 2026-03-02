@@ -4,7 +4,7 @@ mod bindings;
 
 use bindings::{
     PyBoundingBox, PyBuilding, PyCadastre, PyCosia, PyDem, PyGeoCore, PyIris, PyLcz, PyLidar, PyRnb,
-    PyRoad, PyVegetation, PyWater, PyWindConfig, PyWindField,
+    PyRoad, PyVegetation, PyWater,
 };
 
 /// Python bindings for pymdurs
@@ -14,7 +14,6 @@ use bindings::{
 fn pymdurs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register submodules
     register_geometric_module(m)?;
-    register_thermal_module(m)?;
 
     // Register core classes
     m.add_class::<PyBoundingBox>()?;
@@ -71,17 +70,5 @@ fn register_geometric_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
     // Then add to parent module - this makes it accessible as pymdurs.geometric
     py_module.add_submodule(&submodule)?;
 
-    Ok(())
-}
-
-fn register_thermal_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
-    let py = py_module.py();
-    let submodule = PyModule::new(py, "thermal")?;
-    submodule.add("__doc__", "Urban wind field (Röckle model) for UTCI pipeline.")?;
-    submodule.add_class::<PyWindField>()?;
-    submodule.add_class::<PyWindConfig>()?;
-    submodule.setattr("WindField", submodule.getattr("PyWindField")?)?;
-    submodule.setattr("WindConfig", submodule.getattr("PyWindConfig")?)?;
-    py_module.add_submodule(&submodule)?;
     Ok(())
 }

@@ -9,10 +9,9 @@ homepage = "https://github.com/rupeelab17/rsmdu"
 documentation = "https://github.com/rupeelab17/rsmdu#readme"
 
 [features]
-default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "laz", "zip", "tempfile", "geos", "chrono", "quick-xml", "indicatif", "rayon", "laz-memmap", "ndarray"]
+default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "zip", "tempfile", "geos", "chrono", "quick-xml", "indicatif", "rayon", "laz-memmap"]
 wasm = []
 umep = []
-gdal_src = ["gdal/gdal-src"]
 # Use memory-mapped I/O for large cached LAZ files (>50 MiB) to reduce RAM usage
 laz-memmap = ["memmap2"]
 # COPC (Cloud Optimized Point Cloud) support via las::copc::CopcEntryReader
@@ -24,8 +23,7 @@ geo = { version = "0.28", features = ["serde"] }
 geojson = "0.24"
 geos = { version = "10.0", features = ["geo"], optional = true }
 geotiff = { version = "0.1", optional = true }
-# 0.31 required for proj-sys 0.27 compatibility with gdal/gdal-src
-proj = { version = "0.31", optional = true }
+proj = { version = "0.28", optional = true }
 gdal = { version = "0.19", features = ["bindgen"], optional = true }
 rstar = "0.12"
 
@@ -53,12 +51,11 @@ zip = { version = "0.6", optional = true }
 tempfile = { version = "3.8", optional = true }
 indicatif = { version = "0.17", optional = true }
 rayon = { version = "1.10", optional = true }
-ndarray = { version = "0.16", optional = true }
 
 # LiDAR processing
 las = { version = "0.9", features = ["laz-parallel"], optional = true }
 # "copc" feature enabled via lidar-copc for CopcEntryReader
-laz = { version = "0.12", optional = true }
+laz = { version = "0.10", optional = true }
 memmap2 = { version = "0.9", optional = true }
 
 

@@ -329,7 +329,7 @@ impl IgnCollect {
         // Add Bbox if not in filter (following Python: Bbox=self._Bbox)
         if use_bbox_in_url {
             request_url.push_str(&format!(
-                "&Bbox={},{},{},{}&CRS=EPSG:4326",
+                "&BBOX={},{},{},{}&CRS=EPSG:4326",
                 bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x,
             ));
         }
@@ -443,7 +443,7 @@ impl IgnCollect {
                 format!("{}?", url)
             };
             format!(
-                "{}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&CRS=EPSG:4326&Bbox={}&WIDTH={}&HEIGHT={}&FORMAT=image/geotiff&TRANSPARENT=true&STYLES=normal&EXCEPTIONS=text/xml",
+                "{}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&CRS=EPSG:4326&BBOX={}&WIDTH={}&HEIGHT={}&FORMAT=image/geotiff&TRANSPARENT=true&STYLES=normal&EXCEPTIONS=text/xml",
                 base_url, typename, bbox_str, width_px, height_px
             )
         };

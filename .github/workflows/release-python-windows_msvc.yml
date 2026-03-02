@@ -67,7 +67,7 @@ jobs:
   build-wheels:
     needs: [build-sdist]
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -92,10 +92,6 @@ jobs:
       - name: Setup MSVC dev environment
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install CMake and Ninja
-        shell: pwsh
-        run: choco install cmake ninja -y
-
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -105,11 +101,10 @@ jobs:
           channel-priority: strict
           auto-activate-base: false
 
-      - name: Install GEOS/PROJ/SQLite via Conda
+      - name: Install GDAL/GEOS/PROJ via Conda
         shell: pwsh
         run: |
-          # gdal-src compile GDAL lui-même — on installe seulement ses dépendances
-          conda install -y -c conda-forge geos proj sqlite tiff
+          conda install -y -c conda-forge gdal libgdal geos proj sqlite
 
           $condaEnv = (conda info --json | ConvertFrom-Json).active_prefix
           $libRoot  = "$condaEnv\Library"
@@ -120,10 +115,21 @@ jobs:
 
           Write-Host "Active env : $condaEnv"
 
+          # Créer gdal_i.lib depuis gdal.lib
+          if (-not (Test-Path "$libDir\gdal_i.lib")) {
+            Copy-Item "$libDir\gdal.lib" "$libDir\gdal_i.lib"
+            Write-Host "gdal_i.lib created"
+          }
+
           $geosVersion = (conda list geos --json | ConvertFrom-Json | Where-Object { $_.name -eq "geos" }).version
           $projVersion = (conda list proj --json | ConvertFrom-Json | Where-Object { $_.name -eq "proj" }).version
-          Write-Host "GEOS=$geosVersion PROJ=$projVersion"
+          $gdalVersion = (conda list gdal --json | ConvertFrom-Json | Where-Object { $_.name -eq "gdal" }).version
+          Write-Host "GDAL=$gdalVersion GEOS=$geosVersion PROJ=$projVersion"
 
+          echo "GDAL_HOME=$condaEnv"                 >> $env:GITHUB_ENV
+          echo "GDAL_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
+          echo "GDAL_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
+          echo "GDAL_VERSION=$gdalVersion"           >> $env:GITHUB_ENV
           echo "GEOS_LIB_DIR=$libDir"                >> $env:GITHUB_ENV
           echo "GEOS_INCLUDE_DIR=$incDir"            >> $env:GITHUB_ENV
           echo "GEOS_VERSION=$geosVersion"           >> $env:GITHUB_ENV
@@ -151,7 +157,6 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
-            --features gdal_src
           maturin-version: 1.11.4
 
       - name: Test wheel

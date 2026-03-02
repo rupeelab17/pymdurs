@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use rsmdu::geometric::lidar::Lidar;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::bindings::geo_core::PyGeoCore;
 
@@ -105,7 +105,7 @@ impl PyLidar {
     fn save(&self, filename: &str) -> PyResult<String> {
         self.inner
             .save_las(Path::new(filename))
-            .map(|p: PathBuf| p.to_string_lossy().to_string())
+            .map(|p| p.to_string_lossy().to_string())
             .map_err(|e| PyValueError::new_err(format!("Failed to save LAS: {}", e)))
     }
 
