@@ -14,6 +14,7 @@ pub mod rnb;
 pub mod road;
 pub mod vegetation;
 pub mod water;
+pub mod wind;
 
 // Re-export all bindings for convenience
 pub use bounding_box::PyBoundingBox;
@@ -29,3 +30,4 @@ pub use rnb::PyRnb;
 pub use road::PyRoad;
 pub use vegetation::PyVegetation;
 pub use water::PyWater;
+pub use wind::{PyWindConfig, PyWindField};

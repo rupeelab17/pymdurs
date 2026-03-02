@@ -291,6 +291,53 @@ python examples/umep_workflow_new.py
 
 ---
 
+### 15. `wind_field_from_ign.py`
+
+Urban wind field (Röckle model) without QGIS: computes `wind_speed.tif` and `wind_direction.tif` from DEM, DSM, and buildings for use in UTCI/SOLWEIG pipelines.
+
+**Run:**
+
+```bash
+python examples/wind_field_from_ign.py
+```
+
+**What this example does:**
+
+- Optionally downloads DEM and/or generates DSM from LiDAR if not present in `./output`
+- Loads buildings from the IGN API
+- Runs the Röckle wind solver (`pymdurs.thermal.WindField`) in parallel
+- Writes `wind_speed.tif` and `wind_direction.tif` to the output folder
+
+**Output:** `./output/wind_speed.tif`, `./output/wind_direction.tif` (same grid as DEM/DSM).
+
+---
+
+### 16. `utci_rockle_epw.py`
+
+UTCI with Röckle wind field and pythermalcomfort: computes wind speed per pixel for 10 directions (0°, 36°, …, 324°) via the Röckle model, loads weather from an EPW file, runs SOLWEIG for Tmrt, then computes UTCI with `pythermalcomfort` using per-pixel wind speed and writes GeoTIFFs.
+
+**Run:**
+
+```bash
+python examples/utci_rockle_epw.py
+```
+
+**What this example does:**
+
+- Reuses DEM/DSM (and optionally CDSM/landcover) from `output/umep_workflow` or `output/`
+- Loads buildings from the IGN API
+- Runs the Röckle wind solver for 10 wind directions and saves `wind_speed_000.tif` … `wind_speed_324.tif` under `output/utci_rockle/wind_10dir/`
+- Loads weather (Ta, RH, wind speed, wind direction) from an EPW file (e.g. `la_rochelle_2025.epw`)
+- Runs SOLWEIG to get Tmrt per timestep
+- For each timestep: selects the nearest Röckle wind raster by EPW wind direction, scales by EPW wind speed, computes UTCI with `pythermalcomfort.models.utci(tdb, tr, v, rh)`, writes a GeoTIFF
+- Writes a mean UTCI GeoTIFF over the simulated period
+
+**Output:** `./output/utci_rockle/utci/utci_YYYYMMDD_HHMM.tif` (per timestep), `./output/utci_rockle/utci_mean.tif`.
+
+**Additional prerequisites:** `solweig`, `pythermalcomfort`, `rasterio`. Run `umep_workflow_new.py` or `wind_field_from_ign.py` first to have DEM/DSM (and optionally buildings); place `la_rochelle_2025.epw` in `examples/` or project root.
+
+---
+
 ## Prerequisites
 
 ### Rust installation

@@ -2,6 +2,7 @@ pub mod collect;
 pub mod commons;
 pub mod geo_core;
 pub mod geometric;
+pub mod thermal;
 
 // umep-rust integration
 // Urban Meteorology and Environmental Processing functionality
