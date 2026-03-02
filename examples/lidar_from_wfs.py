@@ -23,9 +23,9 @@ def main():
     lidar = pymdurs.geometric.Lidar(output_path="./output")
 
     # Set bounding box (La Rochelle area, France)
-    lidar.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
     # Load points (required for save_las)
-    # lidar.set_bbox(-1.148001, 46.184158, -1.145528, 46.185264)
+    lidar.set_bbox(-1.152223, 46.183282, -1.149637, 46.185459)
+    #    lidar.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
 
     # Set CRS (optional, defaults to EPSG:2154)
     lidar.set_crs(2154)
