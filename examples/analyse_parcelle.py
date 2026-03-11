@@ -385,6 +385,7 @@ def run_umep(output_path, dsm_path, cdsm_path, lc_path, weather_file, datetime_s
             # bbox=bbox_2154,  # Optional: specify extent
             pixel_size=1.0,  # Optional: specify resolution (default: from DSM),
             land_cover=str(lc_path),  # Grid with class IDs (0-7, 99-102),
+            cdsm_relative=False,
         )
 
         # Load weather from EPW fileVectorized COSIA
@@ -406,7 +407,7 @@ def run_umep(output_path, dsm_path, cdsm_path, lc_path, weather_file, datetime_s
                 abs_l=0.97,  # Higher longwave absorption
                 weight=70,  # 70 kg
                 height=1.65,  # 165 cmrm
-                posture="sitting",
+                posture="standing",
             ),
             weather=weather_list,
             use_anisotropic_sky=True,  # Uses SVF (computed automatically if needed)
