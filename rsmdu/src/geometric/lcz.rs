@@ -188,30 +188,18 @@ impl Lcz {
             .bbox
             .context("Bounding box must be set before running LCZ processing")?;
 
-        bbox.transform(4326, 2154)?;
-
-        println!("Bbox: {:?}", bbox);
+        println!("Bbox (EPSG:4326): {:?}", bbox);
 
         println!("Téléchargement du fichier ZIP depuis: {}", url);
 
         // 1. Télécharger et extraire le ZIP
-        //let temp_dir = self.download_and_extract_zip(url)?;
+        let temp_dir = self.download_and_extract_zip(url)?;
         // 2. Trouver le fichier .shp dans le dossier temporaire
-        //let shp_path = self.find_shapefile(&temp_dir)?;
-        let shp_path = PathBuf::from("/Users/Boris/Downloads/pymdurs/pymdurs/examples/output/lcz-spot-2022-la-rochelle/LCZ_SPOT_2022_La Rochelle.shp");
+        let shp_path = self.find_shapefile(&temp_dir)?;
 
         println!("Shapefile trouvé: {:?}", shp_path);
 
-        // 3. Convertir le shapefile en GeoJSON
-        // let geojson_path = temp_dir.path().join("lcz.geojson");
-        let geojson_path =
-            PathBuf::from("/Users/Boris/Downloads/pymdurs/pymdurs/examples/output/lcz_2.geojson");
-        self.shp_to_geojson(
-            shp_path.to_str().context("Invalid shapefile path")?,
-            geojson_path.to_str().context("Invalid GeoJSON path")?,
-        )?;
-
-        // 3. Lire le shapefile avec GDAL
+        // Lire le shapefile avec GDAL (no ogr2ogr step: conversion was unused and required CLI GDAL)
         let dataset = Dataset::open(&shp_path).context("Impossible d'ouvrir le shapefile")?;
 
         let mut layer = dataset
@@ -251,8 +239,8 @@ impl Lcz {
             println!("Bbox polygon (WKT): {}", wkt);
         }
 
-        // Convertir OGR Geometry en geo::Geometry pour l'intersection
-        let bbox_polygon_transformed = self.gdal_to_geo_geometry(&geom)?;
+        // Convertir OGR Geometry en geo::Geometry pour l'intersection (must use projected geom2)
+        let bbox_polygon_transformed = self.gdal_to_geo_geometry(&geom2)?;
         let bbox_polygon_geo = if let GeoGeometry::Polygon(p) = bbox_polygon_transformed {
             p
         } else {
@@ -497,29 +485,6 @@ impl Lcz {
         let ring = GeosGeometry::create_linear_ring(coords)?;
         let polygon = GeosGeometry::create_polygon(ring, vec![])?;
         Ok(polygon)
-    }
-
-    fn shp_to_geojson(&self, input: &str, output: &str) -> Result<()> {
-        // Use ogr2ogr command-line tool for reliable shapefile to GeoJSON conversion
-        // This is more reliable than using the GDAL Rust bindings directly
-        // which have complex API requirements for vector dataset creation
-        use std::process::Command;
-
-        let status = Command::new("ogr2ogr")
-            .arg("-f")
-            .arg("GeoJSON")
-            .arg(output)
-            .arg(input)
-            .status()
-            .context(
-                "Failed to execute ogr2ogr. Make sure GDAL is installed and ogr2ogr is in PATH",
-            )?;
-
-        if !status.success() {
-            anyhow::bail!("ogr2ogr failed to convert shapefile to GeoJSON");
-        }
-
-        Ok(())
     }
 
     /// Convert GDAL geometry to geo::Geometry
