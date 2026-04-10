@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use zip::ZipArchive;
 
 use crate::geo_core::{BoundingBox, GeoCore};
-use gdal::spatial_ref::{CoordTransform, SpatialRef};
+use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 use gdal::vector::Geometry as OgrGeometry;
 use gdal::vector::LayerAccess;
 use gdal::Dataset;
@@ -222,9 +222,12 @@ impl Lcz {
         let bbox_polygon = self.create_bbox(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y)?;
         // Géométrie OGR depuis WKT
 
-        // Définition des CRS
-        let src = SpatialRef::from_epsg(4326)?;
-        let dst = SpatialRef::from_epsg(2154)?;
+        // Définition des CRS — GDAL 3 utilise par défaut l'ordre EPSG:4326 (lat, lon) ;
+        // notre polygone WKT est en (lon, lat) comme en GIS classique.
+        let mut src = SpatialRef::from_epsg(4326)?;
+        src.set_axis_mapping_strategy(AxisMappingStrategy::TraditionalGisOrder);
+        let mut dst = SpatialRef::from_epsg(2154)?;
+        dst.set_axis_mapping_strategy(AxisMappingStrategy::TraditionalGisOrder);
         let wkt = bbox_polygon
             .to_wkt()
             .context("Failed to convert geometry to WKT")?;
