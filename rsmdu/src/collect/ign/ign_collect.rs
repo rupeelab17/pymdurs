@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, write, File};
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::collect::global_variables::TEMP_PATH;
 use crate::geo_core::{BoundingBox, GeoCore};
@@ -16,6 +17,23 @@ const IGN_CSV_URL: &str =
     "https://geoservices.ign.fr/sites/default/files/2026-02/Tableau-suivi-services-web-06-02-2026.csv";
 
 const CSV_NAME: &str = "Tableau-suivi-services-web-06-02-2026.csv";
+
+/// Client HTTP pour l'IGN : réponses WFS/WMS volumineuses, téléchargements longs.
+fn ign_http_client() -> Result<Client> {
+    Client::builder()
+        // Pas de timeout global par défaut sur `Client::new()` ; les bâtiments WFS peuvent
+        // dépasser plusieurs minutes sur une bbox dense.
+        .timeout(Duration::from_secs(900))
+        .connect_timeout(Duration::from_secs(120))
+        .user_agent(concat!(
+            "Mozilla/5.0 (compatible; pymdurs/0.1; ",
+            "+https://github.com/rupeelab17/rsmdu)"
+        ))
+        // Évite des coupures de flux observées avec HTTP/2 sur certains CDN.
+        .http1_only()
+        .build()
+        .context("Failed to build HTTP client for IGN requests")
+}
 
 /// CSV row structure for IGN services
 #[derive(Debug, Clone)]
@@ -145,7 +163,7 @@ impl IgnCollect {
         }
 
         // 4) Download from IGN and save to TEMP_PATH
-        let client = Client::new();
+        let client = ign_http_client()?;
         let response = client
             .get(IGN_CSV_URL)
             .send()
@@ -267,7 +285,7 @@ impl IgnCollect {
 
         println!("URL: {}", url);
 
-        let client = Client::new();
+        let client = ign_http_client()?;
 
         // Handle different service types based on key
         if matches!(
@@ -360,7 +378,15 @@ impl IgnCollect {
 
         let content_bytes = response
             .bytes()
-            .context("Failed to read response body")?
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to read WFS response body ({}): {}",
+                    e.status()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "?".to_string()),
+                    e
+                )
+            })?
             .to_vec();
 
         self.content = Some(content_bytes);
