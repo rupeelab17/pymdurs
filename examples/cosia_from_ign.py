@@ -270,7 +270,9 @@ def main(output_path: Path):
     # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
     #bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
     
-    bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
+    bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
+
+
     working_crs = 2154  # Lambert 93
 
     # Domain boundary GeoJSON export (e.g. for City4CFD domain_bnd)

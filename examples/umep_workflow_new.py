@@ -151,7 +151,8 @@ def main():
     # Format: min_x, min_y, max_x, max_y (WGS84, EPSG:4326)
     # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
     #bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
-    bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
+    #bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
+    bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
 
     # Convert bbox to Lambert-93 (EPSG:2154) with GeoPandas
     minx, miny, maxx, maxy = bbox_wgs84

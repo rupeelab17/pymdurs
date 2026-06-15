@@ -527,12 +527,15 @@ fn read_all_hierarchy_entries(file_buf: &[u8], info: &CopcInfo) -> Result<Vec<Co
 }
 
 /// Calcule le bounding box XY d'un nœud COPC.
-/// Formule spec COPC 1.0 : nodeSize = halfsize / 2^level
+/// Formule COPC 1.0 / laspy : le cube racine couvre [center ± halfsize],
+/// subdivisé en 2^level cellules de côté (2 * halfsize) / 2^level.
 fn copc_entry_bounds_xy(entry: &CopcEntry, info: &CopcInfo) -> (f64, f64, f64, f64) {
-    let node_size = info.halfsize / (1i64 << entry.level.max(0)) as f64;
-    let min_x = info.center_x - info.halfsize + entry.vx as f64 * node_size;
-    let min_y = info.center_y - info.halfsize + entry.vy as f64 * node_size;
-    (min_x, min_y, min_x + node_size, min_y + node_size)
+    let side_size = (2.0 * info.halfsize) / (1u64 << entry.level.max(0)) as f64;
+    let root_min_x = info.center_x - info.halfsize;
+    let root_min_y = info.center_y - info.halfsize;
+    let min_x = root_min_x + entry.vx as f64 * side_size;
+    let min_y = root_min_y + entry.vy as f64 * side_size;
+    (min_x, min_y, min_x + side_size, min_y + side_size)
 }
 
 /// Teste si un nœud COPC intersecte le bbox de requête (XY uniquement).
@@ -1238,6 +1241,15 @@ impl Lidar {
             all_entries.len()
         );
 
+        let leaf_entry_count = all_entries.iter().filter(|e| e.point_count > 0).count();
+        if entries_to_process.is_empty() && leaf_entry_count > 0 {
+            eprintln!(
+                "  ⚠️  COPC spatial filter matched 0 chunks ({} leaf entries in hierarchy), falling back to full LAZ read",
+                leaf_entry_count
+            );
+            return Self::read_as_standard_laz(bytes, filter_bbox);
+        }
+
         // --- 7 & 8. Décompresser chaque chunk et décoder les points ---
         let stats =
             Self::decompress_copc_entries(&bytes, &entries_to_process, &laz_vlr, &hdr, filter_bbox);
@@ -1255,18 +1267,20 @@ impl Lidar {
         }
         println!("     - Points loaded: {}", stats.points.len());
 
-        // --- 9. Fallback si taux d'échec trop élevé ---
+        // --- 9. Fallback si taux d'échec trop élevé ou aucun point ---
         let failure_rate = stats.entries_failed as f64 / stats.entries_processed.max(1) as f64;
-        if failure_rate > 0.5 && stats.entries_processed > 0 {
-            eprintln!(
-                "  High failure rate ({:.1}%), falling back to standard LAZ reader (using cached file)",
-                failure_rate * 100.0
-            );
+        if (failure_rate > 0.5 && stats.entries_processed > 0) || stats.points.is_empty() {
+            if stats.points.is_empty() && stats.entries_processed > 0 {
+                eprintln!(
+                    "  ⚠️  COPC decompression returned 0 points, falling back to full LAZ read"
+                );
+            } else if failure_rate > 0.5 {
+                eprintln!(
+                    "  High failure rate ({:.1}%), falling back to standard LAZ reader (using cached file)",
+                    failure_rate * 100.0
+                );
+            }
             return Self::read_as_standard_laz(bytes, filter_bbox);
-        }
-
-        if stats.points.is_empty() && stats.entries_success > 0 {
-            println!("  No points found in bbox (data may be outside the query area)");
         }
 
         Ok(stats.points)
@@ -1860,16 +1874,19 @@ impl Lidar {
                 laz_urls.iter().partition(|u| Self::is_copc_url(u));
 
             let mut all_points: Vec<LidarPoint> = Vec::new();
+            let mut tile_point_counts: Vec<(String, usize)> = Vec::new();
 
             // --- COPC séquentiel avec retry/backoff ---
             for (idx, url) in copc_urls.iter().enumerate() {
                 println!("\n📦 COPC {}/{}: {}", idx + 1, copc_urls.len(), url);
                 let mut attempt = 0u32;
+                let mut tile_points = 0usize;
                 loop {
                     attempt += 1;
                     match self.load_single_copc_file(url, &cache_dir, filter_bbox) {
                         Ok(pts) => {
-                            println!("  ✅ {} points chargés", pts.len());
+                            tile_points = pts.len();
+                            println!("  ✅ {} points chargés", tile_points);
                             all_points.extend(pts);
                             break;
                         }
@@ -1893,6 +1910,7 @@ impl Lidar {
                         }
                     }
                 }
+                tile_point_counts.push(((*url).clone(), tile_points));
                 // Pause entre fichiers pour éviter 429
                 if idx + 1 < copc_urls.len() {
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1905,7 +1923,7 @@ impl Lidar {
 
             // --- LAZ standard : parallèle ---
             if !laz_only_urls.is_empty() {
-                let results: Vec<Result<Vec<LidarPoint>>> = laz_only_urls
+                let results: Vec<(String, Result<Vec<LidarPoint>>)> = laz_only_urls
                     .par_iter()
                     .map(|url| {
                         let res = self.load_single_laz_file(url, &cache_dir, filter_bbox);
@@ -1913,13 +1931,17 @@ impl Lidar {
                         if let Some(ref pb) = overall_pb {
                             pb.lock().unwrap().inc(1);
                         }
-                        res
+                        ((*url).clone(), res)
                     })
                     .collect();
-                let vecs: Vec<Vec<LidarPoint>> =
-                    results.into_iter().collect::<Result<Vec<_>, _>>()?;
-                all_points.extend(vecs.into_iter().flatten());
+                for (url, res) in results {
+                    let pts = res?;
+                    tile_point_counts.push((url, pts.len()));
+                    all_points.extend(pts);
+                }
             }
+
+            Self::validate_tile_coverage(laz_urls, &tile_point_counts)?;
 
             #[cfg(feature = "indicatif")]
             if let Some(ref pb) = overall_pb {
@@ -1938,6 +1960,7 @@ impl Lidar {
         #[cfg(not(feature = "rayon"))]
         {
             let mut all_points = Vec::new();
+            let mut tile_point_counts: Vec<(String, usize)> = Vec::new();
 
             #[cfg(feature = "indicatif")]
             let overall_pb = if laz_urls.len() > 1 {
@@ -1953,11 +1976,13 @@ impl Lidar {
             for (idx, url) in laz_urls.iter().enumerate() {
                 println!("\nProcessing file {}/{}: {}", idx + 1, laz_urls.len(), url);
                 let mut attempt = 0u32;
+                let mut tile_points = 0usize;
                 loop {
                     attempt += 1;
                     match self.load_single_point_file(url, &cache_dir, filter_bbox) {
                         Ok(points) => {
-                            println!("  Loaded {} points", points.len());
+                            tile_points = points.len();
+                            println!("  Loaded {} points", tile_points);
                             all_points.extend(points);
                             break;
                         }
@@ -1978,6 +2003,7 @@ impl Lidar {
                         }
                     }
                 }
+                tile_point_counts.push(((*url).clone(), tile_points));
                 #[cfg(feature = "indicatif")]
                 if let Some(ref pb) = overall_pb {
                     pb.inc(1);
@@ -1990,12 +2016,44 @@ impl Lidar {
                 pb.finish_with_message("All files processed");
             }
 
+            Self::validate_tile_coverage(laz_urls, &tile_point_counts)?;
+
             if all_points.is_empty() {
                 anyhow::bail!("No LiDAR points were loaded from any file");
             }
             println!("\nTotal points loaded: {}", all_points.len());
             Ok(all_points)
         }
+    }
+
+    /// Warn on empty tiles; fail when fewer than half of WFS tiles contributed points.
+    fn validate_tile_coverage(
+        laz_urls: &[String],
+        tile_point_counts: &[(String, usize)],
+    ) -> Result<()> {
+        let empty: Vec<&str> = tile_point_counts
+            .iter()
+            .filter(|(_, n)| *n == 0)
+            .map(|(url, _)| url.as_str())
+            .collect();
+        if empty.is_empty() {
+            return Ok(());
+        }
+        for url in &empty {
+            eprintln!("  ⚠️  Tile returned 0 points: {}", url);
+        }
+        let loaded = tile_point_counts.iter().filter(|(_, n)| *n > 0).count();
+        let threshold = laz_urls.len().div_ceil(2);
+        if loaded < threshold {
+            anyhow::bail!(
+                "Only {}/{} LAZ tiles contributed points ({} empty). \
+                 LiDAR coverage is incomplete.",
+                loaded,
+                laz_urls.len(),
+                empty.len()
+            );
+        }
+        Ok(())
     }
 
     fn process_lidar_points(
@@ -2336,16 +2394,7 @@ mod tests {
             root_hier_offset: 0,
             root_hier_size: 0,
         };
-        // Niveau 0 (racine) : node_size = 1000 / 2^0 = 1000
-        // vx=0 vy=0 → min_x = 0 - 1000 + 0*1000 = -1000, max_x = 0
-        // Attendu : min=-1000, max=1000? Non : le nœud racine entier couvre [-1000,1000]
-        // Formule : min_x = center_x - halfsize + vx * node_size = 0 - 1000 + 0*1000 = -1000
-        //           max_x = min_x + node_size = -1000 + 1000 = 0  ← le nœud (0,0) à level 0
-        // MAIS avec level 0, il n'y a qu'un seul nœud racine. Dans la spec COPC :
-        // "The root node (level 0) covers [center - halfsize, center + halfsize]"
-        // La formule donne pour (0,0,0) : min_x=-1000, max_x=0 ← incorrect pour la racine unique.
-        // Ceci est correct pour une décomposition en 4 quadrants à level 0.
-        // Pour level 1, vx=1, vy=1 : node_size=500, min_x = -1000+1*500=-500, max_x=0
+        // Level 0 root (vx=0, vy=0) covers the full cube [center - halfsize, center + halfsize].
         let entry_root = CopcEntry {
             level: 0,
             vx: 0,
@@ -2358,12 +2407,56 @@ mod tests {
         let (min_x, min_y, max_x, max_y) = copc_entry_bounds_xy(&entry_root, &info);
         assert!((min_x - (-1000.0)).abs() < 1e-9);
         assert!((min_y - (-1000.0)).abs() < 1e-9);
-        assert!(
-            (max_x - 0.0).abs() < 1e-9,
-            "max_x should be 0, got {}",
-            max_x
-        );
-        assert!((max_y - 0.0).abs() < 1e-9);
+        assert!((max_x - 1000.0).abs() < 1e-9, "max_x should be 1000, got {}", max_x);
+        assert!((max_y - 1000.0).abs() < 1e-9);
+
+        // Level 1, vx=1, vy=1 : side=1000, min=(0,0), max=(1000,1000)
+        let entry = CopcEntry {
+            level: 1,
+            vx: 1,
+            vy: 1,
+            vz: 0,
+            offset: 0,
+            byte_size: 0,
+            point_count: 1,
+        };
+        let (min_x, min_y, max_x, max_y) = copc_entry_bounds_xy(&entry, &info);
+        assert!((min_x - 0.0).abs() < 1e-9);
+        assert!((min_y - 0.0).abs() < 1e-9);
+        assert!((max_x - 1000.0).abs() < 1e-9);
+        assert!((max_y - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_copc_entry_bounds_xy_ign_regression() {
+        // IGN LiDAR HD tile LHD_FXX_0417_6423 (Lambert-93)
+        let info = CopcInfo {
+            center_x: 417_500.0,
+            center_y: 6_422_500.0,
+            center_z: 500.0,
+            halfsize: 500.0,
+            spacing: 1.0,
+            root_hier_offset: 0,
+            root_hier_size: 0,
+        };
+        let bbox = (416_954.22, 6_422_714.49, 417_740.21, 6_423_250.81);
+
+        // Northern quadrant of the tile intersects the southern portion of the query bbox.
+        let entry = CopcEntry {
+            level: 1,
+            vx: 1,
+            vy: 1,
+            vz: 0,
+            offset: 0,
+            byte_size: 0,
+            point_count: 1,
+        };
+        let (_nx_min, ny_min, _nx_max, ny_max) = copc_entry_bounds_xy(&entry, &info);
+        assert!(ny_max > bbox.1, "node max_y {} should exceed bbox min_y {}", ny_max, bbox.1);
+        assert!(ny_min < bbox.3, "node min_y {} should be below bbox max_y {}", ny_min, bbox.3);
+        assert!(copc_entry_intersects(
+            &entry, &info, bbox.0, bbox.1, bbox.2, bbox.3
+        ));
     }
 
     #[test]
@@ -2377,7 +2470,7 @@ mod tests {
             root_hier_offset: 0,
             root_hier_size: 0,
         };
-        // Level 1, vx=1, vy=1 : node_size=500, min=(-500,-500), max=(0,0)
+        // Level 1, vx=1, vy=1 : side=1000, bounds (0,0)-(1000,1000)
         let entry = CopcEntry {
             level: 1,
             vx: 1,
@@ -2388,10 +2481,10 @@ mod tests {
             point_count: 1,
         };
         assert!(copc_entry_intersects(
-            &entry, &info, -600.0, -600.0, -100.0, -100.0
+            &entry, &info, 100.0, 100.0, 900.0, 900.0
         ));
         assert!(!copc_entry_intersects(
-            &entry, &info, 100.0, 100.0, 500.0, 500.0
+            &entry, &info, -900.0, -900.0, -100.0, -100.0
         ));
     }
 
