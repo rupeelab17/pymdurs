@@ -26,6 +26,9 @@ defaults:
     shell: bash
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Source distribution (Linux, inchangé)
+  # ---------------------------------------------------------------------------
   build-sdist:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -64,6 +67,9 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
+  # ---------------------------------------------------------------------------
+  # 2. Windows wheel — tout en MSVC, un seul environnement Python (conda)
+  # ---------------------------------------------------------------------------
   build-wheels:
     needs: [build-sdist]
     runs-on: windows-latest
@@ -74,24 +80,7 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          architecture: x64
-          cache: "pip"
-
-      - name: Install Rust GNU toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable-x86_64-pc-windows-gnu
-          rustup target add x86_64-pc-windows-gnu
-          rustup default stable-x86_64-pc-windows-gnu
-
-      - name: Install MinGW
-        shell: pwsh
-        run: choco install mingw -y
-
+      # ── Conda (fournit Python + GDAL + GEOS + PROJ compilés MSVC) ──────────
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -99,66 +88,124 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           channels: conda-forge
           channel-priority: strict
+          # On active l'env "base" pour que conda run et pip pointent au même endroit
+          activate-environment: true
 
-      - name: Install GDAL via Conda
+      # Cache conda pour éviter de re-télécharger 500 MB à chaque run
+      - name: Cache conda packages
+        uses: actions/cache@v4
+        with:
+          path: ~/conda_pkgs_dir
+          key: conda-${{ runner.os }}-gdal-${{ hashFiles('**/environment*.yml', '**/Cargo.toml') }}
+          restore-keys: conda-${{ runner.os }}-gdal-
+
+      - name: Install GDAL, GEOS, PROJ via Conda (MSVC builds)
         shell: pwsh
         run: |
-          conda install -c conda-forge libgdal geos proj sqlite -y
+          # conda-forge fournit des builds MSVC natifs pour Windows
+          conda install -c conda-forge libgdal geos proj sqlite --yes
 
-          # Utiliser l'env actif (pas base) — c'est là que conda installe les libs
-          $condaEnv = (conda info --json | ConvertFrom-Json).active_prefix
-          $lib = "$condaEnv\Library"
+          $prefix = (conda info --json | ConvertFrom-Json).active_prefix
+          $lib    = "$prefix\Library"
 
-          Write-Host "Active conda env: $condaEnv"
-          Write-Host "Library path: $lib"
+          Write-Host "Active conda prefix : $prefix"
+          Write-Host "Library path        : $lib"
 
-          # Vérifier que les headers GDAL sont bien là
-          $header = Get-ChildItem "$lib\include" -Filter "cpl_atomic_ops.h" -ErrorAction SilentlyContinue
+          # Vérification des headers GDAL
+          $header = Get-ChildItem "$lib\include" -Filter "gdal.h" -ErrorAction SilentlyContinue
           if ($header) {
-            Write-Host "✅ cpl_atomic_ops.h found at: $($header.FullName)"
+            Write-Host "✅ gdal.h trouvé : $($header.FullName)"
           } else {
-            Write-Host "❌ cpl_atomic_ops.h NOT found — listing include dir:"
-            Get-ChildItem "$lib\include" -ErrorAction SilentlyContinue | Select-Object -First 20
+            Write-Error "❌ gdal.h introuvable — installation GDAL défaillante"
+            exit 1
           }
 
-          $geosLine = conda list geos | Select-String -Pattern "^geos\s+"
-          if (-not $geosLine) { throw "GEOS not found in conda environment" }
+          # Récupération version GEOS depuis conda list
+          $geosLine = (conda list geos) | Select-String -Pattern "^geos\s+"
+          if (-not $geosLine) { Write-Error "GEOS absent de l'env conda" ; exit 1 }
+          $geosVer = ($geosLine.ToString().Trim() -split "\s+")[1]
+          Write-Host "GEOS version : $geosVer"
 
-          # conda list: "geos  3.12.1  h..."
-          $geosVer = ($geosLine -split "\s+")[1]
+          # Export des variables d'environnement pour les steps suivants
+          "CONDA_PREFIX=$prefix"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_VERSION=$geosVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_HOME=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_INCLUDE_DIR=$lib\include"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_VERSION=3"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_LIB=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_DATA=$lib\share\proj"      | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUST_BACKTRACE=1"               | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          # On ajoute les DLL conda au PATH (MSVC runtime + gdal/geos/proj)
+          "$lib\bin"                       | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
 
-          "GEOS_VERSION=$geosVer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_LIB_DIR=$lib\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_HOME=$lib"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_LIB_DIR=$lib\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_INCLUDE_DIR=$lib\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_VERSION=3"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_LIB_DIR=$lib\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_LIB=$lib\share\proj"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RUST_BACKTRACE=1"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$lib\bin"                       | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # ── Rust MSVC (compatible avec le Python MSVC de conda-forge) ──────────
+      - name: Install Rust MSVC toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc
+          rustup target add x86_64-pc-windows-msvc
+          rustup default stable-x86_64-pc-windows-msvc
+          rustup show
 
+      # Cache cargo registry/git pour accélérer les builds suivants
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            pymdurs/target
+          key: cargo-${{ runner.os }}-msvc-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-msvc-
+
+      # ── maturin installé dans l'env conda (même Python que le wheel) ───────
       - name: Install maturin
+        shell: pwsh
         run: pip install maturin
 
-      - name: Build wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          target: x86_64-pc-windows-gnu
-          args: >
-            --release
-            --manifest-path pymdurs/Cargo.toml
-            --out dist
-          maturin-version: 1.11.4
-
-      - name: Test wheel
+      # ── Build du wheel en MSVC ──────────────────────────────────────────────
+      # On n'utilise PAS maturin-action car elle ne propage pas les env vars
+      # du runner de façon fiable sur Windows.
+      - name: Build wheel (maturin direct)
+        shell: pwsh
+        env:
+          GDAL_HOME: ${{ env.GDAL_HOME }}
+          GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
+          GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
+          GDAL_VERSION: ${{ env.GDAL_VERSION }}
+          GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
+          GEOS_VERSION: ${{ env.GEOS_VERSION }}
+          PROJ_LIB: ${{ env.PROJ_LIB }}
+          PROJ_DATA: ${{ env.PROJ_DATA }}
+          RUST_BACKTRACE: 1
         run: |
-          pip install --force-reinstall --verbose dist/*.whl
-          cd $RUNNER_TEMP
-          python -c "import pymdurs; print('pymdurs imported successfully')"
-          python -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works:', bbox.min_x)"
+          maturin build `
+            --release `
+            --target x86_64-pc-windows-msvc `
+            --manifest-path pymdurs/Cargo.toml `
+            --out dist
+
+      # ── Test du wheel dans le même env (PATH conda actif) ──────────────────
+      - name: Test wheel
+        shell: pwsh
+        run: |
+          # Installation forcée du wheel fraîchement buildé
+          pip install --force-reinstall --verbose (Get-Item dist\*.whl)
+
+          # Test depuis un répertoire neutre (pas le source tree)
+          Push-Location $env:TEMP
+          try {
+            python -c "import pymdurs; print('✅ pymdurs imported successfully')"
+            python -c "
+          import pymdurs
+          bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0)
+          print('✅ PyBoundingBox works: min_x =', bbox.min_x)
+          "
+          } finally {
+            Pop-Location
+          }
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -166,6 +213,9 @@ jobs:
           name: wheel-windows-x86_64
           path: dist/*.whl
 
+  # ---------------------------------------------------------------------------
+  # 3. Publication PyPI (inchangé)
+  # ---------------------------------------------------------------------------
   publish-to-pypi:
     needs: [build-sdist, build-wheels]
     environment:
@@ -189,6 +239,9 @@ jobs:
           skip-existing: true
           verbose: true
 
+  # ---------------------------------------------------------------------------
+  # 4. Publication GitHub Release (inchangé sauf clarification version)
+  # ---------------------------------------------------------------------------
   publish-to-github:
     needs: [publish-to-pypi]
     if: inputs.dry-run == false
@@ -202,12 +255,16 @@ jobs:
         id: version
         run: |
           VERSION=$(grep -m 1 -oP 'version = "\K[^"]+' pyproject.toml)
-          if [[ "$VERSION" == *"-"* ]] || [[ "$VERSION" == *"dev"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"rc"* ]]; then
+          if [[ "$VERSION" == *"-"* ]] || \
+             [[ "$VERSION" == *"dev"* ]] || \
+             [[ "$VERSION" == *"alpha"* ]] || \
+             [[ "$VERSION" == *"beta"* ]] || \
+             [[ "$VERSION" == *"rc"* ]]; then
             IS_PRERELEASE=true
           else
             IS_PRERELEASE=false
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION"           >> $GITHUB_OUTPUT
           echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
 
       - name: Download artifacts
@@ -227,9 +284,9 @@ jobs:
             ## Python Package Release ${{ steps.version.outputs.version }}
 
             ### Installation
-              ```bash
-                          pip install pymdurs
-              ```
+            ```bash
+            pip install pymdurs
+            ```
 
             ### Available Classes
 
