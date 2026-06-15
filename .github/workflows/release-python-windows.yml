@@ -70,7 +70,7 @@ jobs:
           path: dist/*.tar.gz
 
   # ---------------------------------------------------------------------------
-  # 2. Windows wheel — MSVC + conda-forge + gdal_i.lib généré depuis la DLL
+  # 2. Windows wheel
   # ---------------------------------------------------------------------------
   build-wheels:
     needs: [build-sdist]
@@ -86,12 +86,31 @@ jobs:
         shell: pwsh
         run: |
           git config --global core.longpaths true
-          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+          New-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
             -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force `
             -ErrorAction SilentlyContinue | Out-Null
           New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
 
-      # ── Conda : Python + GDAL/GEOS/PROJ ────────────────────────────────────
+      # ── Patch Cargo.toml : remplace le fork git par crates.io gdal 0.19 ───
+      # Le fork fix/gdal-3.13-compat n'est pas nécessaire avec GDAL 3.12 (conda).
+      # gdal 0.19 de crates.io supporte gdal-sys 0.11 qui gère MSVC correctement.
+      - name: Patch Cargo.toml — use gdal crates.io instead of git fork
+        shell: pwsh
+        run: |
+          $path = "pymdurs\Cargo.toml"
+          $content = Get-Content $path -Raw
+
+          # Remplace la ligne gdal = { git = ... } par la version crates.io
+          $content = $content -replace `
+            'gdal\s*=\s*\{[^}]*git\s*=\s*"https://github\.com/AlexanderWillner/gdal\.git"[^}]*\}', `
+            'gdal = { version = "0.19", features = ["bindgen"], optional = true }'
+
+          Set-Content $path $content -Encoding utf8
+          Write-Host "Cargo.toml patché :"
+          Select-String -Path $path -Pattern "^gdal"
+
+      # ── Conda : Python + GDAL 3.12 + GEOS + PROJ ───────────────────────────
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -105,13 +124,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/conda_pkgs_dir
-          key: conda-${{ runner.os }}-gdal-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: conda-${{ runner.os }}-gdal-
+          key: conda-${{ runner.os }}-gdal312-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: conda-${{ runner.os }}-gdal312-
 
-      - name: Install GDAL, GEOS, PROJ via Conda
+      - name: Install GDAL 3.12, GEOS, PROJ via Conda
         shell: pwsh
         run: |
-          conda install -c conda-forge libgdal geos proj sqlite --yes
+          # On épingle GDAL à 3.12.x — compatible avec gdal-crate 0.19 (crates.io)
+          # GDAL 3.13 requiert le fork AlexanderWillner qui ne supporte pas MSVC proprement
+          conda install -c conda-forge "libgdal=3.12" geos proj sqlite --yes
 
           $prefix = (conda info --json | ConvertFrom-Json).active_prefix
           $lib    = "$prefix\Library"
@@ -119,7 +140,8 @@ jobs:
           Write-Host "Active conda prefix : $prefix"
 
           # Vérification DLL GDAL
-          $dll = Get-ChildItem "$lib\bin" -Filter "gdal*.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $dll = Get-ChildItem "$lib\bin" -Filter "gdal*.dll" -ErrorAction SilentlyContinue |
+                 Sort-Object Name | Select-Object -First 1
           if ($dll) {
             Write-Host "✅ DLL trouvée : $($dll.FullName)"
           } else {
@@ -127,21 +149,26 @@ jobs:
             exit 1
           }
 
-          # Récupération version GEOS
+          # Version GDAL installée
+          $gdalVer = (conda list libgdal) |
+                     Select-String -Pattern "^libgdal\s+" |
+                     ForEach-Object { ($_.ToString().Trim() -split "\s+")[1] }
+          Write-Host "GDAL version installée : $gdalVer"
+
+          # Version GEOS
           $geosLine = (conda list geos) | Select-String -Pattern "^geos\s+"
           if (-not $geosLine) { Write-Error "GEOS absent de l'env conda" ; exit 1 }
           $geosVer = ($geosLine.ToString().Trim() -split "\s+")[1]
           Write-Host "GEOS version : $geosVer"
 
-          # Export variables d'environnement
-          "CONDA_PREFIX=$prefix"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          # Export variables
           "CONDA_LIB=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_DLL_NAME=$($dll.Name)"     | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_VERSION=$geosVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_HOME=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_VERSION=3"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_DLL_NAME=$($dll.Name)"     | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_LIB=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DATA=$lib\share\proj"      | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -149,48 +176,58 @@ jobs:
           "$lib\bin"                       | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
 
       # ── Génération de gdal_i.lib depuis la DLL conda ────────────────────────
-      # conda-forge ne livre pas l'import library MSVC (.lib) — on la génère
-      # avec les outils MSVC (dumpbin → .def → lib.exe → gdal_i.lib)
-      - name: Generate gdal_i.lib (MSVC import library)
+      # conda-forge ne livre pas l'import library MSVC (.lib).
+      # On la génère avec dumpbin + lib.exe (toujours présents sur windows-latest).
+      - name: Generate gdal_i.lib (MSVC import library from conda DLL)
         shell: pwsh
         run: |
           # Localisation des outils MSVC via vswhere
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath  = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vsPath  = & $vswhere -latest -products * `
+                       -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                       -property installationPath
           if (-not $vsPath) { Write-Error "Visual Studio introuvable" ; exit 1 }
 
-          # Cherche dumpbin.exe et lib.exe dans le répertoire MSVC
-          $vcTools = Get-ChildItem "$vsPath\VC\Tools\MSVC" | Sort-Object Name -Descending | Select-Object -First 1
+          $vcTools = Get-ChildItem "$vsPath\VC\Tools\MSVC" |
+                     Sort-Object Name -Descending | Select-Object -First 1
           $binDir  = "$($vcTools.FullName)\bin\Hostx64\x64"
           $dumpbin = "$binDir\dumpbin.exe"
           $libExe  = "$binDir\lib.exe"
 
-          Write-Host "MSVC tools : $binDir"
-          Write-Host "DLL cible  : $env:CONDA_LIB\bin\$env:GDAL_DLL_NAME"
+          Write-Host "Outils MSVC : $binDir"
 
           $dllPath = "$env:CONDA_LIB\bin\$env:GDAL_DLL_NAME"
-          $defPath = "$env:CONDA_LIB\lib\gdal.def"
+          $defPath = "$env:TEMP\gdal.def"
           $libPath = "$env:CONDA_LIB\lib\gdal_i.lib"
 
-          # 1. Extraire les exports de la DLL
-          & $dumpbin /exports $dllPath | Out-File "$env:TEMP\gdal_exports.txt" -Encoding ascii
+          Write-Host "DLL source : $dllPath"
+
+          # 1. Extraire les exports
+          $exports = & $dumpbin /exports $dllPath
           if ($LASTEXITCODE -ne 0) { Write-Error "dumpbin échoué" ; exit 1 }
 
-          # 2. Construire le fichier .def
-          "EXPORTS" | Out-File $defPath -Encoding ascii
-          Get-Content "$env:TEMP\gdal_exports.txt" |
-            Select-String -Pattern "^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)" |
-            ForEach-Object { $_.Matches[0].Groups[1].Value } |
-            Out-File $defPath -Encoding ascii -Append
+          # 2. Parser les exports et construire le .def
+          # Format dumpbin : "   ordinal  hint  RVA       name"
+          $lines = $exports | Select-String -Pattern "^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)" |
+                              ForEach-Object { $_.Matches[0].Groups[1].Value }
 
-          Write-Host "Exports extraits : $((Get-Content $defPath).Count - 1) symboles"
+          if ($lines.Count -eq 0) {
+            Write-Error "Aucun export trouvé dans $dllPath — DLL invalide ?"
+            exit 1
+          }
+          Write-Host "Exports trouvés : $($lines.Count) symboles"
+
+          "LIBRARY $env:GDAL_DLL_NAME" | Out-File $defPath -Encoding ascii
+          "EXPORTS"                     | Out-File $defPath -Encoding ascii -Append
+          $lines                        | Out-File $defPath -Encoding ascii -Append
 
           # 3. Générer l'import library
           & $libExe /def:$defPath /out:$libPath /machine:x64
           if ($LASTEXITCODE -ne 0) { Write-Error "lib.exe échoué" ; exit 1 }
 
           if (Test-Path $libPath) {
-            Write-Host "✅ gdal_i.lib généré : $libPath"
+            $size = (Get-Item $libPath).Length
+            Write-Host "✅ gdal_i.lib généré : $libPath ($size bytes)"
           } else {
             Write-Error "❌ gdal_i.lib absent après génération"
             exit 1
