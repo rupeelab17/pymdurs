@@ -261,37 +261,41 @@ jobs:
           $pcDir = "$env:CONDA_LIB\lib\pkgconfig"
           New-Item -ItemType Directory -Force -Path $pcDir | Out-Null
 
-          # proj.pc
-          @"
-prefix=$($env:CONDA_LIB -replace '\\','/')
-exec_prefix=`${prefix}
-libdir=`${prefix}/lib
-includedir=`${prefix}/include
+          $pfx = $env:CONDA_LIB -replace '\\','/'
 
-Name: PROJ
-Description: Coordinate transformation library
-Version: $env:PROJ_VERSION
-Libs: -L`${libdir} -lproj_i
-Cflags: -I`${includedir}
-"@ | Set-Content "$pcDir\proj.pc" -Encoding ascii
+          # proj.pc — écriture ligne par ligne pour éviter les here-strings
+          $projPc = @(
+            "prefix=$pfx",
+            'exec_prefix=${prefix}',
+            'libdir=${prefix}/lib',
+            'includedir=${prefix}/include',
+            '',
+            'Name: PROJ',
+            'Description: Coordinate transformation library',
+            "Version: $env:PROJ_VERSION",
+            'Libs: -L${libdir} -lproj_i',
+            'Cflags: -I${includedir}'
+          )
+          $projPc | Set-Content "$pcDir\proj.pc" -Encoding ascii
 
           # gdal.pc
-          @"
-prefix=$($env:CONDA_LIB -replace '\\','/')
-exec_prefix=`${prefix}
-libdir=`${prefix}/lib
-includedir=`${prefix}/include
-
-Name: GDAL
-Description: Geospatial Data Abstraction Library
-Version: $env:GDAL_VERSION
-Libs: -L`${libdir} -lgdal_i
-Cflags: -I`${includedir}
-"@ | Set-Content "$pcDir\gdal.pc" -Encoding ascii
+          $gdalPc = @(
+            "prefix=$pfx",
+            'exec_prefix=${prefix}',
+            'libdir=${prefix}/lib',
+            'includedir=${prefix}/include',
+            '',
+            'Name: GDAL',
+            'Description: Geospatial Data Abstraction Library',
+            "Version: $env:GDAL_VERSION",
+            'Libs: -L${libdir} -lgdal_i',
+            'Cflags: -I${includedir}'
+          )
+          $gdalPc | Set-Content "$pcDir\gdal.pc" -Encoding ascii
 
           "PKG_CONFIG_PATH=$pcDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "✅ pkg-config .pc écrits dans $pcDir"
-          Write-Host (Get-Content "$pcDir\proj.pc" -Raw)
+          Write-Host "pkg-config .pc ecrits dans $pcDir"
+          Get-Content "$pcDir\proj.pc"
 
       # ── Rust MSVC ───────────────────────────────────────────────────────────
       - name: Install Rust MSVC toolchain
