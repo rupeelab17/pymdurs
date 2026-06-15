@@ -32,31 +32,79 @@ from shapely.geometry import box
 import pymdurs
 
 
-def preview_pngs_to_gif(
+def _raster_to_frame(path: Path, mode: str = "continuous") -> Image.Image:
+    """Convert a GeoTIFF band to a PIL frame for GIF encoding."""
+    with rasterio.open(path) as src:
+        data = src.read(1).astype(np.float64)
+        nodata = src.nodata
+        if nodata is not None:
+            data = np.where(data == nodata, np.nan, data)
+
+    if mode == "shadow":
+        arr = np.nan_to_num(data, nan=0.0)
+        scaled = (np.clip(arr, 0, 1) * 255).astype(np.uint8)
+    else:
+        valid = data[np.isfinite(data)]
+        if valid.size == 0:
+            scaled = np.zeros(data.shape, dtype=np.uint8)
+        else:
+            vmin, vmax = np.percentile(valid, [2, 98])
+            if vmax <= vmin:
+                vmax = vmin + 1.0
+            filled = np.nan_to_num(data, nan=vmin)
+            scaled = ((filled - vmin) / (vmax - vmin) * 255).clip(0, 255).astype(np.uint8)
+
+    return Image.fromarray(scaled, mode="L").convert("P", palette=Image.ADAPTIVE)
+
+
+def _find_raster_paths(folder: Path, pattern: str) -> list[Path]:
+    """Resolve raster paths; fall back to legacy PNG previews if no GeoTIFF match."""
+    paths = sorted(folder.glob(pattern))
+    if paths:
+        return paths
+    prefix = pattern.split("*", 1)[0]
+    for fallback in (f"{prefix}*.preview.png", f"{prefix}*.png"):
+        paths = sorted(folder.glob(fallback))
+        if paths:
+            return paths
+    return []
+
+
+def preview_rasters_to_gif(
     folder: str | Path,
-    pattern: str = "shadow_*.preview.png",
+    pattern: str = "shadow_*.tif",
     out_path: str | Path | None = None,
     duration_ms: int = 500,
     loop: int = 0,
-) -> Path:
-    """Create an animated GIF from SOLWEIG preview PNGs (shadow, tmrt, utci, pet).
+    mode: str = "continuous",
+) -> Path | None:
+    """Create an animated GIF from SOLWEIG GeoTIFFs (or legacy preview PNGs).
 
     Args:
-        folder: Folder containing shadow_*.preview.png (or other pattern) files.
-        pattern: Glob pattern for PNG files (default: shadow_*.preview.png).
-        out_path: Output GIF file (default: folder / "shadow_preview.gif").
+        folder: Folder containing timestamped rasters (e.g. shadow_20250701_1200.tif).
+        pattern: Glob pattern for raster files (default: shadow_*.tif).
+        out_path: Output GIF file path.
         duration_ms: Duration per frame in ms.
         loop: 0 = loop forever.
+        mode: ``shadow`` (binary 0/1) or ``continuous`` (percentile stretch).
 
     Returns:
-        Path to the created GIF.
+        Path to the created GIF, or None if no matching files were found.
     """
     folder = Path(folder)
-    out_path = Path(out_path) if out_path else folder / "shadow_preview.gif"
-    paths = sorted(folder.glob(pattern))
+    out_path = Path(out_path) if out_path else folder / "preview.gif"
+    paths = _find_raster_paths(folder, pattern)
     if not paths:
-        raise FileNotFoundError(f"No files found: {folder / pattern}")
-    frames = [Image.open(p).convert("P", palette=Image.ADAPTIVE) for p in paths]
+        print(f"⚠️  No files found for GIF: {folder / pattern}")
+        return None
+
+    frames: list[Image.Image] = []
+    for path in paths:
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+            frames.append(Image.open(path).convert("P", palette=Image.ADAPTIVE))
+        else:
+            frames.append(_raster_to_frame(path, mode=mode))
+
     frames[0].save(
         out_path,
         save_all=True,
@@ -65,6 +113,28 @@ def preview_pngs_to_gif(
         loop=loop,
     )
     return out_path
+
+
+def create_solweig_preview_gifs(output_path: Path, duration_ms: int = 500) -> None:
+    """Build shadow, Tmrt and UTCI preview GIFs from SOLWEIG per-timestep outputs."""
+    specs = (
+        ("shadow", "shadow_*.tif", "shadow", "shadow_preview.gif"),
+        ("tmrt", "tmrt_*.tif", "continuous", "tmrt_preview.gif"),
+        ("utci", "utci_*.tif", "continuous", "utci_preview.gif"),
+    )
+    for subdir, pattern, mode, gif_name in specs:
+        folder = output_path / subdir
+        if not folder.is_dir():
+            continue
+        gif_path = preview_rasters_to_gif(
+            folder,
+            pattern=pattern,
+            out_path=output_path / gif_name,
+            duration_ms=duration_ms,
+            mode=mode,
+        )
+        if gif_path is not None:
+            print(f"✅ GIF created: {gif_path}")
 
 
 def main():
@@ -80,7 +150,9 @@ def main():
     # Bounding box (La Rochelle area, France)
     # Format: min_x, min_y, max_x, max_y (WGS84, EPSG:4326)
     # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
-    bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
+    #bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
+    bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
+
     # Convert bbox to Lambert-93 (EPSG:2154) with GeoPandas
     minx, miny, maxx, maxy = bbox_wgs84
     geom_wgs84 = box(minx, miny, maxx, maxy)
@@ -398,6 +470,8 @@ def main():
         print(
             f"  Date range: {metadata['timeseries']['start']} to {metadata['timeseries']['end']}"
         )
+
+        create_solweig_preview_gifs(output_path)
     else:
         print("⚠️  Skipping SOLWEIG - missing requirements or DSM not available")
 
@@ -411,25 +485,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # GPU is on by default when available. Toggle all three GPU paths
+    # (shadows, anisotropic sky, GVF) in a single call.
+    solweig.is_gpu_available()  # True if a GPU device initialised
+    solweig.get_compute_backend()  # "gpu" or "cpu"
+
     main()
-    gif_path = preview_pngs_to_gif(
-        Path("output/umep_workflow/shadow"),
-        pattern="shadow_*.preview.png",
-        out_path="output/umep_workflow/shadow_preview.gif",
-        duration_ms=500,
-    )
-    print(f"✅ GIF created: {gif_path}")
-    gif_path = preview_pngs_to_gif(
-        Path("output/umep_workflow/tmrt"),
-        pattern="tmrt_*.preview.png",
-        out_path="output/umep_workflow/tmrt_preview.gif",
-        duration_ms=500,
-    )
-    print(f"✅ GIF created: {gif_path}")
-    gif_path = preview_pngs_to_gif(
-        Path("output/umep_workflow/utci"),
-        pattern="utci_*.preview.png",
-        out_path="output/umep_workflow/utci_preview.gif",
-        duration_ms=500,
-    )
-    print(f"✅ GIF created: {gif_path}")

@@ -27,7 +27,7 @@ dependencies = [
     "geopandas>=1.0.1",
     "rasterio>=1.4.3",
     "umep>=0.0.1a18",
-    "solweig>=0.1.0b55",
+    "solweig>=0.1.0b75",
     "pythermalcomfort>=3.8.0",
 ]
 
@@ -60,7 +60,7 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [tool.uv.sources]
-solweig = { git = "https://github.com/UMEP-dev/solweig.git", rev = "dev" }
+solweig = { git = "https://github.com/UMEP-dev/solweig.git" }
 
 [dependency-groups]
 dev = [

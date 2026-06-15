@@ -417,6 +417,7 @@ wheels = [
 name = "griffelib"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/06/eccbd311c9e2b3ca45dbc063b93134c57a1ccc7607c5e545264ad092c4a9/griffelib-2.0.0.tar.gz", hash = "sha256:e504d637a089f5cab9b5daf18f7645970509bf4f53eda8d79ed71cce8bd97934", size = 166312, upload-time = "2026-03-23T21:06:55.954Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/51/c936033e16d12b627ea334aaaaf42229c37620d0f15593456ab69ab48161/griffelib-2.0.0-py3-none-any.whl", hash = "sha256:01284878c966508b6d6f1dbff9b6fa607bc062d8261c5c7253cb285b06422a7f", size = 142004, upload-time = "2026-02-09T19:09:40.561Z" },
 ]
@@ -1576,7 +1577,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pythermalcomfort", specifier = ">=3.8.0" },
     { name = "rasterio", specifier = ">=1.4.3" },
-    { name = "solweig", git = "https://github.com/UMEP-dev/solweig.git?rev=dev" },
+    { name = "solweig", git = "https://github.com/UMEP-dev/solweig.git" },
     { name = "umep", specifier = ">=0.0.1a18" },
 ]
 provides-extras = ["dev"]
@@ -2271,12 +2272,16 @@ wheels = [
 
 [[package]]
 name = "solweig"
-version = "0.1.0b48"
-source = { git = "https://github.com/UMEP-dev/solweig.git?rev=dev#09bfbe0fba2e5207e9bc8ea0ea5e63863f72017b" }
+version = "0.1.0b88"
+source = { git = "https://github.com/UMEP-dev/solweig.git#d426b75ab73135e3ab63b9a5dd1bfc166920e05b" }
 dependencies = [
     { name = "numpy" },
+    { name = "pillow" },
     { name = "pyproj" },
+    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "shapely" },
+    { name = "tqdm" },
 ]
 
 [[package]]
