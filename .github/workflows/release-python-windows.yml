@@ -20,7 +20,6 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  # Shorter paths avoid Windows MAX_PATH when cargo fetches git deps
   CARGO_HOME: C:\cargo
   CARGO_TARGET_DIR: C:\target
 
@@ -71,7 +70,7 @@ jobs:
           path: dist/*.tar.gz
 
   # ---------------------------------------------------------------------------
-  # 2. Windows wheel — tout en MSVC, un seul environnement Python (conda)
+  # 2. Windows wheel — MSVC + conda-forge + gdal_i.lib généré depuis la DLL
   # ---------------------------------------------------------------------------
   build-wheels:
     needs: [build-sdist]
@@ -83,7 +82,7 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
 
-      - name: Enable Windows long paths for git/cargo
+      - name: Enable Windows long paths
         shell: pwsh
         run: |
           git config --global core.longpaths true
@@ -91,13 +90,8 @@ jobs:
             -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force `
             -ErrorAction SilentlyContinue | Out-Null
           New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
-          # gdal git fork pulls gdal-src submodule with paths > MAX_PATH; use crates.io on Windows
-          @"
-          [patch.'git+https://github.com/AlexanderWillner/gdal.git?branch=fix%2Fgdal-3.13-compat']
-          gdal = { version = "0.19", features = ["bindgen"] }
-          "@ | Set-Content -Path "$env:CARGO_HOME\config.toml" -Encoding utf8
 
-      # ── Conda (fournit Python + GDAL + GEOS + PROJ compilés MSVC) ──────────
+      # ── Conda : Python + GDAL/GEOS/PROJ ────────────────────────────────────
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -105,59 +99,104 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           channels: conda-forge
           channel-priority: strict
-          # On active l'env "base" pour que conda run et pip pointent au même endroit
           activate-environment: true
 
-      # Cache conda pour éviter de re-télécharger 500 MB à chaque run
       - name: Cache conda packages
         uses: actions/cache@v4
         with:
           path: ~/conda_pkgs_dir
-          key: conda-${{ runner.os }}-gdal-${{ hashFiles('**/environment*.yml', '**/Cargo.toml') }}
+          key: conda-${{ runner.os }}-gdal-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: conda-${{ runner.os }}-gdal-
 
-      - name: Install GDAL, GEOS, PROJ via Conda (MSVC builds)
+      - name: Install GDAL, GEOS, PROJ via Conda
         shell: pwsh
         run: |
-          # conda-forge fournit des builds MSVC natifs pour Windows
           conda install -c conda-forge libgdal geos proj sqlite --yes
 
           $prefix = (conda info --json | ConvertFrom-Json).active_prefix
           $lib    = "$prefix\Library"
 
           Write-Host "Active conda prefix : $prefix"
-          Write-Host "Library path        : $lib"
 
-          # Vérification des headers GDAL
-          $header = Get-ChildItem "$lib\include" -Filter "gdal.h" -ErrorAction SilentlyContinue
-          if ($header) {
-            Write-Host "✅ gdal.h trouvé : $($header.FullName)"
+          # Vérification DLL GDAL
+          $dll = Get-ChildItem "$lib\bin" -Filter "gdal*.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($dll) {
+            Write-Host "✅ DLL trouvée : $($dll.FullName)"
           } else {
-            Write-Error "❌ gdal.h introuvable — installation GDAL défaillante"
+            Write-Error "❌ gdal*.dll introuvable dans $lib\bin"
             exit 1
           }
 
-          # Récupération version GEOS depuis conda list
+          # Récupération version GEOS
           $geosLine = (conda list geos) | Select-String -Pattern "^geos\s+"
           if (-not $geosLine) { Write-Error "GEOS absent de l'env conda" ; exit 1 }
           $geosVer = ($geosLine.ToString().Trim() -split "\s+")[1]
           Write-Host "GEOS version : $geosVer"
 
-          # Export des variables d'environnement pour les steps suivants
+          # Export variables d'environnement
           "CONDA_PREFIX=$prefix"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONDA_LIB=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_VERSION=$geosVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_HOME=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_VERSION=3"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_DLL_NAME=$($dll.Name)"     | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_LIB=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DATA=$lib\share\proj"      | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "RUST_BACKTRACE=1"               | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          # On ajoute les DLL conda au PATH (MSVC runtime + gdal/geos/proj)
           "$lib\bin"                       | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # ── Rust MSVC (compatible avec le Python MSVC de conda-forge) ──────────
+      # ── Génération de gdal_i.lib depuis la DLL conda ────────────────────────
+      # conda-forge ne livre pas l'import library MSVC (.lib) — on la génère
+      # avec les outils MSVC (dumpbin → .def → lib.exe → gdal_i.lib)
+      - name: Generate gdal_i.lib (MSVC import library)
+        shell: pwsh
+        run: |
+          # Localisation des outils MSVC via vswhere
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath  = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) { Write-Error "Visual Studio introuvable" ; exit 1 }
+
+          # Cherche dumpbin.exe et lib.exe dans le répertoire MSVC
+          $vcTools = Get-ChildItem "$vsPath\VC\Tools\MSVC" | Sort-Object Name -Descending | Select-Object -First 1
+          $binDir  = "$($vcTools.FullName)\bin\Hostx64\x64"
+          $dumpbin = "$binDir\dumpbin.exe"
+          $libExe  = "$binDir\lib.exe"
+
+          Write-Host "MSVC tools : $binDir"
+          Write-Host "DLL cible  : $env:CONDA_LIB\bin\$env:GDAL_DLL_NAME"
+
+          $dllPath = "$env:CONDA_LIB\bin\$env:GDAL_DLL_NAME"
+          $defPath = "$env:CONDA_LIB\lib\gdal.def"
+          $libPath = "$env:CONDA_LIB\lib\gdal_i.lib"
+
+          # 1. Extraire les exports de la DLL
+          & $dumpbin /exports $dllPath | Out-File "$env:TEMP\gdal_exports.txt" -Encoding ascii
+          if ($LASTEXITCODE -ne 0) { Write-Error "dumpbin échoué" ; exit 1 }
+
+          # 2. Construire le fichier .def
+          "EXPORTS" | Out-File $defPath -Encoding ascii
+          Get-Content "$env:TEMP\gdal_exports.txt" |
+            Select-String -Pattern "^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)" |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } |
+            Out-File $defPath -Encoding ascii -Append
+
+          Write-Host "Exports extraits : $((Get-Content $defPath).Count - 1) symboles"
+
+          # 3. Générer l'import library
+          & $libExe /def:$defPath /out:$libPath /machine:x64
+          if ($LASTEXITCODE -ne 0) { Write-Error "lib.exe échoué" ; exit 1 }
+
+          if (Test-Path $libPath) {
+            Write-Host "✅ gdal_i.lib généré : $libPath"
+          } else {
+            Write-Error "❌ gdal_i.lib absent après génération"
+            exit 1
+          }
+
+      # ── Rust MSVC ───────────────────────────────────────────────────────────
       - name: Install Rust MSVC toolchain
         shell: pwsh
         run: |
@@ -166,7 +205,6 @@ jobs:
           rustup default stable-x86_64-pc-windows-msvc
           rustup show
 
-      # Cache cargo registry/git pour accélérer les builds suivants
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
@@ -177,14 +215,12 @@ jobs:
           key: cargo-${{ runner.os }}-msvc-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-msvc-
 
-      # ── maturin installé dans l'env conda (même Python que le wheel) ───────
+      # ── maturin dans l'env conda ─────────────────────────────────────────────
       - name: Install maturin
         shell: pwsh
         run: pip install maturin
 
-      # ── Build du wheel en MSVC ──────────────────────────────────────────────
-      # On n'utilise PAS maturin-action car elle ne propage pas les env vars
-      # du runner de façon fiable sur Windows.
+      # ── Build ────────────────────────────────────────────────────────────────
       - name: Build wheel (maturin direct)
         shell: pwsh
         env:
@@ -204,14 +240,11 @@ jobs:
             --manifest-path pymdurs/Cargo.toml `
             --out dist
 
-      # ── Test du wheel dans le même env (PATH conda actif) ──────────────────
+      # ── Test ─────────────────────────────────────────────────────────────────
       - name: Test wheel
         shell: pwsh
         run: |
-          # Installation forcée du wheel fraîchement buildé
           pip install --force-reinstall --verbose (Get-Item dist\*.whl)
-
-          # Test depuis un répertoire neutre (pas le source tree)
           Push-Location $env:TEMP
           try {
             python -c "import pymdurs; print('✅ pymdurs imported successfully')"
@@ -231,7 +264,7 @@ jobs:
           path: dist/*.whl
 
   # ---------------------------------------------------------------------------
-  # 3. Publication PyPI (inchangé)
+  # 3. Publication PyPI
   # ---------------------------------------------------------------------------
   publish-to-pypi:
     needs: [build-sdist, build-wheels]
@@ -257,7 +290,7 @@ jobs:
           verbose: true
 
   # ---------------------------------------------------------------------------
-  # 4. Publication GitHub Release (inchangé sauf clarification version)
+  # 4. Publication GitHub Release
   # ---------------------------------------------------------------------------
   publish-to-github:
     needs: [publish-to-pypi]
@@ -281,7 +314,7 @@ jobs:
           else
             IS_PRERELEASE=false
           fi
-          echo "version=$VERSION"           >> $GITHUB_OUTPUT
+          echo "version=$VERSION"             >> $GITHUB_OUTPUT
           echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
 
       - name: Download artifacts
