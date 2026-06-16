@@ -313,6 +313,55 @@ jobs:
         shell: pwsh
         run: pip install maturin
 
+      # ── Pre-fetch du crate gdal (fork) pour pouvoir le patcher ──────────────
+      # Le fork AlexanderWillner génère OAMS_* en i32 sur Windows MSVC via bindgen
+      # mais le code Rust les compare à un u32. On force le cast as u32 dans srs.rs.
+      - name: Pre-fetch gdal fork and patch OAMS type mismatch
+        shell: pwsh
+        env:
+          GDAL_HOME: ${{ env.GDAL_HOME }}
+          GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
+          GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
+          GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
+          PROJ_LIB: ${{ env.PROJ_LIB }}
+        run: |
+          # 1. Fetch uniquement (sans compiler) pour peupler le cache cargo git
+          cargo fetch --manifest-path pymdurs/Cargo.toml 2>&1 | Select-String -Pattern "gdal|Fetch|error" | ForEach-Object { Write-Host $_ }
+
+          # 2. Localiser srs.rs dans le checkout git du fork
+          $srsPath = Get-ChildItem -Path "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "srs.rs" |
+                     Where-Object { $_.FullName -match "gdal" } |
+                     Select-Object -First 1
+          if (-not $srsPath) {
+            Write-Error "srs.rs introuvable dans $env:CARGO_HOME\git\checkouts"
+            exit 1
+          }
+          Write-Host "srs.rs trouve : $($srsPath.FullName)"
+
+          # 3. Patch : cast explicite as u32 pour les 3 constantes OAMS_*
+          # Avant : OAMS_TRADITIONAL_GIS_ORDER => Ok(Self::TraditionalGisOrder),
+          # Après : x if x == OAMS_TRADITIONAL_GIS_ORDER as u32 => Ok(Self::TraditionalGisOrder),
+          $src = Get-Content $srsPath.FullName -Raw
+
+          # Vérifie que le patch n'a pas déjà été appliqué
+          if ($src -match "as u32 =>") {
+            Write-Host "Patch deja applique — skip"
+          } else {
+            $src = $src -replace 'OAMS_TRADITIONAL_GIS_ORDER\s*=>', 'x if x == OAMS_TRADITIONAL_GIS_ORDER as u32 =>'
+            $src = $src -replace 'OAMS_AUTHORITY_COMPLIANT\s*=>', 'x if x == OAMS_AUTHORITY_COMPLIANT as u32 =>'
+            $src = $src -replace 'OAMS_CUSTOM\s*=>', 'x if x == OAMS_CUSTOM as u32 =>'
+            Set-Content $srsPath.FullName $src -Encoding utf8 -NoNewline
+            Write-Host "Patch OAMS types applique dans $($srsPath.FullName)"
+
+            # Vérification
+            $check = Select-String -Path $srsPath.FullName -Pattern "as u32 =>"
+            Write-Host "Lignes patchees : $($check.Count)"
+            if ($check.Count -lt 3) {
+              Write-Error "Patch incomplet — seulement $($check.Count)/3 remplacements"
+              exit 1
+            }
+          }
+
       # ── Build ────────────────────────────────────────────────────────────────
       - name: Build wheel (maturin direct)
         shell: pwsh
