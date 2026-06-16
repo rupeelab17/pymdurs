@@ -131,7 +131,7 @@ jobs:
       # ── GDAL officiel Windows (gisinternals) ────────────────────────────────
       # gisinternals.com = builds MSVC officiels de Tamas Szekeres (mainteneur GDAL Windows)
       # Fournit gdal_i.lib + gdal.h + gdal*.dll — tout ce dont gdal-sys a besoin sur MSVC
-      # gdal 0.19 crates.io est compatible avec GDAL 3.10 gisinternals
+      # gdal 0.19 crates.io est compatible avec GDAL 3.12 gisinternals
       - name: Download and install GDAL from gisinternals
         shell: pwsh
         run: |
@@ -139,7 +139,7 @@ jobs:
           #   release-XXXX-x64-gdal-X-X-X-mapserver-X-X-X.zip      → DLLs (bin\)
           #   release-XXXX-x64-gdal-X-X-X-mapserver-X-X-X-libs.zip → headers + .lib
           # Il faut les deux.
-          $base    = "release-1928-x64-gdal-3-10-0-mapserver-8-2-2"
+          $base    = "release-1929-x64-gdal-3-12-1-mapserver-8-6-0"
           $urlRoot = "https://download.gisinternals.com/sdk/downloads"
           $tmp     = "$env:TEMP\gdal_sdk"
           New-Item -ItemType Directory -Force -Path $tmp | Out-Null
