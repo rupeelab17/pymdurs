@@ -146,16 +146,45 @@ jobs:
           $gdal = "C:\gdal"
           New-Item -ItemType Directory -Force -Path $gdal | Out-Null
 
-          # 1. Package runtime (DLLs)
-          $runtimeUrl = "$urlRoot\$base.zip"
-          Write-Host "Telechargement runtime : $runtimeUrl"
-          Invoke-WebRequest $runtimeUrl -OutFile "$tmp\runtime.zip" -TimeoutSec 180
+          function Download-GdalZip {
+            param(
+              [string]$Url,
+              [string]$OutFile,
+              [int]$MaxAttempts = 5
+            )
+            for ($i = 1; $i -le $MaxAttempts; $i++) {
+              Write-Host "Telechargement (tentative $i/$MaxAttempts) : $Url"
+              try {
+                # curl est plus fiable que Invoke-WebRequest pour les gros zips gisinternals
+                curl.exe -fL `
+                  --retry 3 `
+                  --retry-delay 15 `
+                  --connect-timeout 120 `
+                  --max-time 900 `
+                  -A "pymdurs-ci/1.0" `
+                  -o $OutFile `
+                  $Url
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $OutFile) -and ((Get-Item $OutFile).Length -gt 1MB)) {
+                  Write-Host "OK : $OutFile ($('{0:N0}' -f (Get-Item $OutFile).Length) octets)"
+                  return
+                }
+                throw "curl exit=$LASTEXITCODE ou fichier trop petit"
+              } catch {
+                Write-Warning "Echec tentative $i : $_"
+                if ($i -eq $MaxAttempts) { throw }
+                Start-Sleep -Seconds (15 * $i)
+              }
+            }
+          }
+
+          # URLs avec / (pas \) — les backslashes cassent parfois la requete HTTP
+          $runtimeUrl = "$urlRoot/$base.zip"
+          $libsUrl    = "$urlRoot/$base-libs.zip"
+
+          Download-GdalZip -Url $runtimeUrl -OutFile "$tmp\runtime.zip"
           Expand-Archive "$tmp\runtime.zip" -DestinationPath "$gdal" -Force
 
-          # 2. Package developpement (headers + gdal_i.lib)
-          $libsUrl = "$urlRoot\$base-libs.zip"
-          Write-Host "Telechargement libs : $libsUrl"
-          Invoke-WebRequest $libsUrl -OutFile "$tmp\libs.zip" -TimeoutSec 180
+          Download-GdalZip -Url $libsUrl -OutFile "$tmp\libs.zip"
           Expand-Archive "$tmp\libs.zip" -DestinationPath "$gdal" -Force
 
           Write-Host "Contenu C:\gdal :"
