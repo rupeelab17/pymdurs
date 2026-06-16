@@ -135,50 +135,52 @@ jobs:
       - name: Download and install GDAL from gisinternals
         shell: pwsh
         run: |
-          $sdkUrl = "https://download.gisinternals.com/sdk/downloads/release-1928-x64-gdal-3-10-0-mapserver-8-2-2.zip"
-          $tmp = "$env:TEMP\gdal_sdk"
+          # gisinternals publie 2 zips distincts pour chaque version :
+          #   release-XXXX-x64-gdal-X-X-X-mapserver-X-X-X.zip      → DLLs (bin\)
+          #   release-XXXX-x64-gdal-X-X-X-mapserver-X-X-X-libs.zip → headers + .lib
+          # Il faut les deux.
+          $base    = "release-1928-x64-gdal-3-10-0-mapserver-8-2-2"
+          $urlRoot = "https://download.gisinternals.com/sdk/downloads"
+          $tmp     = "$env:TEMP\gdal_sdk"
           New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-
-          Write-Host "Telechargement : $sdkUrl"
-          Invoke-WebRequest $sdkUrl -OutFile "$tmp\sdk.zip" -TimeoutSec 180
-          Write-Host "Extraction..."
-          Expand-Archive "$tmp\sdk.zip" -DestinationPath "$tmp\sdk" -Force
-
-          # Le SDK gisinternals extrait bin\ include\ lib\ directement a la racine
-          # (pas de sous-dossier intermediaire)
-          Write-Host "Contenu extrait :"
-          Get-ChildItem "$tmp\sdk" | ForEach-Object { Write-Host "  $($_.Name)" }
-
           $gdal = "C:\gdal"
           New-Item -ItemType Directory -Force -Path $gdal | Out-Null
-          Copy-Item "$tmp\sdk\*" $gdal -Recurse -Force
+
+          # 1. Package runtime (DLLs)
+          $runtimeUrl = "$urlRoot\$base.zip"
+          Write-Host "Telechargement runtime : $runtimeUrl"
+          Invoke-WebRequest $runtimeUrl -OutFile "$tmp\runtime.zip" -TimeoutSec 180
+          Expand-Archive "$tmp\runtime.zip" -DestinationPath "$gdal" -Force
+
+          # 2. Package developpement (headers + gdal_i.lib)
+          $libsUrl = "$urlRoot\$base-libs.zip"
+          Write-Host "Telechargement libs : $libsUrl"
+          Invoke-WebRequest $libsUrl -OutFile "$tmp\libs.zip" -TimeoutSec 180
+          Expand-Archive "$tmp\libs.zip" -DestinationPath "$gdal" -Force
 
           Write-Host "Contenu C:\gdal :"
           Get-ChildItem $gdal | ForEach-Object { Write-Host "  $($_.Name)" }
 
-          # Localisation dynamique de gdal_i.lib (structure varie selon version SDK)
+          # Localisation dynamique (la structure exacte peut varier)
           $libFile = Get-ChildItem $gdal -Recurse -Filter "gdal_i.lib" | Select-Object -First 1
           if (-not $libFile) {
-            Write-Host "gdal_i.lib absent — fichiers .lib presents :"
+            Write-Error "gdal_i.lib introuvable — .lib presents :"
             Get-ChildItem $gdal -Recurse -Filter "*.lib" | ForEach-Object { Write-Host "  $($_.FullName)" }
             exit 1
           }
           $libDir = Split-Path $libFile.FullName
           Write-Host "gdal_i.lib : $($libFile.FullName)"
 
-          # Localisation de gdal.h
           $hdrFile = Get-ChildItem $gdal -Recurse -Filter "gdal.h" | Select-Object -First 1
           if (-not $hdrFile) { Write-Error "gdal.h introuvable" ; exit 1 }
           $incDir = Split-Path $hdrFile.FullName
-          Write-Host "gdal.h : $($hdrFile.FullName)"
+          Write-Host "gdal.h     : $($hdrFile.FullName)"
 
-          # Localisation des DLLs
           $dllFile = Get-ChildItem $gdal -Recurse -Filter "gdal*.dll" | Select-Object -First 1
           if (-not $dllFile) { Write-Error "gdal*.dll introuvable" ; exit 1 }
           $dllDir = Split-Path $dllFile.FullName
-          Write-Host "DLL : $($dllFile.FullName)"
+          Write-Host "gdal DLL   : $($dllFile.FullName)"
 
-          # Export pour gdal-sys et le linker
           "GDAL_HOME=$gdal"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$libDir"     | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$incDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
