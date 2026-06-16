@@ -93,17 +93,24 @@ jobs:
           New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
 
       # ── Patch Cargo.toml : remplace le fork git par crates.io gdal 0.19 ────
+      # La dépendance git est sur une seule ligne — on la remplace avec sed (bash)
+      # puis on vérifie qu'aucune ref au fork ne subsiste.
       - name: Patch Cargo.toml — use gdal crates.io instead of git fork
-        shell: pwsh
+        shell: bash
         run: |
-          $path = "pymdurs\Cargo.toml"
-          $content = Get-Content $path -Raw
-          $content = $content -replace `
-            'gdal\s*=\s*\{[^}]*git\s*=\s*"https://github\.com/AlexanderWillner/gdal\.git"[^}]*\}', `
-            'gdal = { version = "0.19", features = ["bindgen"], optional = true }'
-          Set-Content $path $content -Encoding utf8
-          Write-Host "Cargo.toml patché — dépendance gdal :"
-          Select-String -Path $path -Pattern "^gdal"
+          CARGO="pymdurs/Cargo.toml"
+          echo "=== Avant patch ===" && grep -n "gdal" "$CARGO"
+
+          # Remplace la ligne entière contenant AlexanderWillner
+          sed -i 's|gdal = { git = "https://github.com/AlexanderWillner/gdal.git".*|gdal = { version = "0.19", features = ["bindgen"], optional = true }|g' "$CARGO"
+
+          echo "=== Après patch ===" && grep -n "gdal" "$CARGO"
+
+          if grep -q "AlexanderWillner" "$CARGO"; then
+            echo "❌ Patch échoué — AlexanderWillner encore présent"
+            exit 1
+          fi
+          echo "✅ Patch Cargo.toml OK"
 
       # ── Conda : Python + GDAL 3.12 + GEOS + PROJ ───────────────────────────
       - name: Setup Miniconda
@@ -165,7 +172,10 @@ jobs:
           "GDAL_HOME=$lib"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include"   | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_VERSION=3"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          # Version complète requise par gdal-sys pour cargo:version_number
+          $gdalVer = ((conda list libgdal) | Select-String "^libgdal\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
+          Write-Host "GDAL version complete : $gdalVer"
+          "GDAL_VERSION=$gdalVer"             | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_LIB=$lib\share\proj"        | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DATA=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
