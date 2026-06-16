@@ -115,6 +115,41 @@ def preview_rasters_to_gif(
     return out_path
 
 
+def export_rasters_to_pngs(
+    folder: str | Path,
+    pattern: str = "shadow_*.tif",
+    out_dir: str | Path | None = None,
+    mode: str = "continuous",
+) -> Path | None:
+    """Export each SOLWEIG GeoTIFF (or legacy preview PNG) as a separate PNG file.
+
+    Args:
+        folder: Folder containing timestamped rasters (e.g. shadow_20250701_1200.tif).
+        pattern: Glob pattern for raster files (default: shadow_*.tif).
+        out_dir: Output directory for PNG files (default: folder / "preview").
+        mode: ``shadow`` (binary 0/1) or ``continuous`` (percentile stretch).
+
+    Returns:
+        Path to the output directory, or None if no matching files were found.
+    """
+    folder = Path(folder)
+    out_dir = Path(out_dir) if out_dir else folder / "preview"
+    paths = _find_raster_paths(folder, pattern)
+    if not paths:
+        print(f"⚠️  No files found for PNG export: {folder / pattern}")
+        return None
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+            img = Image.open(path).convert("RGB")
+        else:
+            img = _raster_to_frame(path, mode=mode).convert("RGB")
+        img.save(out_dir / f"{path.stem}.png")
+
+    return out_dir
+
+
 def create_solweig_preview_gifs(output_path: Path, duration_ms: int = 500) -> None:
     """Build shadow, Tmrt and UTCI preview GIFs from SOLWEIG per-timestep outputs."""
     specs = (
@@ -137,6 +172,28 @@ def create_solweig_preview_gifs(output_path: Path, duration_ms: int = 500) -> No
             print(f"✅ GIF created: {gif_path}")
 
 
+def create_solweig_preview_pngs(output_path: Path) -> None:
+    """Export shadow, Tmrt and UTCI per-timestep rasters as individual PNG previews."""
+    specs = (
+        ("shadow", "shadow_*.tif", "shadow"),
+        ("tmrt", "tmrt_*.tif", "continuous"),
+        ("utci", "utci_*.tif", "continuous"),
+    )
+    for subdir, pattern, mode in specs:
+        folder = output_path / subdir
+        if not folder.is_dir():
+            continue
+        png_dir = export_rasters_to_pngs(
+            folder,
+            pattern=pattern,
+            out_dir=folder / "preview",
+            mode=mode,
+        )
+        if png_dir is not None:
+            n_png = len(list(png_dir.glob("*.png")))
+            print(f"✅ {n_png} PNG exportés: {png_dir}")
+
+
 def main():
     print("🌆 Starting UMEP workflow with pymdurs and solweig...")
     print("=" * 60)
@@ -152,7 +209,12 @@ def main():
     # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
     #bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
     #bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
-    bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
+
+    # Tipee
+    bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
+
+    # Bordeaux
+    #bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
 
     # Convert bbox to Lambert-93 (EPSG:2154) with GeoPandas
     minx, miny, maxx, maxy = bbox_wgs84
@@ -473,6 +535,7 @@ def main():
         )
 
         create_solweig_preview_gifs(output_path)
+        create_solweig_preview_pngs(output_path)
     else:
         print("⚠️  Skipping SOLWEIG - missing requirements or DSM not available")
 
