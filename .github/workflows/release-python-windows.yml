@@ -72,9 +72,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # 2. Windows wheel
   # Stratégie :
-  #   - GDAL + GEOS + PROJ : conda-forge (gisinternals inaccessible depuis GitHub Actions)
-  #   - Rust : toolchain MSVC
-  #   - gdal crate : 0.19 crates.io (fork AlexanderWillner non testé sur Windows MSVC)
+  #   - GDAL 3.13.1 + GEOS + PROJ : conda-forge (gisinternals inaccessible depuis GitHub Actions)
+  #   - Rust : toolchain MSVC + fork gdal fix/gdal-3.13-compat (GDT_UInt8, bindgen)
+  #   - GDAL_VERSION doit être la version complète (ex. 3.13.1) pour les cfg gdal-sys
   # ---------------------------------------------------------------------------
   build-wheels:
     needs: [build-sdist]
@@ -96,27 +96,6 @@ jobs:
             -ErrorAction SilentlyContinue | Out-Null
           New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
 
-      # ── Patch Cargo.toml : fork git → crates.io gdal 0.19 ──────────────────
-      # Le fork AlexanderWillner corrige GDAL 3.13 sur Linux/Mac mais produit
-      # 55+ erreurs de types i32/u32 sur Windows MSVC (bindgen génère des types
-      # différents selon la plateforme). gdal 0.19 crates.io + conda-forge GDAL = OK.
-      - name: Patch Cargo.toml — replace git fork with gdal 0.19 crates.io
-        shell: bash
-        run: |
-          CARGO=$(find . -name "Cargo.toml" | xargs grep -l "AlexanderWillner" 2>/dev/null | head -1)
-          if [ -z "$CARGO" ]; then
-            echo "Aucun Cargo.toml avec AlexanderWillner — rien a patcher"
-            exit 0
-          fi
-          echo "Patching: $CARGO"
-          sed -i 's|gdal = { git = "https://github.com/AlexanderWillner/gdal.git"[^}]*}|gdal = { version = "0.19", features = ["bindgen"], optional = true }|' "$CARGO"
-          grep -n "gdal" "$CARGO"
-          if grep -q "AlexanderWillner" "$CARGO"; then
-            echo "ERREUR: patch echoue"
-            exit 1
-          fi
-          echo "Patch OK"
-
       # ── Setup Python via conda ───────────────────────────────────────────────
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -129,10 +108,13 @@ jobs:
 
       # ── GDAL + GEOS + PROJ via conda-forge ───────────────────────────────────
       # gisinternals.com est souvent inaccessible depuis les runners GitHub (timeout 443).
-      - name: Install GDAL, GEOS and PROJ via Conda
+      - name: Install GDAL 3.13.1, GEOS, PROJ and bindgen deps via Conda
         shell: pwsh
         run: |
-          conda install -c conda-forge gdal geos proj sqlite pkg-config --yes
+          # gdal=3.13.1 : aligné avec le fork gdal fix/gdal-3.13-compat (GDT_UInt8)
+          # clang/libclang : bindgen requis pour GDAL > 3.12 (pas de prebuilt gdal-sys)
+          conda install -c conda-forge `
+            gdal=3.13.1 geos=3.14.1 proj sqlite pkg-config clang libclang --yes
 
           $prefix = (conda info --json | ConvertFrom-Json).active_prefix
           $lib    = "$prefix\Library"
@@ -141,6 +123,10 @@ jobs:
           $geosVer = ((conda list geos) | Select-String "^geos\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
           $projVer = ((conda list proj) | Select-String "^proj\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
           Write-Host "GDAL $gdalVer  GEOS $geosVer  PROJ $projVer"
+          if ($gdalVer -notmatch "^3\.13\.") {
+            Write-Error "GDAL $gdalVer inattendu — attendu 3.13.x (crate gdal fix/gdal-3.13-compat)"
+            exit 1
+          }
 
           if (-not (Test-Path "$lib\include\gdal.h")) { Write-Error "gdal.h introuvable dans $lib\include" ; exit 1 }
 
@@ -155,7 +141,8 @@ jobs:
           "GDAL_HOME=$lib"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include"   | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_VERSION=3"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_VERSION=$gdalVer"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "LIBCLANG_PATH=$lib\bin"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_DLL_NAME=$($gdalDll.Name)"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DLL_NAME=$($projDll.Name)"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_DLL_NAME=$($geosDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -255,8 +242,8 @@ jobs:
             C:\cargo\registry
             C:\cargo\git
             C:\target
-          key: cargo-${{ runner.os }}-msvc-conda-gdal-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-msvc-conda-gdal-
+          key: cargo-${{ runner.os }}-msvc-conda-gdal-3.13-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-msvc-conda-gdal-3.13-
 
       - name: Install maturin
         shell: pwsh
@@ -270,6 +257,7 @@ jobs:
           GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
           GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
           GDAL_VERSION: ${{ env.GDAL_VERSION }}
+          LIBCLANG_PATH: ${{ env.LIBCLANG_PATH }}
           GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
           GEOS_VERSION: ${{ env.GEOS_VERSION }}
           PROJ_LIB: ${{ env.PROJ_LIB }}

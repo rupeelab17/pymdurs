@@ -99,7 +99,7 @@ def format_scale_caption(
     hour_end: int,
 ) -> str:
     return (
-        f"Échelle fixe {hour_start}h-{hour_end}h: "
+        f"Echelle fixe {hour_start}h-{hour_end}h: "
         f"min={vmin:.2f}, max={vmax:.2f} ({variable})"
     )
 
@@ -152,7 +152,7 @@ def append_colorbar_legend(
 
 def append_shadow_legend(img: Image.Image, variable: str) -> Image.Image:
     """Append a grayscale legend for shadow previews."""
-    caption = f"Ombre (0 = ensoleillé, 1 = ombragé) ({variable})"
+    caption = f"Ombre (0 = sous l'ombrage, 1 = au soleil) ({variable})"
     return append_colorbar_legend(
         img,
         cmap="gray",
