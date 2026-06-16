@@ -92,33 +92,6 @@ jobs:
             -ErrorAction SilentlyContinue | Out-Null
           New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
 
-      # ── Patch Cargo.toml : remplace le fork git par crates.io gdal 0.19 ────
-      # La dépendance git est sur une seule ligne — on la remplace avec sed (bash)
-      # puis on vérifie qu'aucune ref au fork ne subsiste.
-      - name: Patch Cargo.toml — use gdal crates.io instead of git fork
-        shell: bash
-        run: |
-          # Localise le Cargo.toml qui contient la dépendance gdal git
-          CARGO=$(find . -name "Cargo.toml" | xargs grep -l "AlexanderWillner" 2>/dev/null | head -1)
-          if [ -z "$CARGO" ]; then
-            echo "Aucun Cargo.toml avec AlexanderWillner trouvé — structure du repo :"
-            find . -name "Cargo.toml" | head -20
-            exit 1
-          fi
-          echo "Cargo.toml cible : $CARGO"
-          echo "=== Avant patch ===" && grep -n "gdal" "$CARGO"
-
-          # Remplace la ligne entière contenant AlexanderWillner
-          sed -i 's|gdal = { git = "https://github.com/AlexanderWillner/gdal.git".*|gdal = { version = "0.19", features = ["bindgen"], optional = true }|g' "$CARGO"
-
-          echo "=== Après patch ===" && grep -n "gdal" "$CARGO"
-
-          if grep -q "AlexanderWillner" "$CARGO"; then
-            echo "Patch echoue — AlexanderWillner encore present"
-            exit 1
-          fi
-          echo "Patch Cargo.toml OK : $CARGO"
-
       # ── Conda : Python + GDAL 3.12 + GEOS + PROJ ───────────────────────────
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
@@ -136,11 +109,11 @@ jobs:
           key: conda-${{ runner.os }}-gdal312-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: conda-${{ runner.os }}-gdal312-
 
-      - name: Install GDAL 3.12, GEOS, PROJ via Conda
+      - name: Install GDAL, GEOS, PROJ via Conda
         shell: pwsh
         run: |
-          # Epingle GDAL 3.12 — compatible avec gdal-crate 0.19 (crates.io)
-          conda install -c conda-forge "libgdal=3.12" geos proj sqlite pkg-config --yes
+          # Le fork AlexanderWillner/gdal supporte GDAL 3.13 — pas de contrainte de version
+          conda install -c conda-forge libgdal geos proj sqlite pkg-config --yes
 
           $prefix = (conda info --json | ConvertFrom-Json).active_prefix
           $lib    = "$prefix\Library"
@@ -179,10 +152,13 @@ jobs:
           "GDAL_HOME=$lib"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include"   | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          # Version complète requise par gdal-sys pour cargo:version_number
+          # Version complète pour pkg-config .pc et logs — NE PAS exporter GDAL_VERSION
+          # car gdal-sys (fork) détecte la version via bindgen lui-même.
+          # Si GDAL_VERSION est défini, gdal-sys le lit et peut échouer sur les types i32/u32.
           $gdalVer = ((conda list libgdal) | Select-String "^libgdal\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
-          Write-Host "GDAL version complete : $gdalVer"
-          "GDAL_VERSION=$gdalVer"             | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "GDAL version installee : $gdalVer"
+          # On exporte pour les .pc pkgconfig uniquement (variable locale au step)
+          "GDAL_VERSION_FULL=$gdalVer"        | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_LIB=$lib\share\proj"        | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DATA=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -304,7 +280,7 @@ jobs:
             '',
             'Name: GDAL',
             'Description: Geospatial Data Abstraction Library',
-            "Version: $env:GDAL_VERSION",
+            "Version: $env:GDAL_VERSION_FULL",
             'Libs: -L${libdir} -lgdal_i',
             'Cflags: -I${includedir}'
           )
@@ -344,7 +320,7 @@ jobs:
           GDAL_HOME: ${{ env.GDAL_HOME }}
           GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
           GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-          GDAL_VERSION: ${{ env.GDAL_VERSION }}
+          # GDAL_VERSION intentionnellement absent — le fork gdal-sys détecte via bindgen
           GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
           GEOS_VERSION: ${{ env.GEOS_VERSION }}
           PROJ_LIB: ${{ env.PROJ_LIB }}
