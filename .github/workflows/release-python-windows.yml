@@ -98,7 +98,14 @@ jobs:
       - name: Patch Cargo.toml — use gdal crates.io instead of git fork
         shell: bash
         run: |
-          CARGO="pymdurs/Cargo.toml"
+          # Localise le Cargo.toml qui contient la dépendance gdal git
+          CARGO=$(find . -name "Cargo.toml" | xargs grep -l "AlexanderWillner" 2>/dev/null | head -1)
+          if [ -z "$CARGO" ]; then
+            echo "Aucun Cargo.toml avec AlexanderWillner trouvé — structure du repo :"
+            find . -name "Cargo.toml" | head -20
+            exit 1
+          fi
+          echo "Cargo.toml cible : $CARGO"
           echo "=== Avant patch ===" && grep -n "gdal" "$CARGO"
 
           # Remplace la ligne entière contenant AlexanderWillner
@@ -107,10 +114,10 @@ jobs:
           echo "=== Après patch ===" && grep -n "gdal" "$CARGO"
 
           if grep -q "AlexanderWillner" "$CARGO"; then
-            echo "❌ Patch échoué — AlexanderWillner encore présent"
+            echo "Patch echoue — AlexanderWillner encore present"
             exit 1
           fi
-          echo "✅ Patch Cargo.toml OK"
+          echo "Patch Cargo.toml OK : $CARGO"
 
       # ── Conda : Python + GDAL 3.12 + GEOS + PROJ ───────────────────────────
       - name: Setup Miniconda
