@@ -71,6 +71,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 2. Windows wheel
+  # Stratégie :
+  #   - GDAL : binaires officiels MSVC gisinternals.com (gdal_i.lib + headers + DLLs)
+  #   - GEOS + PROJ : conda-forge (+ génération manuelle des .lib MSVC)
+  #   - Rust : toolchain MSVC
+  #   - gdal crate : 0.19 crates.io (fork AlexanderWillner non testé sur Windows MSVC)
   # ---------------------------------------------------------------------------
   build-wheels:
     needs: [build-sdist]
@@ -92,7 +97,28 @@ jobs:
             -ErrorAction SilentlyContinue | Out-Null
           New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
 
-      # ── Conda : Python + GDAL 3.12 + GEOS + PROJ ───────────────────────────
+      # ── Patch Cargo.toml : fork git → crates.io gdal 0.19 ──────────────────
+      # Le fork AlexanderWillner corrige GDAL 3.13 sur Linux/Mac mais produit
+      # 55+ erreurs de types i32/u32 sur Windows MSVC (bindgen génère des types
+      # différents selon la plateforme). gdal 0.19 crates.io + gisinternals = OK.
+      - name: Patch Cargo.toml — replace git fork with gdal 0.19 crates.io
+        shell: bash
+        run: |
+          CARGO=$(find . -name "Cargo.toml" | xargs grep -l "AlexanderWillner" 2>/dev/null | head -1)
+          if [ -z "$CARGO" ]; then
+            echo "Aucun Cargo.toml avec AlexanderWillner — rien a patcher"
+            exit 0
+          fi
+          echo "Patching: $CARGO"
+          sed -i 's|gdal = { git = "https://github.com/AlexanderWillner/gdal.git"[^}]*}|gdal = { version = "0.19", features = ["bindgen"], optional = true }|' "$CARGO"
+          grep -n "gdal" "$CARGO"
+          if grep -q "AlexanderWillner" "$CARGO"; then
+            echo "ERREUR: patch echoue"
+            exit 1
+          fi
+          echo "Patch OK"
+
+      # ── Setup Python via conda ───────────────────────────────────────────────
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -102,161 +128,140 @@ jobs:
           channel-priority: strict
           activate-environment: true
 
-      - name: Cache conda packages
-        uses: actions/cache@v4
-        with:
-          path: ~/conda_pkgs_dir
-          key: conda-${{ runner.os }}-gdal312-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: conda-${{ runner.os }}-gdal312-
-
-      - name: Install GDAL, GEOS, PROJ via Conda
+      # ── GDAL officiel Windows (gisinternals) ────────────────────────────────
+      # gisinternals.com = builds MSVC officiels de Tamas Szekeres (mainteneur GDAL Windows)
+      # Fournit gdal_i.lib + gdal.h + gdal*.dll — tout ce dont gdal-sys a besoin sur MSVC
+      # gdal 0.19 crates.io est compatible avec GDAL 3.10 gisinternals
+      - name: Download and install GDAL from gisinternals
         shell: pwsh
         run: |
-          # Le fork AlexanderWillner/gdal supporte GDAL 3.13 — pas de contrainte de version
-          conda install -c conda-forge libgdal geos proj sqlite pkg-config --yes
+          $sdkUrl = "https://download.gisinternals.com/sdk/downloads/release-1928-x64-gdal-3-10-0-mapserver-8-2-2.zip"
+          $tmp = "$env:TEMP\gdal_sdk"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+
+          Write-Host "Telechargement : $sdkUrl"
+          Invoke-WebRequest $sdkUrl -OutFile "$tmp\sdk.zip" -TimeoutSec 180
+          Write-Host "Extraction..."
+          Expand-Archive "$tmp\sdk.zip" -DestinationPath "$tmp\sdk" -Force
+
+          # Arborescence SDK gisinternals : sdk\release-1928-x64\bin  include  lib
+          $sdk = (Get-ChildItem "$tmp\sdk" -Directory | Select-Object -First 1).FullName
+          Write-Host "SDK root : $sdk"
+
+          $gdal = "C:\gdal"
+          New-Item -ItemType Directory -Force -Path $gdal | Out-Null
+          Copy-Item "$sdk\*" $gdal -Recurse -Force
+
+          # Verifications
+          if (-not (Test-Path "$gdal\lib\gdal_i.lib")) {
+            # Certaines versions SDK mettent les .lib dans bin
+            $lib = Get-ChildItem $gdal -Recurse -Filter "gdal_i.lib" | Select-Object -First 1
+            if ($lib) {
+              Write-Host "gdal_i.lib trouve ailleurs : $($lib.FullName)"
+              Copy-Item $lib.FullName "$gdal\lib\" -Force
+            } else {
+              Write-Error "gdal_i.lib introuvable dans le SDK"
+              Get-ChildItem $gdal -Recurse -Filter "*.lib" | ForEach-Object { Write-Host $_.FullName }
+              exit 1
+            }
+          }
+          Write-Host "gdal_i.lib OK"
+
+          if (-not (Test-Path "$gdal\include\gdal.h")) {
+            $hdr = Get-ChildItem $gdal -Recurse -Filter "gdal.h" | Select-Object -First 1
+            if ($hdr) {
+              Write-Host "gdal.h trouve ailleurs : $($hdr.FullName)"
+            } else {
+              Write-Error "gdal.h introuvable dans le SDK"
+              exit 1
+            }
+            $incDir = Split-Path $hdr.FullName
+            "GDAL_INCLUDE_DIR=$incDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            "GDAL_INCLUDE_DIR=$gdal\include" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+          # Export des variables pour gdal-sys
+          "GDAL_HOME=$gdal"         | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_LIB_DIR=$gdal\lib"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GDAL_VERSION=3"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "$gdal\bin"               | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "GDAL installe dans $gdal"
+
+      # ── GEOS + PROJ via conda ────────────────────────────────────────────────
+      - name: Install GEOS and PROJ via Conda
+        shell: pwsh
+        run: |
+          conda install -c conda-forge geos proj sqlite pkg-config --yes
 
           $prefix = (conda info --json | ConvertFrom-Json).active_prefix
           $lib    = "$prefix\Library"
 
-          Write-Host "Active conda prefix : $prefix"
-          Write-Host "Library             : $lib"
-
-          # Vérification DLL GDAL
-          $gdalDll = Get-ChildItem "$lib\bin" -Filter "gdal*.dll" |
-                     Sort-Object Name | Select-Object -First 1
-          if (-not $gdalDll) {
-            Write-Error "gdal*.dll introuvable dans $lib\bin" ; exit 1
-          }
-          Write-Host "GDAL DLL : $($gdalDll.Name)"
-
-          # Vérification DLL PROJ
-          $projDll = Get-ChildItem "$lib\bin" -Filter "proj*.dll" |
-                     Sort-Object Name | Select-Object -First 1
-          if (-not $projDll) {
-            Write-Error "proj*.dll introuvable dans $lib\bin" ; exit 1
-          }
-          Write-Host "PROJ DLL : $($projDll.Name)"
-
-          # Versions
           $geosVer = ((conda list geos) | Select-String "^geos\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
           $projVer = ((conda list proj) | Select-String "^proj\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
           Write-Host "GEOS $geosVer  PROJ $projVer"
 
-          # Export
-          "CONDA_PREFIX=$prefix"            | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "CONDA_LIB=$lib"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_DLL_NAME=$($gdalDll.Name)"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_DLL_NAME=$($projDll.Name)"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_VERSION=$geosVer"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_VERSION=$projVer"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_HOME=$lib"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_INCLUDE_DIR=$lib\include"   | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          # Version complète pour pkg-config .pc et logs — NE PAS exporter GDAL_VERSION
-          # car gdal-sys (fork) détecte la version via bindgen lui-même.
-          # Si GDAL_VERSION est défini, gdal-sys le lit et peut échouer sur les types i32/u32.
-          $gdalVer = ((conda list libgdal) | Select-String "^libgdal\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
-          Write-Host "GDAL version installee : $gdalVer"
-          # On exporte pour les .pc pkgconfig uniquement (variable locale au step)
-          "GDAL_VERSION_FULL=$gdalVer"        | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_LIB_DIR=$lib\lib"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_LIB=$lib\share\proj"        | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_DATA=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_ROOT=$lib"                  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "RUST_BACKTRACE=full"             | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          # pkg-config fourni par conda
-          "$lib\bin"                        | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
-          "$prefix\bin"                     | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          $projDll = Get-ChildItem "$lib\bin" -Filter "proj*.dll" | Sort-Object Name | Select-Object -First 1
+          $geosDll = Get-ChildItem "$lib\bin" -Filter "geos_c*.dll" | Sort-Object Name | Select-Object -First 1
+          if (-not $projDll) { Write-Error "proj*.dll introuvable" ; exit 1 }
+          if (-not $geosDll) { Write-Error "geos_c*.dll introuvable" ; exit 1 }
 
-      # ── Génération des import libraries MSVC (.lib) depuis les DLLs conda ──
-      # conda-forge Windows ne livre pas les .lib MSVC — on les génère avec
-      # dumpbin (export table) + lib.exe (import lib). Les deux outils sont
-      # toujours présents sur windows-latest via Visual Studio Build Tools.
-      - name: Generate MSVC import libraries (gdal_i.lib + proj_i.lib + geos_c.lib)
+          "CONDA_LIB=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_DLL_NAME=$($projDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_DLL_NAME=$($geosDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_VERSION=$geosVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_VERSION=$projVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GEOS_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_LIB=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_DATA=$lib\share\proj"      | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROJ_ROOT=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUST_BACKTRACE=full"            | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "$lib\bin"                       | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          "$prefix\bin"                    | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # ── Import libraries MSVC pour PROJ et GEOS ──────────────────────────────
+      - name: Generate MSVC import libraries (proj_i.lib + geos_c.lib)
         shell: pwsh
         run: |
-          # Localise les outils MSVC
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath  = & $vswhere -latest -products * `
                        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
                        -property installationPath
-          if (-not $vsPath) { Write-Error "Visual Studio introuvable" ; exit 1 }
-
-          $vcVer   = Get-ChildItem "$vsPath\VC\Tools\MSVC" |
-                     Sort-Object Name -Descending | Select-Object -First 1
-          $binDir  = "$($vcVer.FullName)\bin\Hostx64\x64"
+          $vcVer  = Get-ChildItem "$vsPath\VC\Tools\MSVC" | Sort-Object Name -Descending | Select-Object -First 1
+          $binDir = "$($vcVer.FullName)\bin\Hostx64\x64"
           $dumpbin = "$binDir\dumpbin.exe"
           $libExe  = "$binDir\lib.exe"
           Write-Host "Outils MSVC : $binDir"
 
-          function New-ImportLib {
-            param($DllPath, $LibPath)
+          function New-ImportLib($DllPath, $LibPath) {
             $dllName = Split-Path $DllPath -Leaf
-            $defPath = "$env:TEMP\$([System.IO.Path]::GetFileNameWithoutExtension($dllName)).def"
-
-            Write-Host "`n── $dllName ──"
+            $defPath = "$env:TEMP\$([IO.Path]::GetFileNameWithoutExtension($dllName)).def"
+            Write-Host "  $dllName -> $LibPath"
             $exports = & $dumpbin /exports $DllPath
-            if ($LASTEXITCODE -ne 0) { Write-Error "dumpbin échoué pour $dllName" ; exit 1 }
-
-            # Parse : lignes "   N   hint   RVA   name"
             $symbols = $exports |
               Select-String -Pattern "^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)" |
               ForEach-Object { $_.Matches[0].Groups[1].Value }
-
-            if ($symbols.Count -eq 0) {
-              Write-Warning "Aucun export dans $dllName — librairie ignorée"
-              return
-            }
-            Write-Host "  $($symbols.Count) symboles exportés"
-
+            if ($symbols.Count -eq 0) { Write-Warning "Pas d'exports dans $dllName" ; return }
             "LIBRARY $dllName" | Out-File $defPath -Encoding ascii
             "EXPORTS"           | Out-File $defPath -Encoding ascii -Append
             $symbols            | Out-File $defPath -Encoding ascii -Append
-
             & $libExe /def:$defPath /out:$LibPath /machine:x64 | Out-Null
-            if ($LASTEXITCODE -ne 0) { Write-Error "lib.exe échoué pour $dllName" ; exit 1 }
-
-            $sz = (Get-Item $LibPath).Length
-            Write-Host "  ✅ $LibPath ($sz bytes)"
+            Write-Host "  OK : $((Get-Item $LibPath).Length) bytes"
           }
 
-          $binDir2 = "$env:CONDA_LIB\bin"
-          $libDir  = "$env:CONDA_LIB\lib"
-
-          # GDAL
-          New-ImportLib "$binDir2\$env:GDAL_DLL_NAME" "$libDir\gdal_i.lib"
-
-          # PROJ — proj-sys cherche proj_i.lib ou proj.lib
-          New-ImportLib "$binDir2\$env:PROJ_DLL_NAME" "$libDir\proj_i.lib"
+          $libDir = "$env:CONDA_LIB\lib"
+          New-ImportLib "$env:CONDA_LIB\bin\$env:PROJ_DLL_NAME" "$libDir\proj_i.lib"
           Copy-Item "$libDir\proj_i.lib" "$libDir\proj.lib" -Force
+          New-ImportLib "$env:CONDA_LIB\bin\$env:GEOS_DLL_NAME" "$libDir\geos_c.lib"
 
-          # GEOS — geos-sys cherche geos_c.lib
-          $geosDll = Get-ChildItem $binDir2 -Filter "geos_c*.dll" |
-                     Sort-Object Name | Select-Object -First 1
-          if ($geosDll) {
-            New-ImportLib $geosDll.FullName "$libDir\geos_c.lib"
-          }
-
-          # Vérification finale
-          Write-Host "`n── Vérification ──"
-          @("gdal_i.lib","proj_i.lib","proj.lib","geos_c.lib") | ForEach-Object {
-            $p = "$libDir\$_"
-            if (Test-Path $p) { Write-Host "  ✅ $_" }
-            else              { Write-Warning "  ⚠ $_ absent" }
-          }
-
-      # ── Configuration pkg-config pour proj-sys ──────────────────────────────
-      # proj-sys 0.27 tente pkg-config avant les env vars sur Windows MSVC.
-      # On écrit un .pc minimal pour que pkg-config trouve PROJ sans erreur.
-      - name: Write pkg-config .pc files for PROJ and GDAL
+      # ── pkg-config .pc pour proj-sys ─────────────────────────────────────────
+      - name: Write pkg-config .pc files
         shell: pwsh
         run: |
           $pcDir = "$env:CONDA_LIB\lib\pkgconfig"
           New-Item -ItemType Directory -Force -Path $pcDir | Out-Null
+          $pfx = $env:CONDA_LIB -replace "\\","/"
 
-          $pfx = $env:CONDA_LIB -replace '\\','/'
-
-          # proj.pc — écriture ligne par ligne pour éviter les here-strings
           $projPc = @(
             "prefix=$pfx",
             'exec_prefix=${prefix}',
@@ -270,27 +275,10 @@ jobs:
             'Cflags: -I${includedir}'
           )
           $projPc | Set-Content "$pcDir\proj.pc" -Encoding ascii
-
-          # gdal.pc
-          $gdalPc = @(
-            "prefix=$pfx",
-            'exec_prefix=${prefix}',
-            'libdir=${prefix}/lib',
-            'includedir=${prefix}/include',
-            '',
-            'Name: GDAL',
-            'Description: Geospatial Data Abstraction Library',
-            "Version: $env:GDAL_VERSION_FULL",
-            'Libs: -L${libdir} -lgdal_i',
-            'Cflags: -I${includedir}'
-          )
-          $gdalPc | Set-Content "$pcDir\gdal.pc" -Encoding ascii
-
           "PKG_CONFIG_PATH=$pcDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "pkg-config .pc ecrits dans $pcDir"
-          Get-Content "$pcDir\proj.pc"
+          Write-Host "proj.pc ecrit dans $pcDir"
 
-      # ── Rust MSVC ───────────────────────────────────────────────────────────
+      # ── Rust MSVC ────────────────────────────────────────────────────────────
       - name: Install Rust MSVC toolchain
         shell: pwsh
         run: |
@@ -306,70 +294,21 @@ jobs:
             C:\cargo\registry
             C:\cargo\git
             C:\target
-          key: cargo-${{ runner.os }}-msvc-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-msvc-
+          key: cargo-${{ runner.os }}-msvc-gisinternals-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-msvc-gisinternals-
 
       - name: Install maturin
         shell: pwsh
         run: pip install maturin
 
-      # ── Pre-fetch du crate gdal (fork) pour pouvoir le patcher ──────────────
-      # Le fork AlexanderWillner génère OAMS_* en i32 sur Windows MSVC via bindgen
-      # mais le code Rust les compare à un u32. On force le cast as u32 dans srs.rs.
-      - name: Pre-fetch gdal fork and patch OAMS type mismatch
+      # ── Build ─────────────────────────────────────────────────────────────────
+      - name: Build wheel
         shell: pwsh
         env:
           GDAL_HOME: ${{ env.GDAL_HOME }}
           GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
           GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-          GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
-          PROJ_LIB: ${{ env.PROJ_LIB }}
-        run: |
-          # 1. Fetch uniquement (sans compiler) pour peupler le cache cargo git
-          cargo fetch --manifest-path pymdurs/Cargo.toml 2>&1 | Select-String -Pattern "gdal|Fetch|error" | ForEach-Object { Write-Host $_ }
-
-          # 2. Localiser srs.rs dans le checkout git du fork
-          $srsPath = Get-ChildItem -Path "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "srs.rs" |
-                     Where-Object { $_.FullName -match "gdal" } |
-                     Select-Object -First 1
-          if (-not $srsPath) {
-            Write-Error "srs.rs introuvable dans $env:CARGO_HOME\git\checkouts"
-            exit 1
-          }
-          Write-Host "srs.rs trouve : $($srsPath.FullName)"
-
-          # 3. Patch : cast explicite as u32 pour les 3 constantes OAMS_*
-          # Avant : OAMS_TRADITIONAL_GIS_ORDER => Ok(Self::TraditionalGisOrder),
-          # Après : x if x == OAMS_TRADITIONAL_GIS_ORDER as u32 => Ok(Self::TraditionalGisOrder),
-          $src = Get-Content $srsPath.FullName -Raw
-
-          # Vérifie que le patch n'a pas déjà été appliqué
-          if ($src -match "as u32 =>") {
-            Write-Host "Patch deja applique — skip"
-          } else {
-            $src = $src -replace 'OAMS_TRADITIONAL_GIS_ORDER\s*=>', 'x if x == OAMS_TRADITIONAL_GIS_ORDER as u32 =>'
-            $src = $src -replace 'OAMS_AUTHORITY_COMPLIANT\s*=>', 'x if x == OAMS_AUTHORITY_COMPLIANT as u32 =>'
-            $src = $src -replace 'OAMS_CUSTOM\s*=>', 'x if x == OAMS_CUSTOM as u32 =>'
-            Set-Content $srsPath.FullName $src -Encoding utf8 -NoNewline
-            Write-Host "Patch OAMS types applique dans $($srsPath.FullName)"
-
-            # Vérification
-            $check = Select-String -Path $srsPath.FullName -Pattern "as u32 =>"
-            Write-Host "Lignes patchees : $($check.Count)"
-            if ($check.Count -lt 3) {
-              Write-Error "Patch incomplet — seulement $($check.Count)/3 remplacements"
-              exit 1
-            }
-          }
-
-      # ── Build ────────────────────────────────────────────────────────────────
-      - name: Build wheel (maturin direct)
-        shell: pwsh
-        env:
-          GDAL_HOME: ${{ env.GDAL_HOME }}
-          GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
-          GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-          # GDAL_VERSION intentionnellement absent — le fork gdal-sys détecte via bindgen
+          GDAL_VERSION: ${{ env.GDAL_VERSION }}
           GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
           GEOS_VERSION: ${{ env.GEOS_VERSION }}
           PROJ_LIB: ${{ env.PROJ_LIB }}
@@ -384,18 +323,18 @@ jobs:
             --manifest-path pymdurs/Cargo.toml `
             --out dist
 
-      # ── Test ─────────────────────────────────────────────────────────────────
+      # ── Test ──────────────────────────────────────────────────────────────────
       - name: Test wheel
         shell: pwsh
         run: |
           pip install --force-reinstall --verbose (Get-Item dist\*.whl)
           Push-Location $env:TEMP
           try {
-            python -c "import pymdurs; print('✅ pymdurs imported successfully')"
+            python -c "import pymdurs; print('pymdurs imported successfully')"
             python -c "
           import pymdurs
           bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0)
-          print('✅ PyBoundingBox works: min_x =', bbox.min_x)
+          print('PyBoundingBox works: min_x =', bbox.min_x)
           "
           } finally {
             Pop-Location
