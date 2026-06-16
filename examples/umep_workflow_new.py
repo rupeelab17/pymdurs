@@ -19,6 +19,7 @@ Note: On Apple Silicon (ARM64), solweig may require the x86_64 target:
 """
 
 import os
+import sys
 from pathlib import Path
 
 import geopandas as gpd
@@ -26,176 +27,19 @@ import numpy as np
 import rasterio
 import solweig
 from osgeo import gdal, gdalconst
-from PIL import Image
 from shapely.geometry import box
 
 import pymdurs
 
+_EXAMPLES_DIR = Path(__file__).resolve().parent
+if str(_EXAMPLES_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXAMPLES_DIR))
 
-def _raster_to_frame(path: Path, mode: str = "continuous") -> Image.Image:
-    """Convert a GeoTIFF band to a PIL frame for GIF encoding."""
-    with rasterio.open(path) as src:
-        data = src.read(1).astype(np.float64)
-        nodata = src.nodata
-        if nodata is not None:
-            data = np.where(data == nodata, np.nan, data)
-
-    if mode == "shadow":
-        arr = np.nan_to_num(data, nan=0.0)
-        scaled = (np.clip(arr, 0, 1) * 255).astype(np.uint8)
-    else:
-        valid = data[np.isfinite(data)]
-        if valid.size == 0:
-            scaled = np.zeros(data.shape, dtype=np.uint8)
-        else:
-            vmin, vmax = np.percentile(valid, [2, 98])
-            if vmax <= vmin:
-                vmax = vmin + 1.0
-            filled = np.nan_to_num(data, nan=vmin)
-            scaled = ((filled - vmin) / (vmax - vmin) * 255).clip(0, 255).astype(np.uint8)
-
-    return Image.fromarray(scaled, mode="L").convert("P", palette=Image.ADAPTIVE)
-
-
-def _find_raster_paths(folder: Path, pattern: str) -> list[Path]:
-    """Resolve raster paths; fall back to legacy PNG previews if no GeoTIFF match."""
-    paths = sorted(folder.glob(pattern))
-    if paths:
-        return paths
-    prefix = pattern.split("*", 1)[0]
-    for fallback in (f"{prefix}*.preview.png", f"{prefix}*.png"):
-        paths = sorted(folder.glob(fallback))
-        if paths:
-            return paths
-    return []
-
-
-def preview_rasters_to_gif(
-    folder: str | Path,
-    pattern: str = "shadow_*.tif",
-    out_path: str | Path | None = None,
-    duration_ms: int = 500,
-    loop: int = 0,
-    mode: str = "continuous",
-) -> Path | None:
-    """Create an animated GIF from SOLWEIG GeoTIFFs (or legacy preview PNGs).
-
-    Args:
-        folder: Folder containing timestamped rasters (e.g. shadow_20250701_1200.tif).
-        pattern: Glob pattern for raster files (default: shadow_*.tif).
-        out_path: Output GIF file path.
-        duration_ms: Duration per frame in ms.
-        loop: 0 = loop forever.
-        mode: ``shadow`` (binary 0/1) or ``continuous`` (percentile stretch).
-
-    Returns:
-        Path to the created GIF, or None if no matching files were found.
-    """
-    folder = Path(folder)
-    out_path = Path(out_path) if out_path else folder / "preview.gif"
-    paths = _find_raster_paths(folder, pattern)
-    if not paths:
-        print(f"⚠️  No files found for GIF: {folder / pattern}")
-        return None
-
-    frames: list[Image.Image] = []
-    for path in paths:
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-            frames.append(Image.open(path).convert("P", palette=Image.ADAPTIVE))
-        else:
-            frames.append(_raster_to_frame(path, mode=mode))
-
-    frames[0].save(
-        out_path,
-        save_all=True,
-        append_images=frames[1:],
-        duration=duration_ms,
-        loop=loop,
-    )
-    return out_path
-
-
-def export_rasters_to_pngs(
-    folder: str | Path,
-    pattern: str = "shadow_*.tif",
-    out_dir: str | Path | None = None,
-    mode: str = "continuous",
-) -> Path | None:
-    """Export each SOLWEIG GeoTIFF (or legacy preview PNG) as a separate PNG file.
-
-    Args:
-        folder: Folder containing timestamped rasters (e.g. shadow_20250701_1200.tif).
-        pattern: Glob pattern for raster files (default: shadow_*.tif).
-        out_dir: Output directory for PNG files (default: folder / "preview").
-        mode: ``shadow`` (binary 0/1) or ``continuous`` (percentile stretch).
-
-    Returns:
-        Path to the output directory, or None if no matching files were found.
-    """
-    folder = Path(folder)
-    out_dir = Path(out_dir) if out_dir else folder / "preview"
-    paths = _find_raster_paths(folder, pattern)
-    if not paths:
-        print(f"⚠️  No files found for PNG export: {folder / pattern}")
-        return None
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for path in paths:
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-            img = Image.open(path).convert("RGB")
-        else:
-            img = _raster_to_frame(path, mode=mode).convert("RGB")
-        img.save(out_dir / f"{path.stem}.png")
-
-    return out_dir
-
-
-def create_solweig_preview_gifs(output_path: Path, duration_ms: int = 500) -> None:
-    """Build shadow, Tmrt and UTCI preview GIFs from SOLWEIG per-timestep outputs."""
-    specs = (
-        ("shadow", "shadow_*.tif", "shadow", "shadow_preview.gif"),
-        ("tmrt", "tmrt_*.tif", "continuous", "tmrt_preview.gif"),
-        ("utci", "utci_*.tif", "continuous", "utci_preview.gif"),
-    )
-    for subdir, pattern, mode, gif_name in specs:
-        folder = output_path / subdir
-        if not folder.is_dir():
-            continue
-        gif_path = preview_rasters_to_gif(
-            folder,
-            pattern=pattern,
-            out_path=output_path / gif_name,
-            duration_ms=duration_ms,
-            mode=mode,
-        )
-        if gif_path is not None:
-            print(f"✅ GIF created: {gif_path}")
-
-
-def create_solweig_preview_pngs(output_path: Path) -> None:
-    """Export shadow, Tmrt and UTCI per-timestep rasters as individual PNG previews."""
-    specs = (
-        ("shadow", "shadow_*.tif", "shadow"),
-        ("tmrt", "tmrt_*.tif", "continuous"),
-        ("utci", "utci_*.tif", "continuous"),
-    )
-    for subdir, pattern, mode in specs:
-        folder = output_path / subdir
-        if not folder.is_dir():
-            continue
-        png_dir = export_rasters_to_pngs(
-            folder,
-            pattern=pattern,
-            out_dir=folder / "preview",
-            mode=mode,
-        )
-        if png_dir is not None:
-            n_png = len(list(png_dir.glob("*.png")))
-            print(f"✅ {n_png} PNG exportés: {png_dir}")
+from utils import create_solweig_preview_gifs, create_solweig_preview_pngs  # noqa: E402
 
 
 def main():
-    print("🌆 Starting UMEP workflow with pymdurs and solweig...")
+    print("Starting UMEP workflow with pymdurs and solweig...")
     print("=" * 60)
 
     # Configuration
@@ -226,9 +70,9 @@ def main():
     # Working CRS (Lambert 93 - EPSG:2154)
     working_crs = 2154
 
-    print(f"📦 Bounding box: {bbox_wgs84}")
-    print(f"🗺️  Working CRS: EPSG:{working_crs}")
-    print(f"📁 Output folder: {output_folder_str}")
+    print(f"Bounding box: {bbox_wgs84}")
+    print(f"Working CRS: EPSG:{working_crs}")
+    print(f"Output folder: {output_folder_str}")
 
     # ========================================================================
     # Step 1: Collect DEM from IGN API
@@ -243,7 +87,7 @@ def main():
     dem = dem.run()
 
     dem_source = Path(output_folder_str) / "DEM.tif"
-    print(f"✅ DEM collected and saved to: {dem_source}")
+    print(f"DEM collected and saved to: {dem_source}")
 
     # ========================================================================
     # Step 2: Load LiDAR data from IGN WFS service
@@ -263,33 +107,33 @@ def main():
         # Set CRS (same as DEM)
         lidar.set_crs(working_crs)
 
-        print("📦 Bounding box set")
+        print("Bounding box set")
         geo = lidar.geo_core
-        print(f"🗺️  CRS: {geo.epsg}")
+        print(f"CRS: {geo.epsg}")
 
         # Generate CDSM from vegetation and water classes
         # Classification: 2 = Ground, 3 = Low Vegetation, 4 = Medium Vegetation,
         #                 5 = High Vegetation, 9 = Water
-        print("🌳 Generating CDSM from vegetation and water classes...")
+        print("Generating CDSM from vegetation and water classes...")
         classification_list = [3, 4, 5]  # Vegetation and water classes
         lidar.run(file_name="CDSM.tif", classification_list=classification_list)
-        print("✅ CDSM generated")
+        print("CDSM generated")
 
         # Generate DSM from ground and buildings classes
-        print("🏢 Generating DSM from ground and buildings classes...")
+        print("Generating DSM from ground and buildings classes...")
         classification_list = [2, 6, 9]  # Ground and buildings classes
         dsm_output_path = lidar.run(
             file_name="DSM.tif", classification_list=classification_list
         )
 
-        print("✅ LiDAR processing complete!")
-        print(f"📁 DSM GeoTIFF saved to: {dsm_output_path}")
+        print("LiDAR processing complete!")
+        print(f"DSM GeoTIFF saved to: {dsm_output_path}")
 
         # Check if file exists
         if os.path.exists(dsm_output_path):
             size = os.path.getsize(dsm_output_path) / (1024 * 1024)  # MB
-            print(f"📊 DSM GeoTIFF file size: {size:.2f} MB")
-            print("📊 File contains 3 bands:")
+            print(f"DSM GeoTIFF file size: {size:.2f} MB")
+            print("File contains 3 bands:")
             print("   - Band 1: DSM (Digital Surface Model)")
             print("   - Band 2: DTM (Digital Terrain Model)")
             print("   - Band 3: CHM (Canopy Height Model)")
@@ -324,7 +168,7 @@ def main():
                 srcDSOrSrcDSTab=str(dem_source),
                 options=warp_options,
             )
-            print(f"✅ DEM clipped to: {dem_clip_path}")
+            print(f"DEM clipped to: {dem_clip_path}")
 
         # Clip DSM
         dsm_clip_path = Path(output_folder_str) / "DSM_clip.tif"
@@ -334,7 +178,7 @@ def main():
                 srcDSOrSrcDSTab=str(dsm_source),
                 options=warp_options,
             )
-            print(f"✅ DSM clipped to: {dsm_clip_path}")
+            print(f"DSM clipped to: {dsm_clip_path}")
 
         # Clip CDSM
         cdsm_clip_path = Path(output_folder_str) / "CDSM_clip.tif"
@@ -345,7 +189,7 @@ def main():
                 srcDSOrSrcDSTab=str(cdsm_source),
                 options=warp_options,
             )
-            print(f"✅ CDSM clipped to: {cdsm_clip_path}")
+            print(f"CDSM clipped to: {cdsm_clip_path}")
 
         # Clip Landcover
         landcover_clip_path = Path(output_folder_str) / "landcover_clip.tif"
@@ -356,14 +200,14 @@ def main():
                 srcDSOrSrcDSTab=str(landcover_source),
                 options=warp_options,
             )
-            print(f"✅ Landcover clipped to: {landcover_clip_path}")
+            print(f"Landcover clipped to: {landcover_clip_path}")
         else:
             print(
-                "⚠️  landcover.tif missing: run from examples/ first: "
+                "Warning: landcover.tif missing: run from examples/ first: "
                 "python cosia_from_ign.py"
             )
     else:
-        print("⚠️  Mask shapefile not found, skipping clipping")
+        print("Warning: Mask shapefile not found, skipping clipping")
 
     # Set paths for later steps
     dsm_path = Path(output_folder_str) / "DSM_clip.tif"
@@ -403,10 +247,10 @@ def main():
             with rasterio.open(dsm_clip_path, "w", **dsm_profile) as dst:
                 dst.write(dsm_data, 1)
 
-            print(f"✅ Filled {filled_count} DSM NoData pixels with DEM values")
+            print(f"Filled {filled_count} DSM NoData pixels with DEM values")
             print(f"   ({filled_count / dsm_data.size * 100:.2f}% of total)")
         else:
-            print("✅ No DSM NoData pixels to fill")
+            print("No DSM NoData pixels to fill")
 
     # ========================================================================
     # Step 6: Run SOLWEIG for thermal comfort analysis
@@ -465,7 +309,7 @@ def main():
             output_dir=str(output_path),
             outputs=["tmrt", "shadow", "utci"],
         )
-        print("✅ SOLWEIG run complete!")
+        print("SOLWEIG run complete!")
 
         print(results.report())
 
@@ -479,11 +323,11 @@ def main():
 
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
-        im0 = axes[0, 0].imshow(results.tmrt_mean, cmap="hot")
+        im0 = axes[0, 0].imshow(results.tmrt_mean, cmap="viridis")
         axes[0, 0].set_title("Mean Tmrt (°C)")
         plt.colorbar(im0, ax=axes[0, 0])
 
-        im1 = axes[0, 1].imshow(results.utci_mean, cmap="hot")
+        im1 = axes[0, 1].imshow(results.utci_mean, cmap="inferno")
         axes[0, 1].set_title("Mean UTCI (°C)")
         plt.colorbar(im1, ax=axes[0, 1])
 
@@ -491,7 +335,7 @@ def main():
         axes[0, 2].set_title("Sun hours")
         plt.colorbar(im2, ax=axes[0, 2])
 
-        im3 = axes[1, 0].imshow(results.tmrt_day_mean, cmap="hot")
+        im3 = axes[1, 0].imshow(results.tmrt_day_mean, cmap="inferno")
         axes[1, 0].set_title("Mean daytime Tmrt (°C)")
         plt.colorbar(im3, ax=axes[1, 0])
 
@@ -537,15 +381,15 @@ def main():
         create_solweig_preview_gifs(output_path)
         create_solweig_preview_pngs(output_path)
     else:
-        print("⚠️  Skipping SOLWEIG - missing requirements or DSM not available")
+        print("Skipping SOLWEIG - missing requirements or DSM not available")
 
     # ========================================================================
     # Summary
     # ========================================================================
     print("\n" + "=" * 60)
-    print("✅ UMEP workflow complete!")
+    print("UMEP workflow complete!")
     print("=" * 60)
-    print(f"📁 All outputs saved to: {output_folder_str}")
+    print(f"All outputs saved to: {output_folder_str}")
 
 
 if __name__ == "__main__":
