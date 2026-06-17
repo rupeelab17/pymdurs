@@ -197,7 +197,6 @@ jobs:
           "GDAL_HOME=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_INCLUDE_DIR=$lib\include"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_NO_PKG_CONFIG=1"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_LIB=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DATA=$lib\share\proj"      | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -251,13 +250,29 @@ jobs:
             if (Test-Path $p) { Write-Host "  $_ OK" } else { Write-Warning "  $_ ABSENT" }
           }
 
-      # ── pkg-config .pc pour proj-sys ─────────────────────────────────────────
-      - name: Write pkg-config .pc files
+      # ── pkg-config .pc pour gdal-sys et proj-sys ───────────────────────────
+      # gdal-sys 0.12 (crates.io) appelle pkg-config APRES avoir trouvé gdal_i.lib
+      # via GDAL_LIB_DIR — il en a besoin pour la version et les deps additionnelles.
+      # GDAL_NO_PKG_CONFIG=1 interrompt cet appel et provoque un panic.
+      # Solution : fournir un gdal.pc et un proj.pc complets.
+      - name: Write pkg-config .pc files (gdal + proj)
         shell: pwsh
         run: |
           $pcDir = "$env:CONDA_LIB\lib\pkgconfig"
           New-Item -ItemType Directory -Force -Path $pcDir | Out-Null
           $pfx = $env:CONDA_LIB -replace "\\","/"
+
+          # gdal.pc
+          $gdalPc = @(
+            "prefix=$pfx", "exec_prefix=`${prefix}",
+            "libdir=`${prefix}/lib", "includedir=`${prefix}/include", "",
+            "Name: GDAL", "Description: Geospatial Data Abstraction Library",
+            "Version: $env:GDAL_VERSION_FULL",
+            "Libs: -L`${libdir} -lgdal_i", "Cflags: -I`${includedir}"
+          )
+          $gdalPc | Set-Content "$pcDir\gdal.pc" -Encoding ascii
+
+          # proj.pc
           $projPc = @(
             "prefix=$pfx", "exec_prefix=`${prefix}",
             "libdir=`${prefix}/lib", "includedir=`${prefix}/include", "",
@@ -266,8 +281,10 @@ jobs:
             "Libs: -L`${libdir} -lproj_i", "Cflags: -I`${includedir}"
           )
           $projPc | Set-Content "$pcDir\proj.pc" -Encoding ascii
+
           "PKG_CONFIG_PATH=$pcDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "proj.pc ecrit dans $pcDir"
+          Write-Host "gdal.pc et proj.pc ecrits dans $pcDir"
+          Write-Host "--- gdal.pc ---" ; Get-Content "$pcDir\gdal.pc"
 
       # ── LIBCLANG_PATH pour proj-sys / geos-sys (bindgen) ────────────────────
       # proj-sys 0.27 et geos-sys utilisent bindgen → besoin de libclang.dll
@@ -326,7 +343,6 @@ jobs:
           GDAL_HOME: ${{ env.GDAL_HOME }}
           GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
           GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-          GDAL_NO_PKG_CONFIG: "1"
           GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
           GEOS_VERSION: ${{ env.GEOS_VERSION }}
           PROJ_LIB: ${{ env.PROJ_LIB }}
