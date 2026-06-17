@@ -125,7 +125,7 @@ jobs:
           $patched = [regex]::Replace(
             $content,
             '(?s)gdal\s*=\s*\{[^}]*AlexanderWillner[^}]*\}',
-            'gdal = { version = "0.19", optional = true }'
+            'gdal = { version = "0.19", features = ["bindgen"], optional = true }'
           )
           if ($content -eq $patched) {
             Write-Error "Aucun remplacement effectue"
