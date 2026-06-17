@@ -262,61 +262,61 @@ jobs:
         shell: pwsh
         run: pip install maturin
 
-      # ── Fetch fork + patch srs.rs pour Windows MSVC ────────────────────────
-      # Le fork AlexanderWillner utilise u32 pour OGRErr (correct Linux/Mac).
-      # Sur MSVC, bindgen génère i32 pour les enums C → 55 erreurs de types.
-      # Fix : remplacer u32 par gdal_sys::OGRErr::Type dans srs.rs.
-      # gdal_sys::OGRErr::Type = i32 sur MSVC, u32 sur Linux/Mac → cross-platform.
-      - name: Fetch gdal fork and patch srs.rs for Windows MSVC
-        shell: pwsh
-        env:
-          GDAL_HOME: ${{ env.GDAL_HOME }}
-          GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
-          GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-          GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
-          PROJ_LIB: ${{ env.PROJ_LIB }}
-          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
-          LIBCLANG_PATH: ${{ env.LIBCLANG_PATH }}
-        run: |
-          Write-Host "Fetch des dependances (telechargement fork gdal)..."
-          cargo fetch --manifest-path pymdurs/Cargo.toml 2>&1 | Select-String -Pattern "gdal|Fetch|error" | ForEach-Object { Write-Host $_ }
+      # # ── Fetch fork + patch srs.rs pour Windows MSVC ────────────────────────
+      # # Le fork AlexanderWillner utilise u32 pour OGRErr (correct Linux/Mac).
+      # # Sur MSVC, bindgen génère i32 pour les enums C → 55 erreurs de types.
+      # # Fix : remplacer u32 par gdal_sys::OGRErr::Type dans srs.rs.
+      # # gdal_sys::OGRErr::Type = i32 sur MSVC, u32 sur Linux/Mac → cross-platform.
+      # - name: Fetch gdal fork and patch srs.rs for Windows MSVC
+      #   shell: pwsh
+      #   env:
+      #     GDAL_HOME: ${{ env.GDAL_HOME }}
+      #     GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
+      #     GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
+      #     GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
+      #     PROJ_LIB: ${{ env.PROJ_LIB }}
+      #     PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
+      #     LIBCLANG_PATH: ${{ env.LIBCLANG_PATH }}
+      #   run: |
+      #     Write-Host "Fetch des dependances (telechargement fork gdal)..."
+      #     cargo fetch --manifest-path pymdurs/Cargo.toml 2>&1 | Select-String -Pattern "gdal|Fetch|error" | ForEach-Object { Write-Host $_ }
 
-          # Localise srs.rs dans le checkout git du fork
-          $srsFiles = Get-ChildItem -Path "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "srs.rs" |
-                      Where-Object { $_.FullName -match "gdal" -and $_.FullName -notmatch "gdal-sys" }
-          if ($srsFiles.Count -eq 0) {
-            Write-Error "srs.rs introuvable dans $env:CARGO_HOME\git\checkouts"
-            Get-ChildItem "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "*.rs" | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
-            exit 1
-          }
+      #     # Localise srs.rs dans le checkout git du fork
+      #     $srsFiles = Get-ChildItem -Path "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "srs.rs" |
+      #                 Where-Object { $_.FullName -match "gdal" -and $_.FullName -notmatch "gdal-sys" }
+      #     if ($srsFiles.Count -eq 0) {
+      #       Write-Error "srs.rs introuvable dans $env:CARGO_HOME\git\checkouts"
+      #       Get-ChildItem "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "*.rs" | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
+      #       exit 1
+      #     }
 
-          foreach ($srs in $srsFiles) {
-            Write-Host "Patch : $($srs.FullName)"
-            $src = Get-Content $srs.FullName -Raw
+      #     foreach ($srs in $srsFiles) {
+      #       Write-Host "Patch : $($srs.FullName)"
+      #       $src = Get-Content $srs.FullName -Raw
 
-            if ($src -match "OGRErr::Type") {
-              Write-Host "  Patch deja applique — skip"
-              continue
-            }
+      #       if ($src -match "OGRErr::Type") {
+      #         Write-Host "  Patch deja applique — skip"
+      #         continue
+      #       }
 
-            # Fix 1 : declarations err_code u32 → gdal_sys::OGRErr::Type
-            # OGRErr::Type = i32 sur MSVC, u32 sur Linux → cross-platform
-            $src = $src -replace 'let mut err_code:\s*u32\b', 'let mut err_code: gdal_sys::OGRErr::Type'
+      #       # Fix 1 : declarations err_code u32 → gdal_sys::OGRErr::Type
+      #       # OGRErr::Type = i32 sur MSVC, u32 sur Linux → cross-platform
+      #       $src = $src -replace 'let mut err_code:\s*u32\b', 'let mut err_code: gdal_sys::OGRErr::Type'
 
-            # Fix 2 : pointer cast *mut u32 → supprime le cast (type inféré)
-            $src = $src -replace '&mut err_code as \*mut u32\b', '&mut err_code'
+      #       # Fix 2 : pointer cast *mut u32 → supprime le cast (type inféré)
+      #       $src = $src -replace '&mut err_code as \*mut u32\b', '&mut err_code'
 
-            # Fix 3 : OAMS match arms — constantes i32 comparées à valeur u32
-            # Pattern : OAMS_X => devient x if x == OAMS_X as u32 =>
-            $src = $src -replace '(?m)^(\s+)(OAMS_TRADITIONAL_GIS_ORDER)(\s*=>)', '$1x_tgo if x_tgo == $2 as u32$3'
-            $src = $src -replace '(?m)^(\s+)(OAMS_AUTHORITY_COMPLIANT)(\s*=>)',   '$1x_ac  if x_ac  == $2 as u32$3'
-            $src = $src -replace '(?m)^(\s+)(OAMS_CUSTOM)(\s*=>)',                '$1x_cu  if x_cu  == $2 as u32$3'
+      #       # Fix 3 : OAMS match arms — constantes i32 comparées à valeur u32
+      #       # Pattern : OAMS_X => devient x if x == OAMS_X as u32 =>
+      #       $src = $src -replace '(?m)^(\s+)(OAMS_TRADITIONAL_GIS_ORDER)(\s*=>)', '$1x_tgo if x_tgo == $2 as u32$3'
+      #       $src = $src -replace '(?m)^(\s+)(OAMS_AUTHORITY_COMPLIANT)(\s*=>)',   '$1x_ac  if x_ac  == $2 as u32$3'
+      #       $src = $src -replace '(?m)^(\s+)(OAMS_CUSTOM)(\s*=>)',                '$1x_cu  if x_cu  == $2 as u32$3'
 
-            Set-Content $srs.FullName $src -Encoding utf8 -NoNewline
+      #       Set-Content $srs.FullName $src -Encoding utf8 -NoNewline
 
-            $fixes = ($src | Select-String -Pattern "OGRErr::Type|x_tgo|x_ac|x_cu").Count
-            Write-Host "  $fixes remplacements appliques dans $($srs.Name)"
-          }
+      #       $fixes = ($src | Select-String -Pattern "OGRErr::Type|x_tgo|x_ac|x_cu").Count
+      #       Write-Host "  $fixes remplacements appliques dans $($srs.Name)"
+      #     }
 
       # ── Build ─────────────────────────────────────────────────────────────────
       - name: Build wheel
