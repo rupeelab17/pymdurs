@@ -5,6 +5,7 @@ on:
     inputs:
       sha:
         description: Commit SHA
+        required: false
         type: string
       dry-run:
         description: Dry run
@@ -15,365 +16,196 @@ concurrency:
   group: ${{ github.workflow }}-${{ inputs.sha || github.sha }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   PYTHON_VERSION: "3.12"
+  MATURIN_VERSION: "1.11.4"
+  RUST_TARGET: "x86_64-pc-windows-msvc"
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  CARGO_HOME: C:\cargo
-  CARGO_TARGET_DIR: C:\target
 
 defaults:
   run:
-    shell: bash
+    shell: pwsh
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # 1. Source distribution (Linux)
-  # ---------------------------------------------------------------------------
   build-sdist:
-    runs-on: ubuntu-latest
+    name: Build source distribution
+    runs-on: windows-latest
     timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ inputs.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-
-      - name: Install GDAL (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgdal-dev gdal-bin
+          cache: pip
 
       - name: Install maturin
-        run: pip install maturin
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "maturin==${{ env.MATURIN_VERSION }}"
 
       - name: Create source distribution
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: >
-            --manifest-path pymdurs/Cargo.toml
+        run: |
+          maturin sdist `
+            --manifest-path pymdurs/Cargo.toml `
             --out dist
-          maturin-version: 1.11.4
 
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
           name: sdist
           path: dist/*.tar.gz
+          if-no-files-found: error
 
-  # ---------------------------------------------------------------------------
-  # 2. Windows wheel
-  #
-  # Stratégie :
-  #   - Fork AlexanderWillner conservé (GDAL 3.13 compat)
-  #   - GDAL + GEOS + PROJ : conda-forge
-  #   - Import libs (.lib) : générées via dumpbin + lib.exe MSVC
-  #   - LIBCLANG_PATH : pour bindgen (proj-sys + gdal-sys)
-  #   - Patch srs.rs : corrige les 55 erreurs i32/u32 sur MSVC
-  #     Le fork utilise u32 pour OGRErr (correct sur Linux/Mac)
-  #     MSVC bindgen génère i32 → on remplace u32 par OGRErr::Type
-  #     qui est la bonne valeur sur chaque plateforme
-  # ---------------------------------------------------------------------------
-  build-wheels:
+  build-windows-wheel:
+    name: Build Windows wheel
     needs: [build-sdist]
     runs-on: windows-latest
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ inputs.sha || github.sha }}
 
-      - name: Enable Windows long paths
-        shell: pwsh
-        run: |
-          git config --global core.longpaths true
-          New-ItemProperty `
-            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
-            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force `
-            -ErrorAction SilentlyContinue | Out-Null
-          New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
-
-      # ── Conda : GDAL + GEOS + PROJ ───────────────────────────────────────────
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Set up Miniforge
+        uses: conda-incubator/setup-miniconda@v4
         with:
-          auto-update-conda: true
+          miniforge-version: latest
+          activate-environment: build-pymdurs
           python-version: ${{ env.PYTHON_VERSION }}
           channels: conda-forge
           channel-priority: strict
-          activate-environment: true
+          mamba-version: "*"
+          use-mamba: true
 
-      - name: Cache conda packages
-        uses: actions/cache@v4
+      - name: Install native dependencies
+        run: |
+          mamba install -y `
+            gdal `
+            libgdal `
+            libclang
+
+          python -m pip install --upgrade pip
+          python -m pip install `
+            "maturin==${{ env.MATURIN_VERSION }}" `
+            delvewheel
+
+      - name: Configure GDAL, PROJ and libclang paths
+        run: |
+          $gdalHome = "$env:CONDA_PREFIX\Library"
+          $gdalBin = "$gdalHome\bin"
+          $gdalInclude = "$gdalHome\include"
+          $gdalLib = "$gdalHome\lib"
+          $gdalData = "$gdalHome\share\gdal"
+          $projData = "$gdalHome\share\proj"
+
+          Add-Content -Path $env:GITHUB_ENV -Value "GDAL_HOME=$gdalHome"
+          Add-Content -Path $env:GITHUB_ENV -Value "GDAL_INCLUDE_DIR=$gdalInclude"
+          Add-Content -Path $env:GITHUB_ENV -Value "GDAL_LIB_DIR=$gdalLib"
+          Add-Content -Path $env:GITHUB_ENV -Value "GDAL_DATA=$gdalData"
+          Add-Content -Path $env:GITHUB_ENV -Value "PROJ_DATA=$projData"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIBCLANG_PATH=$gdalBin"
+          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$gdalInclude;$env:INCLUDE"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$gdalLib;$env:LIB"
+
+          Add-Content -Path $env:GITHUB_PATH -Value $gdalBin
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA_PREFIX\Scripts"
+          Add-Content -Path $env:GITHUB_PATH -Value $env:CONDA_PREFIX
+
+          $env:PATH = "$gdalBin;$env:CONDA_PREFIX\Scripts;$env:CONDA_PREFIX;$env:PATH"
+
+          gdalinfo --version
+          python --version
+          python -c "import sys; print(sys.executable)"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: ~/conda_pkgs_dir
-          key: conda-${{ runner.os }}-geo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: conda-${{ runner.os }}-geo-
+          targets: ${{ env.RUST_TARGET }}
 
-      - name: Install GDAL, GEOS, PROJ via Conda
-        shell: pwsh
+      - name: Show toolchain diagnostics
         run: |
-          conda install -c conda-forge libgdal geos proj sqlite pkg-config --yes
+          rustc --version
+          cargo --version
+          rustup target list --installed
+          maturin --version
 
-          $prefix = (conda info --json | ConvertFrom-Json).active_prefix
-          $lib    = "$prefix\Library"
-          Write-Host "Conda prefix : $prefix  Library : $lib"
-
-          $gdalDll = Get-ChildItem "$lib\bin" -Filter "gdal*.dll"  | Sort-Object Name | Select-Object -First 1
-          $projDll = Get-ChildItem "$lib\bin" -Filter "proj*.dll"  | Sort-Object Name | Select-Object -First 1
-          $geosDll = Get-ChildItem "$lib\bin" -Filter "geos_c*.dll"| Sort-Object Name | Select-Object -First 1
-          if (-not $gdalDll) { Write-Error "gdal*.dll introuvable" ; exit 1 }
-          if (-not $projDll) { Write-Error "proj*.dll introuvable" ; exit 1 }
-          if (-not $geosDll) { Write-Error "geos_c*.dll introuvable" ; exit 1 }
-
-          $geosVer  = ((conda list geos)   | Select-String "^geos\s+").ToString().Trim()   -split "\s+" | Select-Object -Index 1
-          $projVer  = ((conda list proj)   | Select-String "^proj\s+").ToString().Trim()   -split "\s+" | Select-Object -Index 1
-          $gdalVer  = ((conda list libgdal)| Select-String "^libgdal\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
-          Write-Host "GDAL $gdalVer  GEOS $geosVer  PROJ $projVer"
-
-          "CONDA_LIB=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_DLL_NAME=$($gdalDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_DLL_NAME=$($projDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_DLL_NAME=$($geosDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_VERSION_FULL=$gdalVer"     | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_VERSION=$geosVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_VERSION=$projVer"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_HOME=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GDAL_INCLUDE_DIR=$lib\include"  | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "GEOS_LIB_DIR=$lib\lib"          | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_LIB=$lib\share\proj"       | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_DATA=$lib\share\proj"      | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROJ_ROOT=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "RUST_BACKTRACE=full"            | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "$lib\bin"                       | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
-          "$(Split-Path $prefix)\Scripts"  | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
-
-      # ── Import libs MSVC (gdal_i.lib + proj_i.lib + geos_c.lib) ────────────
-      - name: Generate MSVC import libraries
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath  = & $vswhere -latest -products * `
-                       -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-                       -property installationPath
-          $vcVer   = Get-ChildItem "$vsPath\VC\Tools\MSVC" | Sort-Object Name -Descending | Select-Object -First 1
-          $msvc    = "$($vcVer.FullName)\bin\Hostx64\x64"
-
-          function New-ImportLib($DllPath, $LibPath) {
-            $dll  = Split-Path $DllPath -Leaf
-            $def  = "$env:TEMP\$([IO.Path]::GetFileNameWithoutExtension($dll)).def"
-            Write-Host "  $dll -> $(Split-Path $LibPath -Leaf)"
-            $exp  = & "$msvc\dumpbin.exe" /exports $DllPath
-            $syms = $exp | Select-String -Pattern "^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)" |
-                    ForEach-Object { $_.Matches[0].Groups[1].Value }
-            if ($syms.Count -eq 0) { Write-Warning "Aucun export dans $dll" ; return }
-            "LIBRARY $dll" | Out-File $def -Encoding ascii
-            "EXPORTS"       | Out-File $def -Encoding ascii -Append
-            $syms           | Out-File $def -Encoding ascii -Append
-            & "$msvc\lib.exe" /def:$def /out:$LibPath /machine:x64 | Out-Null
-            if (Test-Path $LibPath) { Write-Host "    $((Get-Item $LibPath).Length) bytes" }
-            else { Write-Error "Echec $LibPath" ; exit 1 }
-          }
-
-          $b = "$env:CONDA_LIB\bin"
-          $l = "$env:CONDA_LIB\lib"
-          New-ImportLib "$b\$env:GDAL_DLL_NAME" "$l\gdal_i.lib"
-          New-ImportLib "$b\$env:PROJ_DLL_NAME" "$l\proj_i.lib"
-          Copy-Item "$l\proj_i.lib" "$l\proj.lib" -Force
-          New-ImportLib "$b\$env:GEOS_DLL_NAME" "$l\geos_c.lib"
-          Write-Host "Import libs OK"
-
-      # ── pkg-config .pc ───────────────────────────────────────────────────────
-      - name: Write pkg-config .pc files (gdal + proj)
-        shell: pwsh
-        run: |
-          $pcDir = "$env:CONDA_LIB\lib\pkgconfig"
-          New-Item -ItemType Directory -Force -Path $pcDir | Out-Null
-          $pfx = $env:CONDA_LIB -replace "\\","/"
-
-          @("prefix=$pfx", "exec_prefix=`${prefix}", "libdir=`${prefix}/lib",
-            "includedir=`${prefix}/include", "",
-            "Name: GDAL", "Description: Geospatial Data Abstraction Library",
-            "Version: $env:GDAL_VERSION_FULL",
-            "Libs: -L`${libdir} -lgdal_i", "Cflags: -I`${includedir}"
-          ) | Set-Content "$pcDir\gdal.pc" -Encoding ascii
-
-          @("prefix=$pfx", "exec_prefix=`${prefix}", "libdir=`${prefix}/lib",
-            "includedir=`${prefix}/include", "",
-            "Name: PROJ", "Description: Coordinate transformation library",
-            "Version: $env:PROJ_VERSION",
-            "Libs: -L`${libdir} -lproj_i", "Cflags: -I`${includedir}"
-          ) | Set-Content "$pcDir\proj.pc" -Encoding ascii
-
-          "PKG_CONFIG_PATH=$pcDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "gdal.pc et proj.pc ecrits"
-
-      # ── LIBCLANG_PATH ────────────────────────────────────────────────────────
-      - name: Set LIBCLANG_PATH
-        shell: pwsh
-        run: |
-          $found = $null
-          foreach ($c in @("C:\Program Files\LLVM\bin","C:\LLVM\bin")) {
-            if (Test-Path "$c\libclang.dll") { $found = $c ; break }
-          }
-          if (-not $found) {
-            $dll = Get-ChildItem "C:\Program Files" -Recurse -Filter "libclang.dll" `
-                   -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($dll) { $found = Split-Path $dll.FullName }
-          }
-          if (-not $found) {
-            Write-Host "Installation LLVM..."
-            choco install llvm --version=18.1.8 -y --no-progress
-            $found = "C:\Program Files\LLVM\bin"
-          }
-          "LIBCLANG_PATH=$found" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "LIBCLANG_PATH=$found"
-
-      # ── Rust MSVC ────────────────────────────────────────────────────────────
-      - name: Install Rust MSVC toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable-x86_64-pc-windows-msvc
-          rustup target add x86_64-pc-windows-msvc
-          rustup default stable-x86_64-pc-windows-msvc
-          rustup show
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            C:\cargo\registry
-            C:\cargo\git
-            C:\target
-          key: cargo-${{ runner.os }}-msvc-fork-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-msvc-fork-
-
-      - name: Install maturin
-        shell: pwsh
-        run: pip install maturin
-
-      # # ── Fetch fork + patch srs.rs pour Windows MSVC ────────────────────────
-      # # Le fork AlexanderWillner utilise u32 pour OGRErr (correct Linux/Mac).
-      # # Sur MSVC, bindgen génère i32 pour les enums C → 55 erreurs de types.
-      # # Fix : remplacer u32 par gdal_sys::OGRErr::Type dans srs.rs.
-      # # gdal_sys::OGRErr::Type = i32 sur MSVC, u32 sur Linux/Mac → cross-platform.
-      # - name: Fetch gdal fork and patch srs.rs for Windows MSVC
-      #   shell: pwsh
-      #   env:
-      #     GDAL_HOME: ${{ env.GDAL_HOME }}
-      #     GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
-      #     GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-      #     GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
-      #     PROJ_LIB: ${{ env.PROJ_LIB }}
-      #     PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
-      #     LIBCLANG_PATH: ${{ env.LIBCLANG_PATH }}
-      #   run: |
-      #     Write-Host "Fetch des dependances (telechargement fork gdal)..."
-      #     cargo fetch --manifest-path pymdurs/Cargo.toml 2>&1 | Select-String -Pattern "gdal|Fetch|error" | ForEach-Object { Write-Host $_ }
-
-      #     # Localise srs.rs dans le checkout git du fork
-      #     $srsFiles = Get-ChildItem -Path "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "srs.rs" |
-      #                 Where-Object { $_.FullName -match "gdal" -and $_.FullName -notmatch "gdal-sys" }
-      #     if ($srsFiles.Count -eq 0) {
-      #       Write-Error "srs.rs introuvable dans $env:CARGO_HOME\git\checkouts"
-      #       Get-ChildItem "$env:CARGO_HOME\git\checkouts" -Recurse -Filter "*.rs" | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
-      #       exit 1
-      #     }
-
-      #     foreach ($srs in $srsFiles) {
-      #       Write-Host "Patch : $($srs.FullName)"
-      #       $src = Get-Content $srs.FullName -Raw
-
-      #       if ($src -match "OGRErr::Type") {
-      #         Write-Host "  Patch deja applique — skip"
-      #         continue
-      #       }
-
-      #       # Fix 1 : declarations err_code u32 → gdal_sys::OGRErr::Type
-      #       # OGRErr::Type = i32 sur MSVC, u32 sur Linux → cross-platform
-      #       $src = $src -replace 'let mut err_code:\s*u32\b', 'let mut err_code: gdal_sys::OGRErr::Type'
-
-      #       # Fix 2 : pointer cast *mut u32 → supprime le cast (type inféré)
-      #       $src = $src -replace '&mut err_code as \*mut u32\b', '&mut err_code'
-
-      #       # Fix 3 : OAMS match arms — constantes i32 comparées à valeur u32
-      #       # Pattern : OAMS_X => devient x if x == OAMS_X as u32 =>
-      #       $src = $src -replace '(?m)^(\s+)(OAMS_TRADITIONAL_GIS_ORDER)(\s*=>)', '$1x_tgo if x_tgo == $2 as u32$3'
-      #       $src = $src -replace '(?m)^(\s+)(OAMS_AUTHORITY_COMPLIANT)(\s*=>)',   '$1x_ac  if x_ac  == $2 as u32$3'
-      #       $src = $src -replace '(?m)^(\s+)(OAMS_CUSTOM)(\s*=>)',                '$1x_cu  if x_cu  == $2 as u32$3'
-
-      #       Set-Content $srs.FullName $src -Encoding utf8 -NoNewline
-
-      #       $fixes = ($src | Select-String -Pattern "OGRErr::Type|x_tgo|x_ac|x_cu").Count
-      #       Write-Host "  $fixes remplacements appliques dans $($srs.Name)"
-      #     }
-
-      # ── Build ─────────────────────────────────────────────────────────────────
       - name: Build wheel
-        shell: pwsh
-        env:
-          GDAL_HOME: ${{ env.GDAL_HOME }}
-          GDAL_LIB_DIR: ${{ env.GDAL_LIB_DIR }}
-          GDAL_INCLUDE_DIR: ${{ env.GDAL_INCLUDE_DIR }}
-          GEOS_LIB_DIR: ${{ env.GEOS_LIB_DIR }}
-          GEOS_VERSION: ${{ env.GEOS_VERSION }}
-          PROJ_LIB: ${{ env.PROJ_LIB }}
-          PROJ_DATA: ${{ env.PROJ_DATA }}
-          PROJ_ROOT: ${{ env.PROJ_ROOT }}
-          PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
-          LIBCLANG_PATH: ${{ env.LIBCLANG_PATH }}
-          RUST_BACKTRACE: full
         run: |
           maturin build `
             --release `
-            --target x86_64-pc-windows-msvc `
+            --target ${{ env.RUST_TARGET }} `
             --manifest-path pymdurs/Cargo.toml `
             --out dist
 
-      # ── Test ──────────────────────────────────────────────────────────────────
-      - name: Test wheel
-        shell: pwsh
+      - name: Repair Windows wheel with delvewheel
         run: |
-          pip install --force-reinstall --verbose (Get-Item dist\*.whl)
-          Push-Location $env:TEMP
-          try {
-            python -c "import pymdurs; print('pymdurs imported successfully')"
-            python -c "
-          import pymdurs
-          bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0)
-          print('PyBoundingBox works: min_x =', bbox.min_x)
-          "
-          } finally {
-            Pop-Location
+          New-Item -ItemType Directory -Force -Path repaired | Out-Null
+
+          $wheel = Get-ChildItem -Path dist -Filter "*.whl" | Select-Object -First 1
+
+          if (-not $wheel) {
+            throw "No wheel found in dist/"
           }
 
-      - name: Upload wheel
+          python -m delvewheel show "$($wheel.FullName)"
+
+          python -m delvewheel repair "$($wheel.FullName)" `
+            --wheel-dir repaired `
+            --add-path "$env:CONDA_PREFIX\Library\bin"
+
+          Remove-Item -Path dist\*.whl -Force
+          Copy-Item -Path repaired\*.whl -Destination dist -Force
+
+          Get-ChildItem -Path dist
+
+      - name: Test repaired wheel
+        run: |
+          $wheel = Get-ChildItem -Path dist -Filter "*.whl" | Select-Object -First 1
+
+          if (-not $wheel) {
+            throw "No repaired wheel found in dist/"
+          }
+
+          python -m pip install --force-reinstall --verbose "$($wheel.FullName)"
+
+          $testDir = Join-Path $env:RUNNER_TEMP "pymdurs-wheel-test"
+          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
+          Set-Location $testDir
+
+          python -c "import pymdurs; print('pymdurs imported successfully')"
+          python -c "import pymdurs; print('Available classes:', [x for x in dir(pymdurs.geometric) if not x.startswith('_')])"
+          python -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works:', bbox.min_x)"
+
+      - name: Upload Windows wheel
         uses: actions/upload-artifact@v4
         with:
           name: wheel-windows-x86_64
           path: dist/*.whl
+          if-no-files-found: error
 
-  # ---------------------------------------------------------------------------
-  # 3. Publication PyPI
-  # ---------------------------------------------------------------------------
   publish-to-pypi:
-    needs: [build-sdist, build-wheels]
+    name: Publish to PyPI
+    needs: [build-sdist, build-windows-wheel]
+    runs-on: ubuntu-latest
     environment:
       name: release-python
       url: https://pypi.org/project/pymdurs
-    runs-on: ubuntu-latest
     permissions:
       id-token: write
+      contents: read
 
     steps:
       - name: Download sdists and wheels
@@ -382,40 +214,51 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: List distributions
+        run: |
+          find dist -maxdepth 1 -type f -print
+
       - name: Publish to PyPI
         if: inputs.dry-run == false
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: dist
           skip-existing: true
           verbose: true
 
-  # ---------------------------------------------------------------------------
-  # 4. Publication GitHub Release
-  # ---------------------------------------------------------------------------
   publish-to-github:
+    name: Publish GitHub release
     needs: [publish-to-pypi]
     if: inputs.dry-run == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ inputs.sha || github.sha }}
 
       - name: Get version from pyproject.toml
         id: version
+        shell: bash
         run: |
           VERSION=$(grep -m 1 -oP 'version = "\K[^"]+' pyproject.toml)
-          if [[ "$VERSION" == *"-"* ]] || \
-             [[ "$VERSION" == *"dev"* ]] || \
-             [[ "$VERSION" == *"alpha"* ]] || \
-             [[ "$VERSION" == *"beta"* ]] || \
-             [[ "$VERSION" == *"rc"* ]]; then
+
+          if [[ -z "$VERSION" ]]; then
+            echo "Unable to extract version from pyproject.toml"
+            exit 1
+          fi
+
+          if [[ "$VERSION" == *"-"* ]] || [[ "$VERSION" == *"dev"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"rc"* ]]; then
             IS_PRERELEASE=true
           else
             IS_PRERELEASE=false
           fi
-          echo "version=$VERSION"             >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -423,20 +266,37 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: List release artifacts
+        run: |
+          find dist -maxdepth 1 -type f -print
+
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Python pymdurs ${{ steps.version.outputs.version }}
           tag_name: py-${{ steps.version.outputs.version }}
           prerelease: ${{ steps.version.outputs.is_prerelease }}
           files: dist/*
+          fail_on_unmatched_files: true
           body: |
             ## Python Package Release ${{ steps.version.outputs.version }}
 
+            This release includes Python bindings for pymdurs.
+
             ### Installation
+
             ```bash
             pip install pymdurs
             ```
+
+            ### Windows wheel
+
+            This release includes a Windows x86_64 wheel built with:
+
+            - Python ${{ env.PYTHON_VERSION }}
+            - Rust target `${{ env.RUST_TARGET }}`
+            - GDAL from conda-forge
+            - DLL repair via `delvewheel`
 
             ### Available Classes
 
@@ -447,10 +307,6 @@ jobs:
             - `pymdurs.geometric.Lcz` - Local Climate Zone
             - `pymdurs.BoundingBox` - Bounding box operations
             - `pymdurs.GeoCore` - CRS and geographic operations
-
-            ### Changes
-
-            See the [changelog](https://github.com/rupeelab17/pymdurs/blob/main/CHANGELOG.md) for details.
 
             ### Requirements
 
