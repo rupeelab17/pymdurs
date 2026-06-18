@@ -4,19 +4,22 @@ use encoding_rs;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs::{create_dir_all, write, File};
+use std::fs::File;
 use std::io::{BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::collect::global_variables::TEMP_PATH;
 use crate::geo_core::{BoundingBox, GeoCore};
 
-/// Official IGN URL for the services table CSV (fallback when no local file is found).
-const IGN_CSV_URL: &str =
-    "https://geoservices.ign.fr/sites/default/files/2026-02/Tableau-suivi-services-web-06-02-2026.csv";
-
 const CSV_NAME: &str = "Tableau-suivi-services-web-06-02-2026.csv";
+const CSV_PREFIX: &str = "Tableau-suivi-services-web-";
+
+/// Bundled at compile time so pip-installed wheels work without the source tree.
+/// `include_bytes!` reads the file relative to THIS .rs file, at build time, and
+/// embeds it directly into the compiled .pyd / .so. The CSV therefore ships
+/// inside the wheel with no runtime dependency on the source tree.
+const EMBEDDED_CSV: &[u8] = include_bytes!("data/Tableau-suivi-services-web-06-02-2026.csv");
 
 /// Client HTTP pour l'IGN : réponses WFS/WMS volumineuses, téléchargements longs.
 fn ign_http_client() -> Result<Client> {
@@ -114,14 +117,8 @@ impl IgnCollect {
             "SERVICE_CALCUL_ALTIMETRIQUE".to_string(),
         );
 
-        // Load CSV file - try to find it in multiple locations
-        let csv_path = Self::find_csv_file()?;
-        let collect_path = csv_path
-            .parent()
-            .unwrap_or(&PathBuf::from("."))
-            .to_path_buf();
-
-        let df_csv_file = Self::load_csv_file(&csv_path)?;
+        // Charge la table des services IGN (embarquée en priorité — voir load_csv).
+        let df_csv_file = Self::load_csv()?;
 
         Ok(IgnCollect {
             content: None,
@@ -131,71 +128,78 @@ impl IgnCollect {
             ign_keys,
             geo_core: GeoCore::default(),
             df_csv_file,
-            collect_path, // Store path for potential future use
+            collect_path: PathBuf::from(TEMP_PATH),
         })
     }
 
-    /// Find CSV file in multiple possible locations, or download from IGN URL and cache in TEMP_PATH.
-    fn find_csv_file() -> Result<PathBuf> {
-        // 1) Dev: CARGO_MANIFEST_DIR
+    /// Candidate directories that may contain a bundled IGN services CSV (dev only).
+    fn csv_data_dirs() -> Vec<PathBuf> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let csv_path = PathBuf::from(manifest_dir)
-            .join("src/collect/ign/data")
-            .join(CSV_NAME);
-        if csv_path.exists() {
-            return Ok(csv_path);
+        vec![
+            PathBuf::from(manifest_dir).join("src/collect/ign/data"),
+            PathBuf::from("src/collect/ign/data"),
+            PathBuf::from("./src/collect/ign/data"),
+        ]
+    }
+
+    /// Pick the preferred CSV in `dir`: exact `CSV_NAME`, else newest `Tableau-suivi-services-web-*.csv`.
+    fn find_csv_in_dir(dir: &Path) -> Option<PathBuf> {
+        let exact = dir.join(CSV_NAME);
+        if exact.is_file() {
+            return Some(exact);
         }
 
-        // 2) Relative paths from cwd
-        for path in &[
-            PathBuf::from("src/collect/ign/data").join(CSV_NAME),
-            PathBuf::from("./src/collect/ign/data").join(CSV_NAME),
-        ] {
-            if path.exists() {
-                return Ok(path.clone());
+        let mut candidates = Vec::new();
+        let entries = std::fs::read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_ign_csv = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with(CSV_PREFIX) && name.ends_with(".csv"))
+                .unwrap_or(false);
+            if is_ign_csv {
+                candidates.push(path);
+            }
+        }
+        candidates.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        candidates.into_iter().next()
+    }
+
+    /// Charge la table des services IGN.
+    ///
+    /// Priorité :
+    /// 1. **Disque (dev)** : si un CSV est présent sous `csv_data_dirs()`, il est
+    ///    utilisé. Cela permet de tester une table mise à jour sans recompiler.
+    /// 2. **Embarqué (wheel)** : sinon, on parse directement `EMBEDDED_CSV`,
+    ///    intégré au binaire à la compilation via `include_bytes!`. Aucun accès
+    ///    disque, aucun téléchargement réseau — le wheel est autonome.
+    fn load_csv() -> Result<HashMap<String, IgnServiceRow>> {
+        // 1. Tentative disque (dev uniquement)
+        for dir in Self::csv_data_dirs() {
+            if let Some(path) = Self::find_csv_in_dir(&dir) {
+                let mut buffer = Vec::new();
+                BufReader::new(
+                    File::open(&path)
+                        .with_context(|| format!("Failed to open CSV file: {:?}", path))?,
+                )
+                .read_to_end(&mut buffer)
+                .with_context(|| format!("Failed to read CSV file: {:?}", path))?;
+                return Self::parse_csv_bytes(&buffer);
             }
         }
 
-        // 3) Cache in TEMP_PATH (from a previous download)
-        let cache_path = PathBuf::from(TEMP_PATH).join(CSV_NAME);
-        if cache_path.exists() {
-            return Ok(cache_path);
-        }
-
-        // 4) Download from IGN and save to TEMP_PATH
-        let client = ign_http_client()?;
-        let response = client
-            .get(IGN_CSV_URL)
-            .send()
-            .with_context(|| format!("Failed to download IGN CSV from {}", IGN_CSV_URL))?;
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "IGN CSV URL returned {}: {}",
-                response.status(),
-                IGN_CSV_URL
-            );
-        }
-        let bytes = response
-            .bytes()
-            .with_context(|| format!("Failed to read response body from {}", IGN_CSV_URL))?;
-        create_dir_all(TEMP_PATH).context("Failed to create temp directory for IGN CSV")?;
-        write(&cache_path, &bytes)
-            .with_context(|| format!("Failed to write IGN CSV to {}", cache_path.display()))?;
-        Ok(cache_path)
+        // 2. Fallback embarqué (wheel) — parsé en mémoire, pas d'écriture disque
+        Self::parse_csv_bytes(EMBEDDED_CSV)
+            .context("Failed to parse embedded IGN services CSV")
     }
 
-    /// Load CSV file with the `csv` crate and index by nom_technique.
-    /// Uses semicolon delimiter and ISO-8859-1 encoding (IGN table format).
-    fn load_csv_file(csv_path: &PathBuf) -> Result<HashMap<String, IgnServiceRow>> {
-        let file =
-            File::open(csv_path).context(format!("Failed to open CSV file: {:?}", csv_path))?;
-
-        let mut buffer = Vec::new();
-        BufReader::new(file).read_to_end(&mut buffer)?;
-
+    /// Parse IGN CSV bytes (semicolon delimiter, ISO-8859-1 encoding) into a map
+    /// indexed by `nom_technique`.
+    fn parse_csv_bytes(buffer: &[u8]) -> Result<HashMap<String, IgnServiceRow>> {
         let encoding =
             encoding_rs::Encoding::for_label(b"ISO-8859-1").unwrap_or(encoding_rs::WINDOWS_1252);
-        let (decoded, _, _) = encoding.decode(&buffer);
+        let (decoded, _, _) = encoding.decode(buffer);
         let decoded_str: &str = decoded.as_ref();
 
         let mut rdr = ReaderBuilder::new()
@@ -586,6 +590,13 @@ mod tests {
     }
 
     #[test]
+    fn test_embedded_csv_parses() {
+        // Le CSV embarqué doit toujours être parsable, même sans fichier sur disque.
+        let map = IgnCollect::parse_csv_bytes(EMBEDDED_CSV).unwrap();
+        assert!(!map.is_empty(), "Embedded IGN CSV should not be empty");
+    }
+
+    #[test]
     fn test_set_Bbox() {
         let mut ign = IgnCollect::new().unwrap();
         ign.set_bbox(-1.0, 46.0, -0.9, 46.1);
@@ -618,5 +629,15 @@ mod tests {
         if let Some(row) = row {
             assert!(!row.url_geoplateforme.is_empty());
         }
+    }
+
+    #[test]
+    fn test_cosia_row_present() {
+        let ign = IgnCollect::new().unwrap();
+        let row = ign
+            .get_row_ressource("cosia")
+            .expect("COSIA row should be present in bundled IGN CSV");
+        assert_eq!(row.nom_technique, "IGNF_COSIA_2024-2026");
+        assert!(row.url_geoplateforme.contains("data.geopf.fr"));
     }
 }

@@ -99,8 +99,9 @@ lcov.info
 *.sbx
 *.geojson
 
-# Keep CSV data file (needed for IGN API)
-!src/collect/ign/data/Tableau-suivi-services-web-23-05-2025.csv
+# Keep CSV data files (needed for IGN API)
+!src/collect/ign/data/
+!src/collect/ign/data/Tableau-suivi-services-web-*.csv
 
 # Temporary files
 *.tmp
