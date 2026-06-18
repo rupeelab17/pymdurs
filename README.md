@@ -25,6 +25,26 @@
 
 ## Installation
 
+### Installer uv
+
+[uv](https://docs.astral.sh/uv/) est le gestionnaire de paquets Python utilisé par ce projet (voir `uv.lock`). Installation recommandée via l’installateur standalone [Astral](https://docs.astral.sh/uv/getting-started/installation/) :
+
+**macOS / Linux :**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Windows (PowerShell) :**
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**Autres méthodes :** Homebrew (`brew install uv`), pipx (`pipx install uv`), ou [PyPI](https://pypi.org/project/uv/).
+
+Après installation, redémarrer le terminal. Mise à jour : `uv self update` (installateur standalone uniquement).
+
 **Install GDAL (prerequisite)**
 
 | Platform    | Command                                                                                                                                                            |

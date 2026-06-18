@@ -17,6 +17,34 @@ pymdurs/                    # Racine du projet (pyproject.toml)
 
 ---
 
+## Installer uv
+
+Le projet utilise [uv](https://docs.astral.sh/uv/) pour la gestion des dépendances (`uv.lock`). Installer uv avant de builder :
+
+**macOS / Linux** ([installateur Astral](https://docs.astral.sh/uv/getting-started/installation/)) :
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Windows (PowerShell) :**
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**Alternatives :** `brew install uv`, `pipx install uv`, ou `pip install uv`.
+
+Synchroniser l’environnement du projet après clonage :
+
+```bash
+uv sync
+```
+
+Mise à jour de uv (installateur standalone) : `uv self update`.
+
+---
+
 ## macOS
 
 ### Prérequis
