@@ -140,6 +140,31 @@ def main() -> int:
     for path in (srs, types, rband):
         patch_file_general(path, guard="__CI_MSVC_PATCHED__")
 
+    # 2b. Corrections inverses : certains "as u32" doivent rester i32 sur MSVC
+    # car ils sont passes a des fonctions C (GDALCreate) ou compares a des i32
+    # (gdal_ordinal). Sur MSVC bindgen, ces types C sont i32.
+    driver = os.path.join(src, "src", "driver.rs")
+    for path in (driver, rband, types, srs):
+        c = read(path)
+        if c is None:
+            continue
+        original = c
+        # data_type as u32 -> data_type as gdal_sys::GDALDataType::Type (i32 MSVC)
+        c = re.sub(
+            r"\bdata_type as u32\b",
+            "data_type as gdal_sys::GDALDataType::Type",
+            c,
+        )
+        # self.band_type() as u32 -> self.band_type() as i32 (compare a gdal_ordinal i32)
+        c = re.sub(
+            r"self\.band_type\(\) as u32\b",
+            "self.band_type() as gdal_sys::GDALDataType::Type",
+            c,
+        )
+        if c != original:
+            write(path, c)
+            print(f"Corrections inverses appliquees: {path}")
+
     # 3. TryFrom<i32> pour les enums utilises avec try_into() sur valeur i32
     append_impls(
         srs,
@@ -149,7 +174,7 @@ def main() -> int:
             '#[cfg(target_env = "msvc")]',
             "impl TryFrom<i32> for AxisMappingStrategy {",
             "    type Error = <AxisMappingStrategy as TryFrom<u32>>::Error;",
-            "    fn try_from(v: i32) -> Result<Self, Self::Error> { Self::try_from(v as u32) }",
+            "    fn try_from(v: i32) -> core::result::Result<Self, Self::Error> { Self::try_from(v as u32) }",
             "}",
         ],
     )
@@ -161,7 +186,7 @@ def main() -> int:
             '#[cfg(target_env = "msvc")]',
             "impl TryFrom<i32> for GdalDataType {",
             "    type Error = <GdalDataType as TryFrom<u32>>::Error;",
-            "    fn try_from(v: i32) -> Result<Self, Self::Error> { Self::try_from(v as u32) }",
+            "    fn try_from(v: i32) -> core::result::Result<Self, Self::Error> { Self::try_from(v as u32) }",
             "}",
         ],
     )
