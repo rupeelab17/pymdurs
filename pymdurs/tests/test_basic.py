@@ -28,6 +28,20 @@ def test_geo_core():
     assert geo.output_path == "./output"
 
 
+def test_building_set_bbox_updates_geo_core():
+    """set_bbox on Building must sync geo_core.bbox"""
+    import pymdurs
+
+    buildings = pymdurs.geometric.Building(output_path="./output")
+    buildings.set_bbox(-1.15, 46.18, -1.14, 46.19)
+    bbox = buildings.geo_core.bbox
+    assert bbox is not None
+    assert bbox.min_x == -1.15
+    assert bbox.min_y == 46.18
+    assert bbox.max_x == -1.14
+    assert bbox.max_y == 46.19
+
+
 def test_building_creation():
     """Test BuildingCollection creation"""
     import pymdurs

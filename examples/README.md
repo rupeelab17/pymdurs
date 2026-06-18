@@ -28,7 +28,7 @@ python examples/building_basic.py
 
 - Creates a `Building` (BuildingCollection)
 - Accesses `GeoCore` properties
-- Creates and sets a `BoundingBox`
+- Creates and sets a `PyBoundingBox`
 - Displays the properties
 
 ---

@@ -183,12 +183,12 @@ print(df.head())
 
 ## Core Classes
 
-### `BoundingBox` / `PyBoundingBox`
+### `PyBoundingBox`
 
 Represents a geographic bounding box with min/max coordinates.
 
 ```python
-bbox = pymdurs.BoundingBox(min_x=-1.15, min_y=46.18, max_x=-1.14, max_y=46.19)
+bbox = pymdurs.PyBoundingBox(min_x=-1.15, min_y=46.18, max_x=-1.14, max_y=46.19)
 ```
 
 ### `GeoCore` / `PyGeoCore`

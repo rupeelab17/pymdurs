@@ -679,6 +679,8 @@ impl BuildingCollection {
     /// Set bounding box for IGN API requests
     /// Following Python: self.set_bbox = [...]
     pub fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<()> {
+        let bbox = BoundingBox::new(min_x, min_y, max_x, max_y);
+        self.geo_core.set_bbox(Some(bbox));
         if let Some(ref mut ign_collect) = self.ign_collect {
             ign_collect.set_bbox(min_x, min_y, max_x, max_y);
         } else {
