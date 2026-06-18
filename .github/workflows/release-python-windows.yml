@@ -357,6 +357,8 @@ jobs:
     needs: [publish-to-pypi]
     if: inputs.dry-run == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -364,7 +366,25 @@ jobs:
       - name: Get version from pyproject.toml
         id: version
         run: |
-          VERSION=$(grep -m 1 -oP 'version = "\K[^"]+' pyproject.toml)
+          # Cherche pyproject.toml a la racine OU dans pymdurs/
+          PYPROJECT=""
+          for candidate in pyproject.toml pymdurs/pyproject.toml; do
+            if [ -f "$candidate" ]; then PYPROJECT="$candidate"; break; fi
+          done
+          if [ -z "$PYPROJECT" ]; then
+            echo "ERREUR: pyproject.toml introuvable"
+            find . -name "pyproject.toml" -not -path "*/node_modules/*" | head
+            exit 1
+          fi
+          echo "pyproject.toml : $PYPROJECT"
+
+          VERSION=$(grep -m 1 -oP 'version = "\K[^"]+' "$PYPROJECT")
+          if [ -z "$VERSION" ]; then
+            echo "ERREUR: version introuvable dans $PYPROJECT"
+            exit 1
+          fi
+          echo "Version detectee : $VERSION"
+
           if [[ "$VERSION" == *"-"* ]] || [[ "$VERSION" == *"dev"* ]] || [[ "$VERSION" == *"alpha"* ]] || [[ "$VERSION" == *"beta"* ]] || [[ "$VERSION" == *"rc"* ]]; then
             IS_PRERELEASE=true
           else
@@ -378,7 +398,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Python pymdurs ${{ steps.version.outputs.version }}
           tag_name: py-${{ steps.version.outputs.version }}

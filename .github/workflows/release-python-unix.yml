@@ -213,7 +213,7 @@ jobs:
           merge-multiple: true
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Python pymdurs ${{ steps.version.outputs.version }}
           tag_name: py-${{ steps.version.outputs.version }}
