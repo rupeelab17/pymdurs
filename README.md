@@ -4,12 +4,12 @@
 
 **Python bindings** for the Rust library `rsmdu` — a high-performance reimplementation of [pymdu](https://github.com/UMEP-dev/pymdu) (Python Urban Data Model). Geospatial data processing for urban analysis, with integration with IGN (Institut Géographique National) APIs and UMEP toolchains.
 
-- **Package sur PyPI** : [pypi.org/project/pymdurs](https://pypi.org/project/pymdurs/)
-- **Dernière version** : [![pypi](https://img.shields.io/pypi/v/pymdurs?label=pymdurs)](https://pypi.org/project/pymdurs/)
+- **PyPI package**: [pypi.org/project/pymdurs](https://pypi.org/project/pymdurs/)
+- **Latest version**: [![pypi](https://img.shields.io/pypi/v/pymdurs?label=pymdurs)](https://pypi.org/project/pymdurs/)
 
-| Ombres | Température radiative (Tmrt) |
-| :----------: | :--------------------------: |
-| ![Aperçu ombres](docs/shadow_preview.gif) | ![Aperçu Tmrt](docs/tmrt_preview.gif) |
+| Shadow | Mean radiant temperature (Tmrt) | Thermal comfort (UTCI) |
+| :----: | :-----------------------------: | :--------------------: |
+| ![Shadow preview](docs/shadow_preview.gif) | ![Tmrt preview](docs/tmrt_preview.gif) | ![UTCI preview](docs/utci_preview.gif) |
 
 ---
 
@@ -24,57 +24,57 @@
 - [UMEP Integration](#umep-integration)
 - [Examples](#examples)
 - [API Reference](#api-reference)
-- [Versions et releases](#versions-et-releases)
+- [Versions and releases](#versions-and-releases)
 
 ---
 
 ## Installation
 
-### Installer uv
+### Install uv
 
-[uv](https://docs.astral.sh/uv/) est le gestionnaire de paquets Python utilisé par ce projet (voir `uv.lock`). Installation recommandée via l’installateur standalone [Astral](https://docs.astral.sh/uv/getting-started/installation/) :
+[uv](https://docs.astral.sh/uv/) is the Python package manager used by this project (see `uv.lock`). Recommended installation via the standalone [Astral](https://docs.astral.sh/uv/getting-started/installation/) installer:
 
-**macOS / Linux :**
+**macOS / Linux:**
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-**Windows (PowerShell) :**
+**Windows (PowerShell):**
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**Autres méthodes :** Homebrew (`brew install uv`), pipx (`pipx install uv`), ou [PyPI](https://pypi.org/project/uv/).
+**Other methods:** Homebrew (`brew install uv`), pipx (`pipx install uv`), or [PyPI](https://pypi.org/project/uv/).
 
-Après installation, redémarrer le terminal. Mise à jour : `uv self update` (installateur standalone uniquement).
+After installation, restart your terminal. Update: `uv self update` (standalone installer only).
 
-Créer un environnement virtuel :
+Create a virtual environment:
 
 ```bash
 uv venv .venv --python 3.13
 ```
 
-### Depuis PyPI (recommandé)
+### From PyPI (recommended)
 
-Le paquet est publié sur [PyPI](https://pypi.org/project/pymdurs/). Pour installer la dernière version :
+The package is published on [PyPI](https://pypi.org/project/pymdurs/). To install the latest version:
 
 ```bash
 uv pip install pymdurs
 ```
 
-Sur **Windows**, le wheel PyPI embarque GDAL, GEOS et PROJ via `auditwheel repair` : aucune installation système de GDAL n’est requise.
+On **Windows**, the PyPI wheel bundles GDAL, GEOS, and PROJ via `auditwheel repair` — no system GDAL installation is required.
 
-Pour une version précise (voir l’[historique PyPI](https://pypi.org/project/pymdurs/#history)) :
+For a specific version (see the [PyPI release history](https://pypi.org/project/pymdurs/#history)):
 
 ```bash
 uv pip install "pymdurs==<version>"
 ```
 
-### Depuis les sources
+### From source
 
-**Prérequis GDAL** (compilation uniquement — pas nécessaire pour `pip install pymdurs` sur Windows) :
+**GDAL prerequisites** (build only — not required for `pip install pymdurs` on Windows):
 
 | Platform    | Command                                                                                                                                                            |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -82,7 +82,7 @@ uv pip install "pymdurs==<version>"
 | **Linux**   | `sudo apt-get update && sudo apt-get install -y libgdal-dev gdal-bin libclang-dev`                                                                                 |
 | **Windows** | [OSGeo4W](https://trac.osgeo.org/osgeo4w/) (GDAL, GEOS, PROJ, SQLite3) + `choco install llvm pkgconfiglite sqlite -y` + set `GDAL_HOME`, `PKG_CONFIG_PATH`, `PATH` |
 
-**Prérequis : Rust** (nécessaire pour compiler) :
+**Prerequisites: Rust** (required to build):
 
 **Windows:**
 
@@ -132,7 +132,7 @@ export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig"
 maturin develop --target aarch64-apple-darwin
 ```
 
-**Compilation et installation :**
+**Build and install:**
 
 ```bash
 # Clone the repository
@@ -353,7 +353,7 @@ iris.to_geojson(name="iris")
 
 ### 🌳 COSIA (Land Cover)
 
-Download COSIA (occupation du sol) land cover data from IGN API.
+Download COSIA land-cover data from the IGN API.
 
 ```python
 import pymdurs
@@ -425,7 +425,7 @@ print(f"DSM saved to: {output_path}")
 
 ---
 
-### 🏢 RNB (Référentiel National des Bâtiments)
+### 🏢 RNB (French National Building Registry)
 
 Download building data from RNB API.
 
@@ -614,44 +614,44 @@ uv pip install umep  # Optional
 
 ## UMEP Integration
 
-Le workflow UMEP complet s’enchaîne en **deux étapes** dans `examples/`, avec le même dossier de sortie (`./output/umep_workflow`) et la même zone d’étude (bbox La Rochelle par défaut).
+The full UMEP workflow runs in **two steps** under `examples/`, using the same output directory (`./output/umep_workflow`) and the same study area (La Rochelle bbox by default).
 
-### Étape 1 — Occupation du sol (`cosia_from_ign.py`)
+### Step 1 — Land cover (`cosia_from_ign.py`)
 
-Télécharge l’orthophoto **COSIA** depuis l’API IGN, vectorise les polygones par couleur RGB, les reclasse au format UMEP (bâti, végétation, eau, etc.) et produit notamment :
+Downloads the **COSIA** orthophoto from the IGN API, vectorizes polygons by RGB color, reclassifies them to UMEP format (buildings, vegetation, water, etc.), and produces:
 
-- `landcover.tif` — raster d’occupation du sol compatible SOLWEIG
-- `terrain.shp`, `terrain.geojson` — sous-ensemble vectoriel (sols nus et surfaces imperméables)
+- `landcover.tif` — land-cover raster compatible with SOLWEIG
+- `terrain.shp`, `terrain.geojson` — vector subset (bare soil and impervious surfaces)
 
 ```bash
 python examples/cosia_from_ign.py
 ```
 
-### Étape 2 — Analyse thermique (`umep_workflow_new.py`)
+### Step 2 — Thermal analysis (`umep_workflow_new.py`)
 
-S’appuie sur les sorties de l’étape 1 et collecte le reste des données urbaines via `pymdurs` :
+Builds on step 1 outputs and collects the remaining urban data via `pymdurs`:
 
-1. **DEM** depuis l’API IGN
-2. **DSM / CDSM** depuis le LiDAR IGN (WFS)
-3. Découpe des rasters au masque (`DEM_clip.tif`, `DSM_clip.tif`, `CDSM_clip.tif`, `landcover_clip.tif`)
-4. **SOLWEIG** (`solweig`) : facteur de vue du ciel (SVF), Tmrt, confort thermique (UTCI)
+1. **DEM** from the IGN API
+2. **DSM / CDSM** from IGN LiDAR (WFS)
+3. Clip rasters to the mask (`DEM_clip.tif`, `DSM_clip.tif`, `CDSM_clip.tif`, `landcover_clip.tif`)
+4. **SOLWEIG** (`solweig`): sky view factor (SVF), Tmrt, thermal comfort (UTCI)
 
-`umep_workflow_new.py` attend `landcover.tif` dans `./output/umep_workflow/`. Sans ce fichier, l’étape SOLWEIG est ignorée (un avertissement s’affiche).
+`umep_workflow_new.py` expects `landcover.tif` in `./output/umep_workflow/`. Without that file, the SOLWEIG step is skipped (a warning is printed).
 
 ```bash
-# Sur Apple Silicon (ARM64), ajouter d’abord la cible Rust x86_64 :
+# On Apple Silicon (ARM64), add the x86_64 Rust target first:
 rustup target add x86_64-apple-darwin
 
-# Installer solweig :
+# Install solweig:
 uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
 
-# Lancer le workflow (après cosia_from_ign.py) :
+# Run the workflow (after cosia_from_ign.py):
 python examples/umep_workflow_new.py
 ```
 
-**Note** : `solweig` requiert actuellement la cible Rust `x86_64-apple-darwin` même sur Mac Apple Silicon — limitation du paquet `solweig` lui-même. Placer un fichier météo EPW (ex. `la_rochelle_2025.epw`) dans `examples/` pour l’étape SOLWEIG.
+**Note:** `solweig` currently requires the `x86_64-apple-darwin` Rust target even on Apple Silicon — a limitation of the `solweig` package itself. Place a weather EPW file (e.g. `la_rochelle_2025.epw`) in `examples/` for the SOLWEIG step.
 
-**Sorties principales** : rasters découpés, prévisualisations PNG/GIF, séries temporelles Tmrt/UTCI dans `./output/umep_workflow/`.
+**Main outputs:** clipped rasters, PNG/GIF previews, Tmrt/UTCI time series in `./output/umep_workflow/`.
 
 ---
 
@@ -665,7 +665,7 @@ Comprehensive examples are available in the `examples/` directory:
 - **COSIA workflow**: `cosia_from_ign.py`
 - **UMEP workflow**: `umep_workflow_new.py` (complete urban analysis workflow)
 
-See [examples/README.md](../examples/README.md) for detailed documentation of all examples.
+See [examples/README.md](examples/README.md) for detailed documentation of all examples.
 
 ---
 
@@ -766,22 +766,22 @@ Both Pythonic aliases and original class names are available:
 
 ---
 
-## Versions et releases
+## Versions and releases
 
-La version est synchronisée dans `pyproject.toml`, `pymdurs/Cargo.toml` et `rsmdu/Cargo.toml`.
+The version is synchronized across `pyproject.toml`, `pymdurs/Cargo.toml`, and `rsmdu/Cargo.toml`.
 
-- **Définir une version** : `./scripts/set-version.sh 0.1.2`
-- **Incrémenter (patch/minor/major)** : `./scripts/bump-version.sh patch`
-- **Release (bump + commit + tag)** : `./scripts/bump-version.sh patch --tag` puis `git push && git push origin py-X.Y.Z`
+- **Set a version**: `./scripts/set-version.sh 0.1.2`
+- **Bump (patch/minor/major)**: `./scripts/bump-version.sh patch`
+- **Release (bump + commit + tag)**: `./scripts/bump-version.sh patch --tag` then `git push && git push origin py-X.Y.Z`
 
-Voir [docs/VERSIONING.md](docs/VERSIONING.md) pour le détail.
+See [docs/VERSIONING.md](docs/VERSIONING.md) for details.
 
 ---
 
 ## Support
 
-- [**PyPI – pymdurs**](https://pypi.org/project/pymdurs/) — page du projet et historique des versions
-- [**GitHub – pymdurs**](https://github.com/rupeelab17/pymdurs) — dépôt source (crate Rust `rsmdu` + bindings Python)
-- [Examples README](examples/README.md) — exemples détaillés
-- [Gestion des versions](docs/VERSIONING.md)
+- [**PyPI – pymdurs**](https://pypi.org/project/pymdurs/) — project page and release history
+- [**GitHub – pymdurs**](https://github.com/rupeelab17/pymdurs) — source repository (Rust crate `rsmdu` + Python bindings)
+- [Examples README](examples/README.md) — detailed examples
+- [Versioning](docs/VERSIONING.md)
 - [IGN Documentation](https://geoservices.ign.fr/documentation/services)
