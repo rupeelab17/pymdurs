@@ -9,7 +9,7 @@
 
 | Shadow | Mean radiant temperature (Tmrt) | Thermal comfort (UTCI) |
 | :----: | :-----------------------------: | :--------------------: |
-| ![Shadow preview](docs/shadow_preview.gif) | ![Tmrt preview](docs/tmrt_preview.gif) | ![UTCI preview](docs/utci_preview.gif) |
+| ![Shadow preview](docs/shadow_preview_bordeaux.gif) | ![Tmrt preview](docs/tmrt_preview_bordeaux.gif) | ![UTCI preview](docs/utci_preview_bordeaux.gif) |
 
 ---
 
