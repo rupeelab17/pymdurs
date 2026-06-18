@@ -7,7 +7,12 @@
 - **Package sur PyPI** : [pypi.org/project/pymdurs](https://pypi.org/project/pymdurs/)
 - **Dernière version** : [![pypi](https://img.shields.io/pypi/v/pymdurs?label=pymdurs)](https://pypi.org/project/pymdurs/)
 
+| Ombres (SVF) | Température radiative (Tmrt) |
+| :----------: | :--------------------------: |
+| ![Aperçu ombres](docs/shadow_preview.gif) | ![Aperçu Tmrt](docs/tmrt_preview.gif) |
+
 ---
+
 
 ## 📋 Table of Contents
 
@@ -743,7 +748,7 @@ Both Pythonic aliases and original class names are available:
 - `Cadastre` / `PyCadastre`
 - `Iris` / `PyIris`
 - `Lcz` / `PyLcz`
-- `BoundingBox` / `PyBoundingBox`
+- `PyBoundingBox`
 - `GeoCore` / `PyGeoCore`
 - etc.
 
