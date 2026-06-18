@@ -27,7 +27,7 @@ fn ign_http_client() -> Result<Client> {
         .connect_timeout(Duration::from_secs(120))
         .user_agent(concat!(
             "Mozilla/5.0 (compatible; pymdurs/0.1; ",
-            "+https://github.com/rupeelab17/rsmdu)"
+            "+https://github.com/rupeelab17/pymdurs)"
         ))
         // Évite des coupures de flux observées avec HTTP/2 sur certains CDN.
         .http1_only()

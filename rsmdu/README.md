@@ -136,8 +136,8 @@ pymdurs/
 #### 1. Clone and setup
 
 ```bash
-git clone https://github.com/rupeelab17/rsmdu.git
-cd rsmdu
+git clone https://github.com/rupeelab17/pymdurs.git
+cd pymdurs
 uv venv .venv --python 3.13
 source .venv/bin/activate
 uv pip install maturin
@@ -299,7 +299,7 @@ xcode-select --install
 
 #### Docker
 
-When building an image that installs pymdurs with `uv pip install https://github.com/rupeelab17/rsmdu.git`, **Rust must be installed in a previous layer**. If Rust is not present, maturin installs it on the fly and can hit "Text file busy (os error 26)" when running `cargo metadata` immediately after.
+When building an image that installs pymdurs with `uv pip install https://github.com/rupeelab17/pymdurs.git`, **Rust must be installed in a previous layer**. If Rust is not present, maturin installs it on the fly and can hit "Text file busy (os error 26)" when running `cargo metadata` immediately after.
 
 **Fix:** install Rust (e.g. with rustup) **before** the step that runs `uv pip install`:
 
@@ -311,7 +311,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Then install pymdurs (maturin will find cargo and build the wheel)
-RUN micromamba run -n umep_pymdu python -m uv pip install https://github.com/rupeelab17/rsmdu.git
+RUN micromamba run -n umep_pymdu python -m uv pip install https://github.com/rupeelab17/pymdurs.git
 ```
 
 Adjust the environment (e.g. `micromamba run -n umep_pymdu`, or `ENV PATH` if Rust is installed for another user) to match your image.

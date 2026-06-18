@@ -376,8 +376,8 @@ source $HOME/.cargo/env
 1. **Clone the repository:**
 
 ```bash
-git clone https://github.com/rupeelab17/rsmdu.git
-cd rsmdu
+git clone https://github.com/rupeelab17/pymdurs.git
+cd pymdurs
 ```
 
 2. **Install pymdurs:**
@@ -481,5 +481,5 @@ output/
 For more information, see:
 
 - [Main documentation](../README.md)
-- [GitHub repository](https://github.com/rupeelab17/rsmdu)
+- [GitHub repository](https://github.com/rupeelab17/pymdurs)
 - [IGN documentation](https://geoservices.ign.fr/documentation/services)

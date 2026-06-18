@@ -51,14 +51,6 @@ Créer un environnement virtuel :
 uv venv .venv --python 3.13
 ```
 
-### Install GDAL (prerequisite)
-
-| Platform    | Command                                                                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **macOS**   | `brew install gdal` or `ARCHFLAGS="-arch arm64" uv pip install --no-cache-dir gdal`                                                                                |
-| **Linux**   | `sudo apt-get update && sudo apt-get install -y libgdal-dev gdal-bin libclang-dev`                                                                                 |
-| **Windows** | [OSGeo4W](https://trac.osgeo.org/osgeo4w/) (GDAL, GEOS, PROJ, SQLite3) + `choco install llvm pkgconfiglite sqlite -y` + set `GDAL_HOME`, `PKG_CONFIG_PATH`, `PATH` |
-
 ### Depuis PyPI (recommandé)
 
 Le paquet est publié sur [PyPI](https://pypi.org/project/pymdurs/). Pour installer la dernière version :
@@ -67,6 +59,8 @@ Le paquet est publié sur [PyPI](https://pypi.org/project/pymdurs/). Pour instal
 uv pip install pymdurs
 ```
 
+Sur **Windows**, le wheel PyPI embarque GDAL, GEOS et PROJ via `auditwheel repair` : aucune installation système de GDAL n’est requise.
+
 Pour une version précise (voir l’[historique PyPI](https://pypi.org/project/pymdurs/#history)) :
 
 ```bash
@@ -74,6 +68,14 @@ uv pip install "pymdurs==<version>"
 ```
 
 ### Depuis les sources
+
+**Prérequis GDAL** (compilation uniquement — pas nécessaire pour `pip install pymdurs` sur Windows) :
+
+| Platform    | Command                                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **macOS**   | `brew install gdal` or `ARCHFLAGS="-arch arm64" uv pip install --no-cache-dir gdal`                                                                                |
+| **Linux**   | `sudo apt-get update && sudo apt-get install -y libgdal-dev gdal-bin libclang-dev`                                                                                 |
+| **Windows** | [OSGeo4W](https://trac.osgeo.org/osgeo4w/) (GDAL, GEOS, PROJ, SQLite3) + `choco install llvm pkgconfiglite sqlite -y` + set `GDAL_HOME`, `PKG_CONFIG_PATH`, `PATH` |
 
 **Prérequis : Rust** (nécessaire pour compiler) :
 
@@ -129,8 +131,8 @@ maturin develop --target aarch64-apple-darwin
 
 ```bash
 # Clone the repository
-git clone https://github.com/rupeelab17/rsmdu.git
-cd rsmdu
+git clone https://github.com/rupeelab17/pymdurs.git
+cd pymdurs
 
 # Install maturin (Python-Rust build tool)
 uv pip install maturin
@@ -774,7 +776,7 @@ Voir [docs/VERSIONING.md](docs/VERSIONING.md) pour le détail.
 ## Support
 
 - [**PyPI – pymdurs**](https://pypi.org/project/pymdurs/) — page du projet et historique des versions
-- [**GitHub – rsmdu**](https://github.com/rupeelab17/rsmdu) — dépôt source et documentation Rust
+- [**GitHub – pymdurs**](https://github.com/rupeelab17/pymdurs) — dépôt source (crate Rust `rsmdu` + bindings Python)
 - [Examples README](examples/README.md) — exemples détaillés
 - [Gestion des versions](docs/VERSIONING.md)
 - [IGN Documentation](https://geoservices.ign.fr/documentation/services)
