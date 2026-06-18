@@ -290,11 +290,24 @@ jobs:
       - name: Test wheel
         shell: pwsh
         run: |
-          pip install --force-reinstall --verbose (Get-Item dist\*.whl)
+          # Utilise explicitement le python conda (le meme qui a servi au build)
+          # pour garantir que pip install et python -c partagent l'environnement.
+          $py = (Get-Command python).Source
+          Write-Host "Python utilise : $py"
+
+          $wheel = (Get-Item dist\*.whl).FullName
+          Write-Host "Wheel : $wheel"
+
+          # Installe les DLLs runtime dans le PATH pour le chargement de l'extension
+          $env:PATH = "$env:CONDA_LIB\bin;$env:PATH"
+
+          # pip ET python via le MEME interpreteur (python -m pip)
+          & $py -m pip install --force-reinstall --verbose $wheel
+
           Push-Location $env:TEMP
           try {
-            python -c "import pymdurs; print('pymdurs imported successfully')"
-            python -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works: min_x =', bbox.min_x)"
+            & $py -c "import pymdurs; print('pymdurs imported successfully')"
+            & $py -c "import pymdurs; bbox = pymdurs.PyBoundingBox(-1.0, 46.0, 1.0, 47.0); print('PyBoundingBox works: min_x =', bbox.min_x)"
           } finally { Pop-Location }
 
       - name: Upload wheel
