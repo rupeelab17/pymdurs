@@ -1,11 +1,11 @@
 # pymdurs
 
-[![PyPI](https://img.shields.io/pypi/v/pymdurs?label=PyPI)](https://pypi.org/project/pymdurs/) [![Python](https://img.shields.io/pypi/pyversions/pymdurs)](https://pypi.org/project/pymdurs/)
+[![PyPI](https://img.shields.io/pypi/v/pymdurs?label=PyPI)](https://pypi.org/project/pymdurs/) [![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)](https://pypi.org/project/pymdurs/)
 
 **Python bindings** for the Rust library `rsmdu` — a high-performance reimplementation of [pymdu](https://github.com/UMEP-dev/pymdu) (Python Urban Data Model). Geospatial data processing for urban analysis, with integration with IGN (Institut Géographique National) APIs and UMEP toolchains.
 
 - **Package sur PyPI** : [pypi.org/project/pymdurs](https://pypi.org/project/pymdurs/)
-- **Dernière version** : [pymdurs 0.1.1](https://pypi.org/project/pymdurs/0.1.1/)
+- **Dernière version** : [![pypi](https://img.shields.io/pypi/v/pymdurs?label=pymdurs)](https://pypi.org/project/pymdurs/)
 
 ---
 
@@ -67,10 +67,10 @@ Le paquet est publié sur [PyPI](https://pypi.org/project/pymdurs/). Pour instal
 uv pip install pymdurs
 ```
 
-Pour une version précise (ex. [0.1.1](https://pypi.org/project/pymdurs/0.1.1/)) :
+Pour une version précise (voir l’[historique PyPI](https://pypi.org/project/pymdurs/#history)) :
 
 ```bash
-uv pip install pymdurs==0.1.1
+uv pip install "pymdurs==<version>"
 ```
 
 ### Depuis les sources
