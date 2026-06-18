@@ -89,7 +89,7 @@ maturin build --target x86_64-apple-darwin --release    # Intel
 
 Après la compilation Rust, maturin analyse les dépendances dynamiques (GDAL → abseil/protobuf, etc.) pour les copier dans la roue. Les install names du type `@rpath/libabsl_debugging_internal….dylib` sont résolus comme le ferait dyld, avec des répertoires de secours **limités** par défaut (`~/lib`, `/usr/local/lib`, `/lib`, `/usr/lib`). Sur **Apple Silicon**, Homebrew installe les bibliothèques dans `$(brew --prefix)/lib` (souvent `/opt/homebrew/lib`), qui n’est pas dans cette liste : la résolution échoue et le repair s’arrête.
 
-**Correctif** : inclure le répertoire `lib` de Homebrew dans `DYLD_FALLBACK_LIBRARY_PATH` pendant le build / `pip install` / `uv pip install` :
+**Correctif** : inclure le répertoire `lib` de Homebrew dans `DYLD_FALLBACK_LIBRARY_PATH` pendant le build / `uv pip install` :
 
 ```bash
 export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"

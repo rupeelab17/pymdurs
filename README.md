@@ -133,7 +133,7 @@ git clone https://github.com/rupeelab17/rsmdu.git
 cd rsmdu
 
 # Install maturin (Python-Rust build tool)
-pip install maturin
+uv pip install maturin
 
 # Build and install pymdurs
 cd pymdurs
@@ -587,7 +587,7 @@ lcz.to_geojson(name="lcz")
 **Note**: If you encounter NumPy 2.x compatibility issues, install NumPy 1.x:
 
 ```bash
-pip install 'numpy<2.0.0'
+uv pip install 'numpy<2.0.0'
 ```
 
 ### Optional Dependencies
@@ -596,11 +596,11 @@ For advanced workflows and examples:
 
 ```bash
 # Geospatial operations
-pip install geopandas rasterio pyproj shapely
+uv pip install geopandas rasterio pyproj shapely
 
 # For UMEP integration
-pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
-pip install umep  # Optional
+uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
+uv pip install umep  # Optional
 ```
 
 ---
@@ -614,7 +614,7 @@ To use `pymdurs` with `solweig` for UMEP (Urban Multi-scale Environmental Predic
 rustup target add x86_64-apple-darwin
 
 # Then install solweig:
-pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
+uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
 
 ```
 

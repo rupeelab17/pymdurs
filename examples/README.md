@@ -135,7 +135,7 @@ python examples/cosia_from_ign.py
 **Additional prerequisites:**
 
 ```bash
-pip install geopandas rasterio numpy shapely
+uv pip install geopandas rasterio numpy shapely
 ```
 
 ---
@@ -287,7 +287,7 @@ Alternative UMEP workflow using the `solweig` Python package (SOLWEIG from UMEP-
 python examples/umep_workflow_new.py
 ```
 
-**Additional prerequisites:** `pip install geopandas rasterio pyproj pillow` and `solweig` (e.g. from UMEP-dev/solweig).
+**Additional prerequisites:** `uv pip install geopandas rasterio pyproj pillow` and `solweig` (e.g. from UMEP-dev/solweig).
 
 ---
 
@@ -398,24 +398,24 @@ maturin develop --target x86_64-apple-darwin
 **Base dependencies:**
 
 ```bash
-pip install pandas 'numpy<2.0.0'
+uv pip install pandas 'numpy<2.0.0'
 ```
 
 **Important note:** NumPy 2.x may cause compatibility issues with some dependencies (e.g. `numexpr`). Using NumPy < 2.0.0 is recommended. If you already have NumPy 2.x installed, you can downgrade with:
 
 ```bash
-pip install 'numpy<2.0.0' --force-reinstall
+uv pip install 'numpy<2.0.0' --force-reinstall
 ```
 
 **Dependencies for advanced workflows:**
 
 ```bash
 # For geospatial examples
-pip install geopandas rasterio pyproj shapely
+uv pip install geopandas rasterio pyproj shapely
 
 # For umep_workflow.py
-pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
-pip install umep  # Optional
+uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
+uv pip install umep  # Optional
 ```
 
 ### Internet connection
