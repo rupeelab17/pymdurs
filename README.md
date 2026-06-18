@@ -45,7 +45,13 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 Après installation, redémarrer le terminal. Mise à jour : `uv self update` (installateur standalone uniquement).
 
-**Install GDAL (prerequisite)**
+Créer un environnement virtuel :
+
+```bash
+uv venv .venv --python 3.13
+```
+
+### Install GDAL (prerequisite)
 
 | Platform    | Command                                                                                                                                                            |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -58,13 +64,13 @@ Après installation, redémarrer le terminal. Mise à jour : `uv self update` (i
 Le paquet est publié sur [PyPI](https://pypi.org/project/pymdurs/). Pour installer la dernière version :
 
 ```bash
-pip install pymdurs
+uv pip install pymdurs
 ```
 
 Pour une version précise (ex. [0.1.1](https://pypi.org/project/pymdurs/0.1.1/)) :
 
 ```bash
-pip install pymdurs==0.1.1
+uv pip install pymdurs==0.1.1
 ```
 
 ### Depuis les sources

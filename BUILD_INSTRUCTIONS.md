@@ -35,6 +35,12 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 **Alternatives :** `brew install uv`, `pipx install uv`, ou `pip install uv`.
 
+Créer l’environnement virtuel :
+
+```bash
+uv venv .venv --python 3.13
+```
+
 Synchroniser l’environnement du projet après clonage :
 
 ```bash
