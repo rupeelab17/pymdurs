@@ -7,7 +7,7 @@
 - **Package sur PyPI** : [pypi.org/project/pymdurs](https://pypi.org/project/pymdurs/)
 - **Dernière version** : [![pypi](https://img.shields.io/pypi/v/pymdurs?label=pymdurs)](https://pypi.org/project/pymdurs/)
 
-| Ombres (SVF) | Température radiative (Tmrt) |
+| Ombres | Température radiative (Tmrt) |
 | :----------: | :--------------------------: |
 | ![Aperçu ombres](docs/shadow_preview.gif) | ![Aperçu Tmrt](docs/tmrt_preview.gif) |
 
