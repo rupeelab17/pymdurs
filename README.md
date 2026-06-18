@@ -607,24 +607,44 @@ uv pip install umep  # Optional
 
 ## UMEP Integration
 
-To use `pymdurs` with `solweig` for UMEP (Urban Multi-scale Environmental Predictor) workflows:
+Le workflow UMEP complet s’enchaîne en **deux étapes** dans `examples/`, avec le même dossier de sortie (`./output/umep_workflow`) et la même zone d’étude (bbox La Rochelle par défaut).
+
+### Étape 1 — Occupation du sol (`cosia_from_ign.py`)
+
+Télécharge l’orthophoto **COSIA** depuis l’API IGN, vectorise les polygones par couleur RGB, les reclasse au format UMEP (bâti, végétation, eau, etc.) et produit notamment :
+
+- `landcover.tif` — raster d’occupation du sol compatible SOLWEIG
+- `terrain.shp`, `terrain.geojson` — sous-ensemble vectoriel (sols nus et surfaces imperméables)
 
 ```bash
-# On Apple Silicon (ARM64), first add the x86_64 Rust target:
-rustup target add x86_64-apple-darwin
-
-# Then install solweig:
-uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
-
+python examples/cosia_from_ign.py
 ```
 
-**Note**: `solweig` currently requires the `x86_64-apple-darwin` Rust target even on Apple Silicon Macs. This is a limitation of the `solweig` package itself.
+### Étape 2 — Analyse thermique (`umep_workflow_new.py`)
 
-See `examples/umep_workflow_new.py` for a complete example combining `pymdurs` and `solweig` for:
+S’appuie sur les sorties de l’étape 1 et collecte le reste des données urbaines via `pymdurs` :
 
-- DEM, DSM, and CDSM generation
-- Sky View Factor (SVF) calculation
-- SOLWEIG thermal comfort analysis
+1. **DEM** depuis l’API IGN
+2. **DSM / CDSM** depuis le LiDAR IGN (WFS)
+3. Découpe des rasters au masque (`DEM_clip.tif`, `DSM_clip.tif`, `CDSM_clip.tif`, `landcover_clip.tif`)
+4. **SOLWEIG** (`solweig`) : facteur de vue du ciel (SVF), Tmrt, confort thermique (UTCI)
+
+`umep_workflow_new.py` attend `landcover.tif` dans `./output/umep_workflow/`. Sans ce fichier, l’étape SOLWEIG est ignorée (un avertissement s’affiche).
+
+```bash
+# Sur Apple Silicon (ARM64), ajouter d’abord la cible Rust x86_64 :
+rustup target add x86_64-apple-darwin
+
+# Installer solweig :
+uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
+
+# Lancer le workflow (après cosia_from_ign.py) :
+python examples/umep_workflow_new.py
+```
+
+**Note** : `solweig` requiert actuellement la cible Rust `x86_64-apple-darwin` même sur Mac Apple Silicon — limitation du paquet `solweig` lui-même. Placer un fichier météo EPW (ex. `la_rochelle_2025.epw`) dans `examples/` pour l’étape SOLWEIG.
+
+**Sorties principales** : rasters découpés, prévisualisations PNG/GIF, séries temporelles Tmrt/UTCI dans `./output/umep_workflow/`.
 
 ---
 
@@ -636,7 +656,7 @@ Comprehensive examples are available in the `examples/` directory:
 - **IGN API integration**: `building_from_ign.py`, `dem_from_ign.py`, `cadastre_from_ign.py`, etc.
 - **LiDAR processing**: `lidar_from_wfs.py`
 - **COSIA workflow**: `cosia_from_ign.py`
-- **UMEP workflow**: `umep_workflow.py` (complete urban analysis workflow)
+- **UMEP workflow**: `umep_workflow_new.py` (complete urban analysis workflow)
 
 See [examples/README.md](../examples/README.md) for detailed documentation of all examples.
 

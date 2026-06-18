@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Patch AlexanderWillner/gdal fork for MSVC bindgen (i32 vs u32 enums)."""
+"""Patch AlexanderWillner/gdal fork for MSVC bindgen (i32 vs u32 enums).
+
+Sur Windows MSVC, bindgen genere les constantes d'enum GDAL en i32, alors que
+le code du fork les traite en u32 (repr, discriminants, match arms). Ce script
+applique des corrections generales plutot que cas par cas.
+
+Usage: patch_gdal_msvc.py <gdal_fork_src_dir>
+"""
 
 from __future__ import annotations
 
@@ -8,27 +15,104 @@ import re
 import sys
 
 
-def patch(
-    path: str,
-    guard: str,
-    transforms: list[tuple[str, str, int]],
-    appends: list[str],
-) -> None:
+# Constantes GDAL/OGR generees par bindgen — utilisees comme discriminants
+# d'enum ou dans des match arms. Sur MSVC elles sont i32, le fork attend u32.
+CONST_PREFIXES = (
+    "GDT_", "GDAL", "OAMS_", "OGR", "OAO_", "GFT_", "GFU_", "GRIORA_",
+    "GCI_", "GMF_", "GARIO_", "OFTL_", "OFT", "OJUndefined", "wkb",
+)
+
+
+def read(path: str) -> str | None:
     if not os.path.exists(path):
-        print(f"SKIP: {path}")
-        return
+        print(f"SKIP (introuvable): {path}")
+        return None
     with open(path, encoding="utf-8") as f:
-        content = f.read()
-    if guard and guard in content:
-        print(f"Already patched: {path}")
-        return
-    for pattern, repl, flags in transforms:
-        content = re.sub(pattern, repl, content, flags=flags)
-    if appends:
-        content += "".join(line + "\n" for line in appends)
+        return f.read()
+
+
+def write(path: str, content: str) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"Patched: {path}")
+
+
+def patch_enum_discriminants(content: str) -> str:
+    """Ajoute 'as u32' aux discriminants d'enum de la forme:
+        Variant = SOMECONST::CONST_NAME,
+    et aussi:
+        Variant = bare_const_name,
+    """
+    # Forme : = NAMESPACE::CONST,  ou  = NAMESPACE::CONST }
+    def repl_path(m: re.Match) -> str:
+        return f"{m.group(1)} as u32{m.group(2)}"
+
+    # = Xxx::YYY suivi de , ou } ou fin de ligne, sans deja "as u32"
+    content = re.sub(
+        r"(=\s*[A-Za-z_][A-Za-z0-9_]*::[A-Z][A-Za-z0-9_]*)(\s*[,}])",
+        repl_path,
+        content,
+    )
+    return content
+
+
+def patch_match_arms(content: str) -> str:
+    """Transforme les match arms qui comparent une valeur u32 a des constantes
+    i32 en guards. Gere les arms simples et les arms multiples (A | B | C =>).
+
+    Avant:  GDT_Byte => ...
+            GDT_CInt16 | GDT_CInt32 => ...
+    Apres:  x if x == GDT_Byte as u32 => ...
+            x if x == GDT_CInt16 as u32 || x == GDT_CInt32 as u32 => ...
+    """
+    const_re = "|".join(CONST_PREFIXES)
+    # Une ligne d'arm : indentation + (CONST | CONST | ...) => reste
+    arm_re = re.compile(
+        r"^(?P<indent>\s+)"
+        r"(?P<consts>(?:[A-Za-z_][A-Za-z0-9_]*)(?:\s*\|\s*[A-Za-z_][A-Za-z0-9_]*)*)"
+        r"(?P<arrow>\s*=>)",
+        re.MULTILINE,
+    )
+
+    def is_const(tok: str) -> bool:
+        return tok.startswith(CONST_PREFIXES)
+
+    def repl(m: re.Match) -> str:
+        consts_raw = m.group("consts")
+        tokens = [t.strip() for t in consts_raw.split("|")]
+        # Ne patche que si TOUS les tokens sont des constantes GDAL connues
+        if not tokens or not all(is_const(t) for t in tokens):
+            return m.group(0)
+        guards = " || ".join(f"x == {t} as u32" for t in tokens)
+        return f"{m.group('indent')}x if {guards}{m.group('arrow')}"
+
+    return arm_re.sub(repl, content)
+
+
+def patch_file_general(path: str, guard: str) -> None:
+    content = read(path)
+    if content is None:
+        return
+    if guard and guard in content:
+        print(f"Already patched (general): {path}")
+        return
+    content = patch_enum_discriminants(content)
+    content = patch_match_arms(content)
+    # Marqueur d'idempotence en tete de fichier
+    content = f"// {guard}\n" + content
+    write(path, content)
+
+
+def append_impls(path: str, guard: str, lines: list[str]) -> None:
+    content = read(path)
+    if content is None:
+        return
+    if guard in content:
+        print(f"Impl already present: {path}")
+        return
+    content += "\n" + "\n".join(lines) + "\n"
+    write(path, content)
+    print(f"Impl appended: {path}")
 
 
 def main() -> int:
@@ -37,35 +121,31 @@ def main() -> int:
         return 1
 
     src = sys.argv[1]
+    srs = os.path.join(src, "src", "spatial_ref", "srs.rs")
+    types = os.path.join(src, "src", "raster", "types.rs")
+    rband = os.path.join(src, "src", "raster", "rasterband.rs")
 
-    patch(
-        os.path.join(src, "src", "spatial_ref", "srs.rs"),
-        "OGRErr::Type",
+    # 1. err_code : u32 -> OGRErr::Type (cross-platform)
+    content = read(srs)
+    if content is not None and "gdal_sys::OGRErr::Type" not in content:
+        content = re.sub(
+            r"let mut err_code:\s*u32\b",
+            "let mut err_code: gdal_sys::OGRErr::Type",
+            content,
+        )
+        content = re.sub(r"&mut err_code as \*mut u32\b", "&mut err_code", content)
+        write(srs, content)
+
+    # 2. Patch general discriminants + match arms sur les 3 fichiers
+    for path in (srs, types, rband):
+        patch_file_general(path, guard="__CI_MSVC_PATCHED__")
+
+    # 3. TryFrom<i32> pour les enums utilises avec try_into() sur valeur i32
+    append_impls(
+        srs,
+        "TryFrom<i32> for AxisMappingStrategy",
         [
-            (
-                r"let mut err_code:\s*u32\b",
-                "let mut err_code: gdal_sys::OGRErr::Type",
-                0,
-            ),
-            (r"&mut err_code as \*mut u32\b", "&mut err_code", 0),
-            (
-                r"^(\s+)(OAMS_TRADITIONAL_GIS_ORDER)(\s*=>)",
-                r"\1x_tgo if x_tgo == \2 as u32\3",
-                re.M,
-            ),
-            (
-                r"^(\s+)(OAMS_AUTHORITY_COMPLIANT)(\s*=>)",
-                r"\1x_ac if x_ac == \2 as u32\3",
-                re.M,
-            ),
-            (
-                r"^(\s+)(OAMS_CUSTOM)(\s*=>)",
-                r"\1x_cu if x_cu == \2 as u32\3",
-                re.M,
-            ),
-        ],
-        [
-            "/// MSVC compat added by CI patch",
+            "// __CI_MSVC_PATCHED__ impl ajoutee par le CI",
             '#[cfg(target_env = "msvc")]',
             "impl TryFrom<i32> for AxisMappingStrategy {",
             "    type Error = <AxisMappingStrategy as TryFrom<u32>>::Error;",
@@ -73,32 +153,17 @@ def main() -> int:
             "}",
         ],
     )
-
-    patch(
-        os.path.join(src, "src", "raster", "types.rs"),
+    append_impls(
+        types,
         "TryFrom<i32> for GdalDataType",
-        [],
         [
-            "/// MSVC compat added by CI patch",
+            "// __CI_MSVC_PATCHED__ impl ajoutee par le CI",
             '#[cfg(target_env = "msvc")]',
             "impl TryFrom<i32> for GdalDataType {",
             "    type Error = <GdalDataType as TryFrom<u32>>::Error;",
             "    fn try_from(v: i32) -> Result<Self, Self::Error> { Self::try_from(v as u32) }",
             "}",
         ],
-    )
-
-    patch(
-        os.path.join(src, "src", "raster", "rasterband.rs"),
-        "GRIORA_NearestNeighbour as u32",
-        [
-            (
-                r"(GDALRIOResampleAlg::\w+)(?=\s*[,}])",
-                r"\1 as u32",
-                0,
-            ),
-        ],
-        [],
     )
 
     print("All patches done")
