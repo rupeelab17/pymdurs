@@ -261,69 +261,9 @@ jobs:
           $srcDir = (Get-ChildItem $gdalCheckout.FullName -Directory | Select-Object -First 1).FullName
           Write-Host "Fork src : $srcDir"
 
-          # Ecrit le script Python dans un fichier temp (evite les problemes de
-          # caracteres speciaux et de heredocs imbriques dans le YAML)
-          $py = @(
-            "import os, re",
-            "src = r'$srcDir'",
-            "",
-            "def patch(path, guard, transforms, appends):",
-            "    if not os.path.exists(path): print('SKIP:', path); return",
-            "    with open(path, encoding='utf-8') as f: c = f.read()",
-            "    if guard and guard in c: print('Already patched:', path); return",
-            "    for pat, rep, fl in transforms: c = re.sub(pat, rep, c, flags=fl)",
-            "    for line in appends: c += line + chr(10)",
-            "    with open(path, 'w', encoding='utf-8') as f: f.write(c)",
-            "    print('Patched:', path)",
-            "",
-            "# srs.rs : err_code types + OAMS match + TryFrom<i32>",
-            "patch(os.path.join(src, 'src', 'spatial_ref', 'srs.rs'),",
-            "    'OGRErr::Type',",
-            "    [",
-            "        (r'let mut err_code:\s*u32\b', 'let mut err_code: gdal_sys::OGRErr::Type', 0),",
-            "        (r'&mut err_code as \*mut u32\b', '&mut err_code', 0),",
-            r"        (r'^(\s+)(OAMS_TRADITIONAL_GIS_ORDER)(\s*=>)', r'\1x_tgo if x_tgo == \2 as u32\3', re.M),",
-            r"        (r'^(\s+)(OAMS_AUTHORITY_COMPLIANT)(\s*=>)',   r'\1x_ac if x_ac == \2 as u32\3',   re.M),",
-            r"        (r'^(\s+)(OAMS_CUSTOM)(\s*=>)',                r'\1x_cu if x_cu == \2 as u32\3',   re.M),",
-            "    ],",
-            "    [",
-            "        '/// MSVC compat added by CI patch',",
-            "        '#[cfg(target_env = \"msvc\")]',",
-            "        'impl TryFrom<i32> for AxisMappingStrategy {',",
-            "        '    type Error = <AxisMappingStrategy as TryFrom<u32>>::Error;',",
-            "        '    fn try_from(v: i32) -> Result<Self, Self::Error> { Self::try_from(v as u32) }',",
-            "        '}',",
-            "    ]",
-            ")",
-            "",
-            "# types.rs : TryFrom<i32> pour GdalDataType",
-            "patch(os.path.join(src, 'src', 'raster', 'types.rs'),",
-            "    'TryFrom<i32> for GdalDataType',",
-            "    [],",
-            "    [",
-            "        '/// MSVC compat added by CI patch',",
-            "        '#[cfg(target_env = \"msvc\")]',",
-            "        'impl TryFrom<i32> for GdalDataType {',",
-            "        '    type Error = <GdalDataType as TryFrom<u32>>::Error;',",
-            "        '    fn try_from(v: i32) -> Result<Self, Self::Error> { Self::try_from(v as u32) }',",
-            "        '}',",
-            "    ]",
-            ")",
-            "",
-            "# rasterband.rs : discriminants d'enum u32 vs constantes i32",
-            "# Pattern: EnumVariant = GDALRIOResampleAlg::GRIORA_X, -> = GDALRIOResampleAlg::GRIORA_X as u32,",
-            "patch(os.path.join(src, 'src', 'raster', 'rasterband.rs'),",
-            "    'GRIORA_NearestNeighbour as u32',",
-            "    [",
-            r"        (r'(GDALRIOResampleAlg::\w+)(?=\s*[,}])', r'\1 as u32', 0),",
-            "    ],",
-            "    []",
-            ")",
-            "",
-            "print('All patches done')"
-          )
-          $py | Set-Content "$env:TEMP\patch_gdal.py" -Encoding utf8
-          python "$env:TEMP\patch_gdal.py"
+          # Le script de patch est versionne dans le repo
+          # (.github/scripts/patch_gdal_msvc.py)
+          python .github/scripts/patch_gdal_msvc.py $srcDir
 
       # ── Build ─────────────────────────────────────────────────────────────────
       - name: Build wheel
