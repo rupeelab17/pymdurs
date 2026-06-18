@@ -133,6 +133,7 @@ jobs:
           $gdalVer = ((conda list libgdal)| Select-String "^libgdal\s+").ToString().Trim() -split "\s+" | Select-Object -Index 1
           Write-Host "GDAL $gdalVer  GEOS $geosVer  PROJ $projVer"
           "CONDA_LIB=$lib"                 | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CONDA_PREFIX=$prefix"           | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GDAL_DLL_NAME=$($gdalDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "PROJ_DLL_NAME=$($projDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "GEOS_DLL_NAME=$($geosDll.Name)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -281,27 +282,36 @@ jobs:
           LIBCLANG_PATH: ${{ env.LIBCLANG_PATH }}
           RUST_BACKTRACE: full
         run: |
+          # --auditwheel=repair embarque les DLLs externes (gdal, geos, proj,
+          # snappy, sqlite3...) dans le wheel pour qu'il soit autonome sur PyPI.
+          # Sans ca, l'utilisateur final devrait avoir conda/GDAL installe.
           maturin build `
             --release `
             --target x86_64-pc-windows-msvc `
             --manifest-path pymdurs/Cargo.toml `
+            --auditwheel repair `
             --out dist
 
       - name: Test wheel
         shell: pwsh
         run: |
-          # Utilise explicitement le python conda (le meme qui a servi au build)
-          # pour garantir que pip install et python -c partagent l'environnement.
-          $py = (Get-Command python).Source
+          # On teste avec le Python conda (celui qui a les DLLs GDAL/GEOS/PROJ
+          # dans son Library\bin). On s'assure que pip y est present.
+          $py = "$env:CONDA_PREFIX\python.exe"
+          if (-not (Test-Path $py)) { $py = (Get-Command python).Source }
           Write-Host "Python utilise : $py"
+
+          # Garantit que pip est disponible dans cet interpreteur
+          & $py -m ensurepip --upgrade 2>&1 | Out-Null
+          & $py -m pip --version
 
           $wheel = (Get-Item dist\*.whl).FullName
           Write-Host "Wheel : $wheel"
 
-          # Installe les DLLs runtime dans le PATH pour le chargement de l'extension
+          # Ajoute les DLLs runtime conda (snappy, archive, sqlite3, gdal...) au PATH
+          # requises par l'extension native au moment de l'import
           $env:PATH = "$env:CONDA_LIB\bin;$env:PATH"
 
-          # pip ET python via le MEME interpreteur (python -m pip)
           & $py -m pip install --force-reinstall --verbose $wheel
 
           Push-Location $env:TEMP
