@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import geopandas as gpd
@@ -6,10 +7,15 @@ import numpy as np
 import rasterio
 from rasterio.features import rasterize
 import solweig
-from osgeo import gdal, gdalconst
 from shapely.geometry import box
 
 import pymdurs
+
+_EXAMPLES_DIR = Path(__file__).resolve().parent
+if str(_EXAMPLES_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXAMPLES_DIR))
+
+from utils import warp_clip_raster  # noqa: E402
 
 
 def add_building_to_dsm(dsm_path, building_path, output_path,
@@ -259,66 +265,29 @@ def generate_files(output_folder, bbox_wgs84):
     print("=" * 60)
 
     mask_shp_path = Path(output_folder_str) / "mask.shp"
+    dem_clip_path = Path(output_folder_str) / "DEM_clip.tif"
+    dsm_clip_path = Path(output_folder_str) / "DSM_clip.tif"
+    cdsm_clip_path = Path(output_folder_str) / "CDSM_clip.tif"
+    cdsm_source = Path(output_folder_str) / "CDSM.tif"
+    landcover_clip_path = Path(output_folder_str) / "landcover_clip.tif"
+    landcover_source = Path(output_folder_str) / "landcover.tif"
+
     if mask_shp_path.exists():
-        warp_options = gdal.WarpOptions(
-            multithread=True,
-            format="GTiff",
-            xRes=1,
-            yRes=1,
-            outputType=gdalconst.GDT_Float32,
-            dstNodata=None,
-            dstSRS="EPSG:2154",
-            cropToCutline=True,
-            cutlineDSName=str(mask_shp_path),
-            cutlineLayer="mask",
-        )
-
-        # Clip DEM
-        dem_clip_path = Path(output_folder_str) / "DEM_clip.tif"
-        if dem_source.exists():
-            gdal.Warp(
-                destNameOrDestDS=str(dem_clip_path),
-                srcDSOrSrcDSTab=str(dem_source),
-                options=warp_options,
-            )
-            print(f"✅ DEM clipped to: {dem_clip_path}")
-
-        # Clip DSM
-        dsm_clip_path = Path(output_folder_str) / "DSM_clip.tif"
-        if dsm_source.exists():
-            gdal.Warp(
-                destNameOrDestDS=str(dsm_clip_path),
-                srcDSOrSrcDSTab=str(dsm_source),
-                options=warp_options,
-            )
-            print(f"✅ DSM clipped to: {dsm_clip_path}")
-
-        # Clip CDSM
-        cdsm_clip_path = Path(output_folder_str) / "CDSM_clip.tif"
-        cdsm_source = Path(output_folder_str) / "CDSM.tif"
-        if cdsm_source.exists():
-            gdal.Warp(
-                destNameOrDestDS=str(cdsm_clip_path),
-                srcDSOrSrcDSTab=str(cdsm_source),
-                options=warp_options,
-            )
-            print(f"✅ CDSM clipped to: {cdsm_clip_path}")
-
-        # Clip Landcover
-        landcover_clip_path = Path(output_folder_str) / "landcover_clip.tif"
-        landcover_source = Path(output_folder_str) / "landcover.tif"
-        if landcover_source.exists():
-            gdal.Warp(
-                destNameOrDestDS=str(landcover_clip_path),
-                srcDSOrSrcDSTab=str(landcover_source),
-                options=warp_options,
-            )
-            print(f"✅ Landcover clipped to: {landcover_clip_path}")
-        else:
-            print(
-                "⚠️  landcover.tif missing: run from examples/ first: "
-                "python cosia_from_ign.py"
-            )
+        clip_targets = [
+            ("DEM", dem_source, dem_clip_path),
+            ("DSM", dsm_source, dsm_clip_path),
+            ("CDSM", cdsm_source, cdsm_clip_path),
+            ("Landcover", landcover_source, landcover_clip_path),
+        ]
+        for label, src, dst in clip_targets:
+            if src.exists():
+                warp_clip_raster(src, dst, mask_shp_path)
+                print(f"✅ {label} clipped to: {dst}")
+            elif label == "Landcover":
+                print(
+                    "⚠️  landcover.tif missing: run from examples/ first: "
+                    "python cosia_from_ign.py"
+                )
     else:
         print("⚠️  Mask shapefile not found, skipping clipping")
 
