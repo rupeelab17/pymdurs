@@ -17,7 +17,7 @@ const CSV_PREFIX: &str = "Tableau-suivi-services-web-";
 
 /// Bundled at compile time so pip-installed wheels work without the source tree.
 /// `include_bytes!` reads the file relative to THIS .rs file, at build time, and
-/// embeds it directly into the compiled .pyd / .so. The CSV therefore ships
+/// embeds it directly into the compiled .pyd / .so.     The CSV therefore ships
 /// inside the wheel with no runtime dependency on the source tree.
 const EMBEDDED_CSV: &[u8] = include_bytes!("data/Tableau-suivi-services-web-06-02-2026.csv");
 

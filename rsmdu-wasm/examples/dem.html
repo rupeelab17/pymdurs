@@ -340,8 +340,49 @@
         let map = null;
         let demLayer = null;
         let currentGeoraster = null;
+        let currentValueMin = 0;
+        let currentValueMax = 1;
         let currentColorScale = 'viridis';
         let osmLayer = null; // Store reference to OSM tile layer
+
+        // IGN GeoTIFFs often report EPSG:32767 (unknown); bounds are geographic WGS84.
+        function normalizeProjection(georaster) {
+            const p = georaster.projection;
+            const geographic =
+                Math.abs(georaster.xmin) <= 180 && Math.abs(georaster.xmax) <= 180 &&
+                Math.abs(georaster.ymin) <= 90 && Math.abs(georaster.ymax) <= 90;
+            if (!p || p === 32767 || p > 32766 || (geographic && p !== 4326)) {
+                georaster.projection = 4326;
+            }
+        }
+
+        function isNoData(georaster, value) {
+            if (value === null || value === undefined || !isFinite(value)) return true;
+            // IGN float32 nodata (-99999) drifts slightly in WMS tiles
+            if (value < -1000) return true;
+            const nodata = georaster.noDataValue;
+            return nodata != null && Math.abs(value - nodata) < 250;
+        }
+
+        // georaster.mins can include nodata; coastal tiles have ocean outliers
+        function bandMinMax(georaster) {
+            const vals = [];
+            const band = georaster.values[0];
+            for (let y = 0; y < georaster.height; y++) {
+                for (let x = 0; x < georaster.width; x++) {
+                    const v = band[y][x];
+                    if (isNoData(georaster, v)) continue;
+                    vals.push(v);
+                }
+            }
+            if (!vals.length) {
+                return [georaster.mins[0], georaster.maxs[0]];
+            }
+            vals.sort((a, b) => a - b);
+            const i0 = Math.floor(vals.length * 0.02);
+            const i1 = Math.max(i0, Math.ceil(vals.length * 0.98) - 1);
+            return [vals[i0], vals[i1]];
+        }
         
         // Update bbox fields from map bounds
         function updateBboxFromMap() {
@@ -423,14 +464,14 @@
                 return null; // Transparent for no data
             }
             
-            if (!currentGeoraster || !currentGeoraster.mins || !currentGeoraster.maxs) {
+            if (isNoData(currentGeoraster, value)) {
                 return null;
             }
-            
-            const min = currentGeoraster.mins[0];
-            const max = currentGeoraster.maxs[0];
-            
-            if (min === undefined || max === undefined || !isFinite(min) || !isFinite(max)) {
+
+            const min = currentValueMin;
+            const max = currentValueMax;
+
+            if (!isFinite(min) || !isFinite(max)) {
                 return null;
             }
             
@@ -559,47 +600,12 @@
                     throw new Error('Invalid GeoRaster: missing min/max values');
                 }
                 
-                // Ensure projection is set (default to EPSG:4326 if not present)
-                // GeoRasterLayer expects projection as a number (EPSG code)
-                if (!georaster.projection) {
-                    console.warn('GeoRaster has no projection property, checking srs/crs...');
-                    // Try to get from srs or crs
-                    if (georaster.srs) {
-                        const srsMatch = georaster.srs.toString().match(/EPSG:?(\d+)/i);
-                        if (srsMatch) {
-                            georaster.projection = parseInt(srsMatch[1]);
-                            console.log('Found projection from srs:', georaster.projection);
-                        }
-                    } else if (georaster.crs) {
-                        const crsMatch = georaster.crs.toString().match(/EPSG:?(\d+)/i);
-                        if (crsMatch) {
-                            georaster.projection = parseInt(crsMatch[1]);
-                            console.log('Found projection from crs:', georaster.projection);
-                        }
-                    }
-                    
-                    // Default to EPSG:4326 if still not found
-                    if (!georaster.projection) {
-                        console.warn('Setting default projection to EPSG:4326');
-                        georaster.projection = 4326;
-                    }
-                } else {
-                    // Ensure projection is a number
-                    if (typeof georaster.projection === 'string') {
-                        const match = georaster.projection.match(/EPSG:?(\d+)/i);
-                        if (match) {
-                            georaster.projection = parseInt(match[1]);
-                        } else {
-                            georaster.projection = parseInt(georaster.projection) || 4326;
-                        }
-                    } else if (typeof georaster.projection !== 'number') {
-                        georaster.projection = 4326;
-                    }
-                }
-                
-                console.log('Final projection:', georaster.projection);
-                
+                normalizeProjection(georaster);
+                const [valueMin, valueMax] = bandMinMax(georaster);
+
                 currentGeoraster = georaster;
+                currentValueMin = valueMin;
+                currentValueMax = valueMax;
                 currentColorScale = document.getElementById('colorscale').value;
                 
                 // Display on map
@@ -609,7 +615,7 @@
                 updateStats(georaster);
                 
                 // Update legend
-                updateLegend(georaster.mins[0], georaster.maxs[0], currentColorScale);
+                updateLegend(valueMin, valueMax, currentColorScale);
                 
                 showSuccess(`DEM chargé: ${georaster.width}×${georaster.height} pixels`);
                 
@@ -624,157 +630,34 @@
         
         // Display georaster on map
         function displayGeoRaster(georaster) {
-            console.log('Displaying GeoRaster:', georaster);
-            console.log('Bounds:', {
-                xmin: georaster.xmin,
-                ymin: georaster.ymin,
-                xmax: georaster.xmax,
-                ymax: georaster.ymax
-            });
-            console.log('Stats:', {
-                min: georaster.mins[0],
-                max: georaster.maxs[0],
-                width: georaster.width,
-                height: georaster.height
-            });
-            
-            // Remove existing layer
+            normalizeProjection(georaster);
+
             if (demLayer) {
                 map.removeLayer(demLayer);
                 demLayer = null;
             }
-            
-            // Restore OSM layer opacity when DEM is removed
+
             if (osmLayer) {
-                osmLayer.setOpacity(1.0); // Restore full opacity
-                console.log('OSM layer opacity restored to 1.0');
+                osmLayer.setOpacity(1.0);
             }
-            
-            // Remove existing click handlers
+
             map.off('click');
-            
-            // Create GeoRasterLayer
+
             try {
-                // Ensure projection is set and is a number BEFORE creating the layer
-                // This is critical - GeoRasterLayer accesses projection during initialization
-                if (!georaster.projection || typeof georaster.projection !== 'number' || isNaN(georaster.projection)) {
-                    console.warn('Projection not set or invalid, using EPSG:4326');
-                    georaster.projection = 4326;
-                }
-                
-                // Double-check: ensure it's a valid number
-                if (typeof georaster.projection !== 'number' || isNaN(georaster.projection)) {
-                    georaster.projection = 4326;
-                }
-                
-                console.log('Creating GeoRasterLayer with projection:', georaster.projection, typeof georaster.projection);
-                console.log('GeoRaster bounds:', {
-                    xmin: georaster.xmin,
-                    ymin: georaster.ymin,
-                    xmax: georaster.xmax,
-                    ymax: georaster.ymax
+                demLayer = new GeoRasterLayer({
+                    georaster,
+                    opacity: 0.85,
+                    pixelValuesToColorFn: pixelValuesToColorFn,
+                    resolution: 128,
                 });
-                console.log('GeoRaster projection property:', georaster.projection);
-                
-                // Create a wrapper to ensure projection is always accessible
-                // GeoRasterLayer may access projection asynchronously, so we need to ensure it's always defined
-                // Create a simple copy with all properties and a guaranteed projection
-                const georasterWithProjection = Object.assign({}, georaster);
-                
-                // Force projection to be a number, never undefined
-                const projectionValue = (typeof georaster.projection === 'number' && !isNaN(georaster.projection)) 
-                    ? georaster.projection 
-                    : 4326;
-                
-                // Set projection directly
-                georasterWithProjection.projection = projectionValue;
-                
-                // Also set srs and crs if they don't exist, as GeoRasterLayer might check these
-                if (!georasterWithProjection.srs) {
-                    georasterWithProjection.srs = `EPSG:${projectionValue}`;
-                }
-                if (!georasterWithProjection.crs) {
-                    georasterWithProjection.crs = `EPSG:${projectionValue}`;
-                }
-                
-                // Ensure projection is enumerable and accessible
-                Object.defineProperty(georasterWithProjection, 'projection', {
-                    value: projectionValue,
-                    writable: true,
-                    enumerable: true,
-                    configurable: true
-                });
-                
-                console.log('GeoRaster wrapper projection:', georasterWithProjection.projection, typeof georasterWithProjection.projection);
-                console.log('Has projection property:', 'projection' in georasterWithProjection);
-                console.log('Projection value:', georasterWithProjection.projection);
-                console.log('SRS:', georasterWithProjection.srs);
-                console.log('CRS:', georasterWithProjection.crs);
-                
-                // Try passing georaster directly instead of a Promise
-                // Some versions of GeoRasterLayer work better with direct objects
-                try {
-                    demLayer = new GeoRasterLayer({
-                        georaster: georasterWithProjection,
-                        opacity: 1,
-                        pixelValuesToColorFn: pixelValuesToColorFn,
-                        resolution: 128, // Lower resolution for faster rendering
-                        updateWhenZooming: true,
-                        updateWhenIdle: true,
-                        keepBuffer: 2
-                    });
-                } catch (directError) {
-                    console.warn('Direct georaster failed, trying with Promise:', directError);
-                    // Fallback to Promise-based approach
-                    const georasterPromise = Promise.resolve(georasterWithProjection);
-                    demLayer = new GeoRasterLayer({
-                        georaster: georasterPromise,
-                        opacity: 1,
-                        pixelValuesToColorFn: pixelValuesToColorFn,
-                        resolution: 128,
-                        updateWhenZooming: true,
-                        updateWhenIdle: true,
-                        keepBuffer: 2
-                    });
-                }
-                
-                console.log('GeoRasterLayer created:', demLayer);
-                
-                // Add event listeners for debugging
-                demLayer.on('loading', () => console.log('GeoRasterLayer: loading'));
-                demLayer.on('load', () => console.log('GeoRasterLayer: loaded'));
-                demLayer.on('error', (e) => console.error('GeoRasterLayer error:', e));
-                
+
                 demLayer.addTo(map);
-                console.log('GeoRasterLayer added to map');
-                
-                // Reduce OSM layer opacity when DEM is displayed
+
                 if (osmLayer) {
-                    osmLayer.setOpacity(0.3); // Reduce to 30% opacity
-                    console.log('OSM layer opacity reduced to 0.3');
+                    osmLayer.setOpacity(0.35);
                 }
-                
-                // Force a redraw after a short delay
-                setTimeout(() => {
-                    if (demLayer && map.hasLayer(demLayer)) {
-                        console.log('GeoRasterLayer is on map, forcing redraw');
-                        map.invalidateSize();
-                    } else {
-                        console.warn('GeoRasterLayer is not on map!');
-                    }
-                }, 500);
-                
-                // Wait a bit for the layer to render, then fit bounds
-                setTimeout(() => {
-                    // Fit map to bounds (Leaflet expects [lat, lng] order)
-                    const bounds = [
-                        [georaster.ymin, georaster.xmin],
-                        [georaster.ymax, georaster.xmax]
-                    ];
-                    console.log('Fitting bounds:', bounds);
-                    map.fitBounds(bounds, { padding: [20, 20] });
-                }, 100);
-                
+
+                map.fitBounds(demLayer.getBounds(), { padding: [20, 20] });
             } catch (error) {
                 console.error('Error creating GeoRasterLayer:', error);
                 showError('Error displaying DEM: ' + error.message);
@@ -816,9 +699,9 @@
             const statsDiv = document.getElementById('stats');
             const statsContent = document.getElementById('stats-content');
             
-            const min = georaster.mins[0];
-            const max = georaster.maxs[0];
-            const mean = georaster.ranges[0] ? (min + max) / 2 : 0;
+            const min = currentValueMin;
+            const max = currentValueMax;
+            const mean = (min + max) / 2;
             
             statsContent.innerHTML = `
                 <div class="stats-item">
@@ -851,7 +734,7 @@
             if (currentGeoraster) {
                 currentColorScale = this.value;
                 displayGeoRaster(currentGeoraster);
-                updateLegend(currentGeoraster.mins[0], currentGeoraster.maxs[0], currentColorScale);
+                updateLegend(currentValueMin, currentValueMax, currentColorScale);
             }
         });
         

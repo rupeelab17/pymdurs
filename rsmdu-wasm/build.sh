@@ -39,5 +39,5 @@ echo "✅ Build complete!"
 echo ""
 echo "To serve the example:"
 echo "  cd examples && python3 -m http.server 8000"
-echo "Then open: http://localhost:8000/index.html"
+echo "Then open: http://localhost:8000/dem.html"
 
