@@ -133,6 +133,7 @@ notebooks/working/
 # Ignorer tous les fichiers directement dans notebooks/ et ses sous-dossiers
 notebooks/*
 !notebooks/umep_workflow.py
+!notebooks/umep_workflow.ipynb
 !notebooks/output/
 
 # Dans output/, tout ignorer sauf umep_workflow/
