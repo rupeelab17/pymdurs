@@ -30,7 +30,6 @@ dependencies = [
     "numpy>=2.0.2",
     "umep>=0.0.1a18",
     "pythermalcomfort>=3.8.0",
-    "gdal>=3.13.1",
     "geopandas>=1.1.3",
     "rasterio>=1.5.0",
     "solweig>=0.1.0b88",
