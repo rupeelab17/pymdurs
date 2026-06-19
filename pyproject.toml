@@ -7,7 +7,7 @@ name = "pymdurs"
 version = "0.1.5"
 description = "Rust transpilation of pymdu (Python Urban Data Model) - Python bindings"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 license = { text = "GPL-3.0" }
 authors = [
     { name = "Boris Brangeon", email = "boris.brangeon@plateforme-tipee.com" }
@@ -28,11 +28,12 @@ classifiers = [
 dependencies = [
     "pandas>=2.0.0",
     "numpy>=2.0.2",
-    "geopandas>=1.0.1",
-    "rasterio>=1.4.3",
     "umep>=0.0.1a18",
-    "solweig>=0.1.0b75",
     "pythermalcomfort>=3.8.0",
+    "gdal>=3.13.1",
+    "geopandas>=1.1.3",
+    "rasterio>=1.5.0",
+    "solweig>=0.1.0b88",
 ]
 
 [project.optional-dependencies]
