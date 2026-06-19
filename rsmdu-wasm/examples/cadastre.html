@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadastre Viewer - Leaflet</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .header p { opacity: 0.9; font-size: 0.9rem; }
+
+        .container { display: flex; flex: 1; overflow: hidden; }
+
+        .sidebar {
+            width: 350px;
+            background: #f8f9fa;
+            padding: 1.5rem;
+            overflow-y: auto;
+            border-right: 1px solid #dee2e6;
+        }
+
+        .map-container { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; }
+
+        .control-group { margin-bottom: 1.5rem; }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .control-group input[type="file"],
+        .control-group input[type="number"] {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background: white;
+        }
+
+        button {
+            background: #e67e22;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            width: 100%;
+        }
+
+        button:hover { background: #d35400; }
+        button:disabled { background: #adb5bd; cursor: not-allowed; }
+
+        .stats {
+            background: white;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .stats h3 { margin-bottom: 0.75rem; color: #495057; font-size: 1rem; }
+
+        .stats-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .stats-item:last-child { border-bottom: none; }
+        .stats-label { color: #6c757d; }
+        .stats-value { font-weight: 600; color: #495057; }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            border: 1px solid #f5c6cb;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            border: 1px solid #c3e6cb;
+        }
+
+        .info {
+            background: #fdebd0;
+            color: #7d6608;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-top: 1rem;
+            border: 1px solid #f9e79f;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Cadastre PCI Viewer</h1>
+        <p>Parcelles cadastrales IGN (Parcellaire Express) via WASM</p>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <div class="control-group">
+                <h3 style="margin-bottom: 0.5rem; font-size: 0.9rem; color: #495057;">Load from IGN API</h3>
+                <p style="font-size: 0.85rem; color: #6c757d; margin-bottom: 0.75rem;">
+                    Bbox mise à jour selon la vue carte (max 10 000 parcelles)
+                </p>
+                <label for="bbox-min-x">Min Longitude (West)</label>
+                <input type="number" id="bbox-min-x" value="-1.152704" step="0.000001" readonly style="background-color: #f8f9fa; cursor: not-allowed;">
+
+                <label for="bbox-min-y">Min Latitude (South)</label>
+                <input type="number" id="bbox-min-y" value="46.181627" step="0.000001" readonly style="background-color: #f8f9fa; cursor: not-allowed;">
+
+                <label for="bbox-max-x">Max Longitude (East)</label>
+                <input type="number" id="bbox-max-x" value="-1.139893" step="0.000001" readonly style="background-color: #f8f9fa; cursor: not-allowed;">
+
+                <label for="bbox-max-y">Max Latitude (North)</label>
+                <input type="number" id="bbox-max-y" value="46.18699" step="0.000001" readonly style="background-color: #f8f9fa; cursor: not-allowed;">
+            </div>
+
+            <div class="control-group" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #dee2e6;">
+                <label for="geojson-file">Or Load GeoJSON File</label>
+                <input type="file" id="geojson-file" accept=".geojson,.json,.GEOJSON,.JSON">
+            </div>
+
+            <button id="load-btn" disabled>Charger et visualiser</button>
+
+            <div id="message"></div>
+
+            <div id="stats" class="stats" style="display: none;">
+                <h3>Statistiques cadastre</h3>
+                <div id="stats-content"></div>
+            </div>
+
+            <div class="info" style="margin-top: 1rem;">
+                <strong>Instructions</strong>
+                <ul style="margin-top: 0.5rem; padding-left: 1.5rem;">
+                    <li>Zoomez sur une zone puis chargez depuis l'API IGN</li>
+                    <li>Cliquez une parcelle pour voir section, numéro, contenance</li>
+                    <li>Serveur HTTP requis (pas file://)</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <script type="module">
+        import init, { WasmCadastre } from './pkg/rsmdu_wasm.js';
+
+        let map = null;
+        let cadastreLayer = null;
+
+        function updateBboxFromMap() {
+            if (!map) return;
+            const bounds = map.getBounds();
+            const sw = bounds.getSouthWest();
+            const ne = bounds.getNorthEast();
+            document.getElementById('bbox-min-x').value = sw.lng.toFixed(6);
+            document.getElementById('bbox-min-y').value = sw.lat.toFixed(6);
+            document.getElementById('bbox-max-x').value = ne.lng.toFixed(6);
+            document.getElementById('bbox-max-y').value = ne.lat.toFixed(6);
+        }
+
+        function showError(message) {
+            const el = document.getElementById('message');
+            el.className = 'error';
+            el.textContent = message;
+        }
+
+        function showSuccess(message) {
+            const el = document.getElementById('message');
+            el.className = 'success';
+            el.textContent = message;
+        }
+
+        function updateStats(stats) {
+            const statsDiv = document.getElementById('stats');
+            const content = document.getElementById('stats-content');
+            const ha = stats.total_contenance / 10000;
+            content.innerHTML = `
+                <div class="stats-item">
+                    <span class="stats-label">Parcelles:</span>
+                    <span class="stats-value">${stats.count}</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Contenance totale:</span>
+                    <span class="stats-value">${stats.total_contenance.toFixed(0)} m²</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Surface:</span>
+                    <span class="stats-value">${ha.toFixed(2)} ha</span>
+                </div>
+            `;
+            statsDiv.style.display = 'block';
+        }
+
+        function displayCadastre(geojson) {
+            if (cadastreLayer) {
+                map.removeLayer(cadastreLayer);
+            }
+
+            cadastreLayer = L.geoJSON(geojson, {
+                style: {
+                    color: '#d35400',
+                    weight: 1,
+                    opacity: 0.9,
+                    fillColor: '#e67e22',
+                    fillOpacity: 0.25,
+                },
+                onEachFeature(feature, layer) {
+                    const p = feature.properties || {};
+                    const section = p.section ?? '—';
+                    const numero = p.numero ?? '—';
+                    const contenance = p.contenance != null ? `${p.contenance} m²` : '—';
+                    const commune = p.nom_com ?? p.code_insee ?? '—';
+                    const idu = p.idu ?? feature.id ?? '—';
+                    layer.bindPopup(`
+                        <strong>Parcelle</strong><br>
+                        Commune: ${commune}<br>
+                        Section: ${section} n°${numero}<br>
+                        Contenance: ${contenance}<br>
+                        IDU: ${idu}
+                    `);
+                },
+            }).addTo(map);
+
+            if (cadastreLayer.getBounds().isValid()) {
+                map.fitBounds(cadastreLayer.getBounds(), { padding: [20, 20] });
+            }
+        }
+
+        async function loadCadastre() {
+            const fileInput = document.getElementById('geojson-file');
+            const file = fileInput.files[0];
+            const minX = parseFloat(document.getElementById('bbox-min-x').value);
+            const minY = parseFloat(document.getElementById('bbox-min-y').value);
+            const maxX = parseFloat(document.getElementById('bbox-max-x').value);
+            const maxY = parseFloat(document.getElementById('bbox-max-y').value);
+
+            if (!file && (isNaN(minX) || isNaN(minY) || isNaN(maxX) || isNaN(maxY))) {
+                showError('Bbox invalide ou fichier manquant');
+                return;
+            }
+
+            if (!file && (minX >= maxX || minY >= maxY)) {
+                showError('Bbox invalide: min < max requis');
+                return;
+            }
+
+            const btn = document.getElementById('load-btn');
+            btn.disabled = true;
+
+            try {
+                let cadastre;
+                if (file) {
+                    showSuccess('Chargement du fichier GeoJSON...');
+                    const text = await file.text();
+                    cadastre = WasmCadastre.from_geojson(text);
+                } else {
+                    showSuccess('Chargement cadastre IGN...');
+                    cadastre = await WasmCadastre.from_ign_api(minX, minY, maxX, maxY);
+                }
+
+                const geojson = JSON.parse(cadastre.to_geojson());
+                const stats = cadastre.get_stats();
+                updateStats(stats);
+                displayCadastre(geojson);
+                showSuccess(`${cadastre.len()} parcelle(s) chargée(s)`);
+            } catch (error) {
+                showError('Erreur: ' + error);
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function initApp() {
+            try {
+                await init('./pkg/rsmdu_wasm_bg.wasm');
+                map = L.map('map').setView([46.16, -1.15], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19,
+                }).addTo(map);
+                map.on('moveend', updateBboxFromMap);
+                map.on('zoomend', updateBboxFromMap);
+                updateBboxFromMap();
+                document.getElementById('load-btn').disabled = false;
+                document.getElementById('load-btn').addEventListener('click', loadCadastre);
+            } catch (error) {
+                showError('WASM: ' + error);
+                console.error(error);
+            }
+        }
+
+        initApp();
+    </script>
+</body>
+</html>

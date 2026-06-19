@@ -421,6 +421,162 @@ struct BuildingStats {
     max_height: f64,
 }
 
+/// Cadastral parcels from IGN WFS (GeoJSON)
+#[wasm_bindgen]
+pub struct WasmCadastre {
+    geojson: GeoJson,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CadastreStats {
+    count: usize,
+    total_contenance: f64,
+}
+
+#[wasm_bindgen]
+impl WasmCadastre {
+    #[wasm_bindgen]
+    pub async fn from_ign_api(
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
+    ) -> Result<WasmCadastre, JsValue> {
+        use wasm_bindgen_futures::JsFuture;
+        use web_sys::{Request, RequestInit, RequestMode};
+
+        if min_x >= max_x || min_y >= max_y {
+            return Err(JsValue::from_str(
+                "Invalid bounding box: min values must be less than max values",
+            ));
+        }
+
+        let typename = "CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle";
+        let base_url = "https://data.geopf.fr/wfs/ows";
+        let bbox_str = format!("{},{},{},{}", min_y, min_x, max_y, max_x);
+
+        let request_url = format!(
+            "{}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES={}&OUTPUTFORMAT=application/json&Bbox={}&CRS=EPSG:4326&STARTINDEX=0&MAXFEATURES=10000",
+            base_url, typename, bbox_str
+        );
+
+        let mut opts = RequestInit::new();
+        opts.set_method("GET");
+        opts.set_mode(RequestMode::Cors);
+
+        let request = Request::new_with_str_and_init(&request_url, &opts)
+            .map_err(|e| JsValue::from_str(&format!("Failed to create request: {:?}", e)))?;
+
+        let window =
+            web_sys::window().ok_or_else(|| JsValue::from_str("No window object available"))?;
+
+        let resp_value = JsFuture::from(window.fetch_with_request(&request))
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Network request failed: {:?}", e)))?;
+
+        let resp: web_sys::Response = resp_value
+            .dyn_into()
+            .map_err(|_| JsValue::from_str("Invalid response type"))?;
+
+        if !resp.ok() {
+            return Err(JsValue::from_str(&format!(
+                "IGN API error {}: {}",
+                resp.status(),
+                resp.status_text()
+            )));
+        }
+
+        let text_promise = resp
+            .text()
+            .map_err(|e| JsValue::from_str(&format!("Failed to get response text: {:?}", e)))?;
+
+        let text = JsFuture::from(text_promise)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to read response: {:?}", e)))?;
+
+        let geojson_str = text
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("Response is not a valid string"))?;
+
+        Self::from_geojson(&geojson_str)
+    }
+
+    #[wasm_bindgen]
+    pub fn from_geojson(geojson_str: &str) -> Result<WasmCadastre, JsValue> {
+        let geojson: GeoJson = geojson_str
+            .parse()
+            .map_err(|e| JsValue::from_str(&format!("Invalid GeoJSON: {}", e)))?;
+
+        match &geojson {
+            GeoJson::FeatureCollection(_) | GeoJson::Feature(_) => Ok(WasmCadastre { geojson }),
+            _ => Err(JsValue::from_str(
+                "GeoJSON must be a Feature or FeatureCollection",
+            )),
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn to_geojson(&self) -> Result<String, JsValue> {
+        let fc = self.as_feature_collection()?;
+        serde_json::to_string(&fc)
+            .map_err(|e| JsValue::from_str(&format!("Serialization failed: {}", e)))
+    }
+
+    #[wasm_bindgen]
+    pub fn len(&self) -> usize {
+        Self::feature_count(&self.geojson)
+    }
+
+    #[wasm_bindgen]
+    pub fn get_stats(&self) -> Result<JsValue, JsValue> {
+        let stats = CadastreStats {
+            count: Self::feature_count(&self.geojson),
+            total_contenance: Self::sum_contenance(&self.geojson),
+        };
+        serde_wasm_bindgen::to_value(&stats)
+            .map_err(|e| JsValue::from_str(&format!("Serialization failed: {}", e)))
+    }
+
+    fn as_feature_collection(&self) -> Result<FeatureCollection, JsValue> {
+        match &self.geojson {
+            GeoJson::FeatureCollection(fc) => Ok(fc.clone()),
+            GeoJson::Feature(f) => Ok(FeatureCollection {
+                bbox: None,
+                features: vec![f.clone()],
+                foreign_members: None,
+            }),
+            _ => Err(JsValue::from_str("Invalid GeoJSON type")),
+        }
+    }
+
+    fn feature_count(geojson: &GeoJson) -> usize {
+        match geojson {
+            GeoJson::FeatureCollection(fc) => fc.features.len(),
+            GeoJson::Feature(_) => 1,
+            _ => 0,
+        }
+    }
+
+    fn sum_contenance(geojson: &GeoJson) -> f64 {
+        let features: Vec<&Feature> = match geojson {
+            GeoJson::FeatureCollection(fc) => fc.features.iter().collect(),
+            GeoJson::Feature(f) => vec![f],
+            _ => return 0.0,
+        };
+        features
+            .iter()
+            .filter_map(|f| f.properties.as_ref())
+            .filter_map(|props| {
+                props.get("contenance").and_then(|v| {
+                    v.as_f64()
+                        .or_else(|| v.as_i64().map(|i| i as f64))
+                        .or_else(|| v.as_u64().map(|u| u as f64))
+                })
+            })
+            .sum()
+    }
+}
+
 /// Set panic hook for better error messages (alternative to init)
 #[wasm_bindgen]
 pub fn set_panic_hook() {

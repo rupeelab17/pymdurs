@@ -4,6 +4,7 @@ WebAssembly bindings for building GeoJSON processing in the browser.
 
 ## Features
 
+- Load cadastral parcels from IGN WFS API
 - Load buildings from GeoJSON
 - Process building heights (fill missing heights using defaults or mean)
 - Convert building collections to GeoJSON
@@ -81,7 +82,9 @@ npx serve .
 3. Open in browser:
 
 ```
-http://localhost:8000/index.html
+http://localhost:8000/index.html      # buildings
+http://localhost:8000/dem.html        # DEM raster
+http://localhost:8000/cadastre.html   # cadastral parcels (PCI)
 ```
 
 ## Usage
@@ -165,7 +168,7 @@ collection.free();
 
 ## Example
 
-See `examples/index.html` for a complete example with Leaflet integration.
+See `examples/index.html`, `examples/dem.html`, and `examples/cadastre.html` for Leaflet demos.
 
 ## License
 
