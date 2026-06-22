@@ -1,0 +1,20 @@
+{
+  "include": ["pymdurs", "examples"],
+  "exclude": ["pymdurs/tests"],
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false,
+  "executionEnvironments": [
+    {
+      "root": "pymdurs"
+    },
+    {
+      "root": "examples",
+      "reportArgumentType": "none",
+      "reportOptionalOperand": "none",
+      "reportOptionalMemberAccess": "none",
+      "reportGeneralTypeIssues": "none",
+      "reportCallIssue": "none",
+      "reportAttributeAccessIssue": "none"
+    }
+  ]
+}

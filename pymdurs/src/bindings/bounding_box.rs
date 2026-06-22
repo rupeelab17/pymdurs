@@ -1,14 +1,17 @@
 use rsmdu::geo_core::BoundingBox;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 
 /// BoundingBox Python binding
+#[gen_stub_pyclass(module = "pymdurs")]
 #[pyclass]
 #[derive(Clone)]
 pub struct PyBoundingBox {
     pub(crate) inner: BoundingBox, // pub(crate) allows access from other modules in the same crate
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyBoundingBox {
     #[new]

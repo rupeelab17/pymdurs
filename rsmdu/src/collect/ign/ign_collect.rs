@@ -21,6 +21,9 @@ const CSV_PREFIX: &str = "Tableau-suivi-services-web-";
 /// inside the wheel with no runtime dependency on the source tree.
 const EMBEDDED_CSV: &[u8] = include_bytes!("data/Tableau-suivi-services-web-06-02-2026.csv");
 
+/// Géoplateforme WMS-R max WIDTH/HEIGHT per GetMap request.
+const WMS_MAX_DIMENSION: u32 = 5010;
+
 /// Client HTTP pour l'IGN : réponses WFS/WMS volumineuses, téléchargements longs.
 fn ign_http_client() -> Result<Client> {
     Client::builder()
@@ -423,8 +426,24 @@ impl IgnCollect {
         let width_m = (bbox.max_x - bbox.min_x) * deg_to_m_lon;
         let height_m = (bbox.max_y - bbox.min_y) * deg_to_m_lat;
 
-        let width_px = (width_m / resolution) as u32;
-        let height_px = (height_m / resolution) as u32;
+        let mut width_px = (width_m / resolution) as u32;
+        let mut height_px = (height_m / resolution) as u32;
+
+        if width_px > WMS_MAX_DIMENSION || height_px > WMS_MAX_DIMENSION {
+            eprintln!(
+                "Warning: WMS size {width_px}x{height_px} px exceeds IGN limit ({WMS_MAX_DIMENSION} px). \
+                 Dimensions capped — reduce the bounding box for 1 m/px resolution."
+            );
+            let scale = (width_px as f64 / WMS_MAX_DIMENSION as f64)
+                .max(height_px as f64 / WMS_MAX_DIMENSION as f64);
+            width_px = ((width_px as f64 / scale).floor() as u32).max(1);
+            height_px = ((height_px as f64 / scale).floor() as u32).max(1);
+            eprintln!(
+                "Warning: using capped WMS size {width_px}x{height_px} px \
+                 (~{:.2} m/px effective resolution).",
+                width_m / width_px as f64
+            );
+        }
 
         // For WMS 1.3.0 with EPSG:4326, Bbox order is inverted for ortho and dem
         // Python: if key == "ortho" and version == "1.3.0" and crs == "EPSG:4326": Bbox_str = [ymin, xmin, ymax, xmax]
@@ -629,6 +648,19 @@ mod tests {
         if let Some(row) = row {
             assert!(!row.url_geoplateforme.is_empty());
         }
+    }
+
+    #[test]
+    fn test_wms_dimension_cap() {
+        let width_px: u32 = 5843;
+        let height_px: u32 = 3428;
+        let scale = (width_px as f64 / WMS_MAX_DIMENSION as f64)
+            .max(height_px as f64 / WMS_MAX_DIMENSION as f64);
+        let capped_w = ((width_px as f64 / scale).floor() as u32).max(1);
+        let capped_h = ((height_px as f64 / scale).floor() as u32).max(1);
+        assert!(capped_w <= WMS_MAX_DIMENSION);
+        assert!(capped_h <= WMS_MAX_DIMENSION);
+        assert_eq!(capped_w, 5010);
     }
 
     #[test]

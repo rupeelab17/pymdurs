@@ -1,14 +1,17 @@
 use rsmdu::geo_core::GeoCore;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 
 use crate::bindings::bounding_box::PyBoundingBox;
 
 /// GeoCore Python binding
+#[gen_stub_pyclass(module = "pymdurs")]
 #[pyclass]
 pub struct PyGeoCore {
     pub(crate) inner: GeoCore, // pub(crate) allows access from other modules in the same crate
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyGeoCore {
     #[new]

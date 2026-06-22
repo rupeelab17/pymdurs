@@ -20,9 +20,11 @@ def main():
     buildings = pymdurs.geometric.Building(
         output_path="./output", defaultStoreyHeight=3.0
     )
+     # Atlantec
+    bbox_wgs84 = (-1.153414,46.180217,-1.141098,46.186531)
 
     # Set bounding box (La Rochelle area, France)
-    buildings.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
+    buildings.set_bbox(*bbox_wgs84)
     # buildings.set_bbox(-1.148001, 46.184158, -1.145528, 46.185264)
 
     geo = buildings.geo_core

@@ -272,9 +272,9 @@ def main(output_path: Path):
     #bbox_wgs84 = (-1.1484979698,46.1838328061,-1.1444401229,46.1862607901)
     
     # Bordeax
-    bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
-
-
+    #bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
+    # Atlantec
+    bbox_wgs84 = (-1.153414,46.180217,-1.141098,46.186531)
     working_crs = 2154  # Lambert 93
 
     # Domain boundary GeoJSON export (e.g. for City4CFD domain_bnd)

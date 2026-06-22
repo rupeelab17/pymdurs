@@ -1,15 +1,18 @@
 use rsmdu::geometric::iris::Iris;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 
 use crate::bindings::geo_core::PyGeoCore;
 
 /// Iris Python binding
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyIris {
     inner: Iris,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyIris {
     #[new]
@@ -32,6 +35,7 @@ impl PyIris {
         self.inner.set_crs(epsg);
     }
 
+    #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
         slf.inner
             .run_internal()
@@ -39,6 +43,7 @@ impl PyIris {
         Ok(slf)
     }
 
+    #[gen_stub(override_return_type(type_repr = "dict[str, typing.Any]", imports = ("typing",)))]
     fn get_geojson(&self, py: Python) -> PyResult<Py<PyAny>> {
         match self.inner.get_geojson() {
             Some(geojson) => {

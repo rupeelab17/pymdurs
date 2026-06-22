@@ -21,7 +21,7 @@ def main():
 
     # Set bounding box (La Rochelle area, France)
     # Format: min_x, min_y, max_x, max_y (WGS84, EPSG:4326)
-    dem.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
+    dem.set_bbox(-1.182833,46.145232,-1.107044,46.176027)
 
     # Set CRS (optional, defaults to EPSG:2154)
     dem.set_crs(2154)

@@ -85,3 +85,31 @@ fn register_thermal_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
     py_module.add_submodule(&submodule)?;
     Ok(())
 }
+
+// Public API aliases (runtime setattr in register_*_module)
+pyo3_stub_gen::type_alias!("pymdurs", BoundingBox = PyBoundingBox);
+pyo3_stub_gen::type_alias!("pymdurs", GeoCore = PyGeoCore);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Building = PyBuilding);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Cadastre = PyCadastre);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Cosia = PyCosia);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Dem = PyDem);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Iris = PyIris);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Lcz = PyLcz);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Lidar = PyLidar);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Road = PyRoad);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Rnb = PyRnb);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Vegetation = PyVegetation);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Water = PyWater);
+pyo3_stub_gen::type_alias!("pymdurs.thermal", WindField = PyWindField);
+pyo3_stub_gen::type_alias!("pymdurs.thermal", WindConfig = PyWindConfig);
+
+/// Gather stub metadata from the workspace `pyproject.toml` (one level above `Cargo.toml`).
+pub fn stub_info() -> pyo3_stub_gen::Result<pyo3_stub_gen::StubInfo> {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut stub =
+        pyo3_stub_gen::StubInfo::from_pyproject_toml(manifest_dir.join("../pyproject.toml"))?;
+    // Mixed layout: Python package and Rust extension live in `pymdurs/`.
+    stub.is_mixed_layout = true;
+    stub.python_root = manifest_dir.to_path_buf();
+    Ok(stub)
+}

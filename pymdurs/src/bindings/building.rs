@@ -1,6 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyList};
+use pyo3_stub_gen::derive::*;
 use rsmdu::geometric::building::BuildingCollection;
 
 use crate::bindings::bounding_box::PyBoundingBox;
@@ -38,11 +39,13 @@ fn option_vec_f64_to_pylist<'a>(
 }
 
 /// BuildingCollection Python binding (exposed as Building to match Python API)
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyBuilding {
     pub(crate) inner: BuildingCollection,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyBuilding {
     #[new]
@@ -70,6 +73,7 @@ impl PyBuilding {
     }
 
     /// Run processing: load data, process heights, return self
+    #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
         // Use run_internal which works on &mut self
         slf.inner
@@ -92,6 +96,7 @@ impl PyBuilding {
     }
 
     /// Convert to pandas DataFrame
+    #[gen_stub(override_return_type(type_repr = "pandas.DataFrame", imports = ("pandas",)))]
     fn to_pandas(&self, py: Python) -> PyResult<Py<PyAny>> {
         // Convert Polars Rust DataFrame to pandas via Python polars package
         match self.inner.to_polars_df() {
@@ -147,6 +152,7 @@ impl PyBuilding {
     /// Load from GeoJSON
     #[staticmethod]
     fn from_geojson(
+        #[gen_stub(override_type(type_repr = "bytes"))]
         geojson_data: &[u8],
         output_path: Option<String>,
         default_storey_height: f64,
@@ -184,6 +190,7 @@ impl PyBuilding {
     }
 
     /// Get GeoJSON (equivalent to to_gdf() in Python)
+    #[gen_stub(override_return_type(type_repr = "dict[str, typing.Any]", imports = ("typing",)))]
     fn get_geojson(&self, py: Python) -> PyResult<Py<PyAny>> {
         match self.inner.get_geojson() {
             Ok(geojson) => {

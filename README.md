@@ -669,6 +669,26 @@ See [examples/README.md](examples/README.md) for detailed documentation of all e
 
 ---
 
+## Typage (IDE)
+
+Le package est annoté (PEP 561) via `py.typed` et des stubs `.pyi` générés depuis les bindings PyO3.
+
+Après modification d’un binding Rust :
+
+```bash
+./scripts/generate-stubs.sh
+```
+
+Vérification locale :
+
+```bash
+uv run basedpyright pymdurs examples
+```
+
+Les stubs commités (`pymdurs/pymdurs.pyi`, `pymdurs/geometric/`, `pymdurs/thermal/`) sont contrôlés en CI (workflow `type-stubs.yml`).
+
+---
+
 ## API Reference
 
 ### Common Methods

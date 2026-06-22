@@ -1,15 +1,18 @@
 use rsmdu::geometric::cosia::Cosia;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 
 use crate::bindings::geo_core::PyGeoCore;
 
 /// Cosia Python binding
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyCosia {
     inner: Cosia,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyCosia {
     #[new]
@@ -38,6 +41,7 @@ impl PyCosia {
     }
 
     /// Run Cosia processing: download from IGN API
+    #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run_ign(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
         // Use run_ign_internal which works on &mut self
         slf.inner

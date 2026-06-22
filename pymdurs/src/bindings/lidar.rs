@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 use rsmdu::geometric::lidar::Lidar;
 use std::path::{Path, PathBuf};
 
@@ -8,11 +9,13 @@ use crate::bindings::geo_core::PyGeoCore;
 /// Lidar Python binding.
 /// Download and process LiDAR point clouds from IGN WFS; produces DSM, DTM, CHM GeoTIFFs.
 /// LAZ files are cached under output_path/.cache/laz to avoid re-downloading.
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyLidar {
     inner: Lidar,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyLidar {
     #[new]

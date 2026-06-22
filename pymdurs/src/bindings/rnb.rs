@@ -1,15 +1,18 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 use rsmdu::geometric::rnb::Rnb;
 
 use crate::bindings::geo_core::PyGeoCore;
 
 /// RNB Python binding
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyRnb {
     inner: Rnb,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyRnb {
     #[new]
@@ -35,6 +38,7 @@ impl PyRnb {
     }
 
     /// Run RNB processing: fetch from RNB API, parse JSON, create GeoJSON
+    #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
         // Use run_internal which works on &mut self
         slf.inner
@@ -44,6 +48,7 @@ impl PyRnb {
     }
 
     /// Get GeoJSON (equivalent to to_gdf() in Python)
+    #[gen_stub(override_return_type(type_repr = "dict[str, typing.Any]", imports = ("typing",)))]
     fn get_geojson(&self, py: Python) -> PyResult<Py<PyAny>> {
         match self.inner.get_geojson() {
             Some(geojson) => {

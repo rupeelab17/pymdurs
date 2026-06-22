@@ -3,6 +3,7 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 use std::path::Path;
 
 use rsmdu::thermal::{VegetationCollection, WindConfig, WindField, WindProfileType};
@@ -11,6 +12,7 @@ use rsmdu::thermal::{VegetationCollection, WindConfig, WindField, WindProfileTyp
 ///
 /// Grid spacing for the 3D solver: solver_dx/solver_dy override raster pixel size; solver_dz overrides
 /// the vertical step. When solver_dz is None, resolution_m is used as the vertical spacing (dz).
+#[gen_stub_pyclass(module = "pymdurs.thermal")]
 #[pyclass]
 pub struct PyWindConfig {
     #[pyo3(get, set)]
@@ -63,6 +65,7 @@ fn parse_profile_type(s: &str) -> WindProfileType {
     }
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyWindConfig {
     #[new]
@@ -128,11 +131,13 @@ impl PyWindConfig {
 }
 
 /// WindField: Röckle-based urban wind solver (outputs wind_speed.tif, wind_direction.tif; optionally rockle_zone.tif when save_rockle_zone=True).
+#[gen_stub_pyclass(module = "pymdurs.thermal")]
 #[pyclass]
 pub struct PyWindField {
     inner: WindField,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyWindField {
     #[new]
@@ -151,6 +156,7 @@ impl PyWindField {
     /// Run wind field: requires DEM and DSM GeoTIFF paths and a BuildingCollection.
     /// Writes wind_speed.tif and wind_direction.tif to the output path; if save_rockle_zone is True, also writes rockle_zone.tif.
     /// Returns (wind_speed_path, wind_direction_path, rockle_zone_path). rockle_zone_path is None when save_rockle_zone is False.
+    #[gen_stub(override_return_type(type_repr = "tuple[str, str, str | None]"))]
     fn run(
         &self,
         config: &PyWindConfig,

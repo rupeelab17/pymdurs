@@ -1,15 +1,18 @@
 use rsmdu::geometric::dem::Dem;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::*;
 
 use crate::bindings::geo_core::PyGeoCore;
 
 /// Dem Python binding
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyDem {
     inner: Dem,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyDem {
     #[new]
@@ -36,6 +39,7 @@ impl PyDem {
 
     /// Run DEM processing
     #[pyo3(signature = (shape = None))]
+    #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>, shape: Option<(u32, u32)>) -> PyResult<PyRefMut<Self>> {
         // Use run_internal which works on &mut self
         slf.inner

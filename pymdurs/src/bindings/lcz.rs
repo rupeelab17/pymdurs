@@ -1,16 +1,19 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use pyo3_stub_gen::derive::*;
 use rsmdu::geometric::lcz::Lcz;
 
 use crate::bindings::geo_core::PyGeoCore;
 
 /// Lcz Python binding
+#[gen_stub_pyclass(module = "pymdurs.geometric")]
 #[pyclass]
 pub struct PyLcz {
     inner: Lcz,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl PyLcz {
     #[new]
@@ -39,6 +42,7 @@ impl PyLcz {
     }
 
     #[pyo3(signature = (zipfile_url = None))]
+    #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>, zipfile_url: Option<String>) -> PyResult<PyRefMut<Self>> {
         slf.inner
             .run(zipfile_url.as_deref())
@@ -46,6 +50,7 @@ impl PyLcz {
         Ok(slf)
     }
 
+    #[gen_stub(override_return_type(type_repr = "dict[str, typing.Any] | None", imports = ("typing",)))]
     fn geojson(&self, py: Python) -> PyResult<Option<Py<PyAny>>> {
         match self.inner.geojson() {
             Some(geojson) => {
@@ -80,6 +85,7 @@ impl PyLcz {
         }
     }
 
+    #[gen_stub(override_return_type(type_repr = "dict[int, dict[str, str]]"))]
     fn get_table_color(&self, py: Python) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, (name, color)) in &self.inner.table_color {

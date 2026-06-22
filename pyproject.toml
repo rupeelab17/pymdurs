@@ -38,6 +38,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "basedpyright>=1.29.0",
 ]
 
 [tool.pytest.ini_options]
@@ -52,8 +53,10 @@ addopts = "-s"
 
 [tool.maturin]
 manifest-path = "pymdurs/Cargo.toml"
-features = []
+features = ["extension-module"]
 module-name = "pymdurs"
+
+[tool.pyo3-stub-gen]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -69,4 +72,5 @@ solweig = { git = "https://github.com/UMEP-dev/solweig.git" }
 [dependency-groups]
 dev = [
     "marimo[recommended]>=0.19.6",
+    "basedpyright>=1.29.0",
 ]
