@@ -150,6 +150,7 @@ notebooks/output/umep_workflow/*.tif
 # Ignorer les autres .tif mais garder Tmrt_average.tif
 notebooks/output/*.tif
 !notebooks/output/Tmrt_average.tif
+*.gpkg
 
 # Ignorer tous les .tif ailleurs
 *.tif
