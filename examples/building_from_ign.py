@@ -21,7 +21,10 @@ def main():
         output_path="./output", defaultStoreyHeight=3.0
     )
      # Atlantec
-    bbox_wgs84 = (-1.153414,46.180217,-1.141098,46.186531)
+    #bbox_wgs84 = (-1.153414,46.180217,-1.141098,46.186531)
+
+    # Lagord 
+    bbox_wgs84 = (-1.157084,46.179533,-1.141977,46.186486)
 
     # Set bounding box (La Rochelle area, France)
     buildings.set_bbox(*bbox_wgs84)

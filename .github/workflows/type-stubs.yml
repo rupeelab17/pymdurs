@@ -1,19 +1,15 @@
 name: Type stubs
 
 on:
-  pull_request:
-    paths:
-      - "pymdurs/**"
-      - "pyproject.toml"
-      - "scripts/generate-stubs.sh"
-      - ".github/workflows/type-stubs.yml"
-  push:
-    branches: [main, master]
-    paths:
-      - "pymdurs/**"
-      - "pyproject.toml"
-      - "scripts/generate-stubs.sh"
-      - ".github/workflows/type-stubs.yml"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA
+        type: string
+      dry-run:
+        description: Dry run
+        type: boolean
+        default: false
 
 defaults:
   run:
