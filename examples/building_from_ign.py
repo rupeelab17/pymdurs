@@ -8,6 +8,8 @@ This example demonstrates how to:
 4. Convert to pandas DataFrame
 """
 
+import os
+
 import geopandas as gpd
 
 import pymdurs
@@ -16,9 +18,11 @@ import pymdurs
 def main():
     print("🏢 Loading buildings from IGN API...")
 
+    output_path = os.environ.get("PYMDURS_OUTPUT", "./output")
+
     # Create BuildingCollection (using alias created by rsmdu_helper)
     buildings = pymdurs.geometric.Building(
-        output_path="./output", defaultStoreyHeight=3.0
+        output_path=output_path, defaultStoreyHeight=3.0
     )
      # Atlantec
     #bbox_wgs84 = (-1.153414,46.180217,-1.141098,46.186531)
@@ -54,9 +58,9 @@ def main():
     print(f"📊 GeoDataFrame CRS: {gdf.crs}")
     gdf = gdf.to_crs(epsg=2154)
 
-    gdf.to_file("buildings.shp", driver="ESRI Shapefile")
-    gdf.to_file("buildings.gpkg", driver="GPKG")
-    gdf.to_file("buildings.geojson", driver="GeoJSON")
+    gdf.to_file(os.path.join(output_path, "buildings.shp"), driver="ESRI Shapefile")
+    gdf.to_file(os.path.join(output_path, "buildings.gpkg"), driver="GPKG")
+    gdf.to_file(os.path.join(output_path, "buildings.geojson"), driver="GeoJSON")
 
     if geojson and "features" in geojson:
         num_features = len(geojson["features"])

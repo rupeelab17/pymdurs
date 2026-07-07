@@ -161,6 +161,10 @@ notebooks/output/*.tif
 # Python
 **__pycache__**
 
+# Apptainer / Singularity images
+*.sif
+apptainer/*.sif
+
 .cursor/
 .claude/
 actions-runner/

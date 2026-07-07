@@ -1,0 +1,40 @@
+BootStrap: docker
+From: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+%labels
+    Author Boris Brangeon
+    Version pymdurs-buildings
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PYTHONUNBUFFERED=1
+    export PYMDURS_OUTPUT=/app/output
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        libgdal-dev \
+        libgeos-dev \
+        libproj-dev \
+        && rm -rf /var/lib/apt/lists/*
+    uv pip install --system pymdurs
+    mkdir -p /app/examples /app/output
+
+%files
+    examples/building_from_ign.py /app/examples/building_from_ign.py
+
+%runscript
+    cd /app
+    exec python examples/building_from_ign.py "$@"
+
+%help
+    Conteneur pymdurs — exemple buildings depuis l'API IGN.
+
+    Construction:
+        apptainer build pymdurs.sif apptainer/pymdurs.def
+
+    Exécution (réseau requis pour l'API IGN):
+        mkdir -p output && apptainer run --bind "$PWD/output:/app/output" pymdurs.sif
+
+    Les fichiers produits (buildings.shp, buildings.gpkg, buildings.geojson)
+    sont écrits dans le répertoire bind-mounté sur /app/output.

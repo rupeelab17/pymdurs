@@ -359,6 +359,20 @@ python examples/utci_rockle_epw.py
 
 ---
 
+## Apptainer / HPC
+
+Pour exécuter `building_from_ign.py` sur un cluster Linux sans installation locale, utilisez le conteneur Apptainer :
+
+```bash
+apptainer build pymdurs.sif apptainer/pymdurs.def
+mkdir -p output
+apptainer run --bind "$PWD/output:/app/output" pymdurs.sif
+```
+
+Voir [apptainer/README.md](../apptainer/README.md) pour la documentation complète (construction, bind mounts, personnalisation).
+
+---
+
 ## Prerequisites
 
 ### Rust installation
