@@ -1,6 +1,6 @@
 [package]
 name = "pymdurs"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Python bindings for rsmdu - Rust transpilation of pymdu"
 license = "GPL-3.0"

@@ -24,6 +24,14 @@ const EMBEDDED_CSV: &[u8] = include_bytes!("data/Tableau-suivi-services-web-06-0
 /// Géoplateforme WMS-R max WIDTH/HEIGHT per GetMap request.
 const WMS_MAX_DIMENSION: u32 = 5010;
 
+fn is_lidar_hd_elevation_key(key: &str) -> bool {
+    matches!(key, "mnt" | "mns" | "mnh")
+}
+
+fn lidar_hd_csv_typename(typename: &str) -> String {
+    typename.replace(".LAMB93", ".SHADOW")
+}
+
 /// Client HTTP pour l'IGN : réponses WFS/WMS volumineuses, téléchargements longs.
 fn ign_http_client() -> Result<Client> {
     Client::builder()
@@ -118,6 +126,18 @@ impl IgnCollect {
         ign_keys.insert(
             "altitude".to_string(),
             "SERVICE_CALCUL_ALTIMETRIQUE".to_string(),
+        );
+        ign_keys.insert(
+            "mnt".to_string(),
+            "IGNF_LIDAR-HD_MNT_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93".to_string(),
+        );
+        ign_keys.insert(
+            "mns".to_string(),
+            "IGNF_LIDAR-HD_MNS_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93".to_string(),
+        );
+        ign_keys.insert(
+            "mnh".to_string(),
+            "IGNF_LIDAR-HD_MNH_ELEVATION.ELEVATIONGRIDCOVERAGE.LAMB93".to_string(),
         );
 
         // Charge la table des services IGN (embarquée en priorité — voir load_csv).
@@ -217,14 +237,16 @@ impl IgnCollect {
             if record.nom_technique.is_empty() {
                 continue;
             }
-            df_csv_file.insert(
-                record.nom_technique.clone(),
-                IgnServiceRow {
-                    service: record.service,
-                    nom_technique: record.nom_technique.clone(),
-                    url_geoplateforme: record.url_geoplateforme,
-                },
-            );
+            let is_wms_raster = record.service == "WMS Raster";
+            let row = IgnServiceRow {
+                service: record.service,
+                nom_technique: record.nom_technique.clone(),
+                url_geoplateforme: record.url_geoplateforme,
+            };
+            // Prefer WMS-Raster rows when several services share the same nom_technique.
+            if is_wms_raster || !df_csv_file.contains_key(&record.nom_technique) {
+                df_csv_file.insert(record.nom_technique.clone(), row);
+            }
         }
 
         Ok(df_csv_file)
@@ -233,7 +255,9 @@ impl IgnCollect {
     /// Get row from CSV by key
     pub fn get_row_ressource(&self, key: &str) -> Option<&IgnServiceRow> {
         let typename = self.ign_keys.get(key)?;
-        self.df_csv_file.get(typename)
+        self.df_csv_file
+            .get(typename)
+            .or_else(|| self.df_csv_file.get(&lidar_hd_csv_typename(typename)))
     }
 
     /// Execute IGN API request following Python implementation
@@ -413,18 +437,35 @@ impl IgnCollect {
         // Python uses: resolution = kwargs.get("resolution") or 1.0
         let resolution = 1.0; // Default resolution in meters/pixel
 
-        // Calculate center (Python: lon_center = (xmin + xmax) / 2)
-        // let _lon_center = (bbox.min_x + bbox.max_x) / 2.0;
-        let lat_center = (bbox.min_y + bbox.max_y) / 2.0;
+        let lidar_hd = is_lidar_hd_elevation_key(key);
+        let request_bbox = if lidar_hd {
+            bbox.transform(4326, 2154).context(
+                "Failed to reproject bbox to EPSG:2154 for LiDAR HD WMS (input bbox is WGS84)",
+            )?
+        } else {
+            *bbox
+        };
 
-        // Conversion deg → m (approximate, valid near France)
-        // Python: deg_to_m_lat = 111320, deg_to_m_lon = 40075000 * cos(radians(lat_center)) / 360
-        use std::f64::consts::PI;
-        let deg_to_m_lat = 111320.0;
-        let deg_to_m_lon = 40075000.0 * (lat_center * PI / 180.0).cos() / 360.0;
+        let (width_m, height_m) = if lidar_hd {
+            (
+                (request_bbox.max_x - request_bbox.min_x).abs(),
+                (request_bbox.max_y - request_bbox.min_y).abs(),
+            )
+        } else {
+            // Calculate center (Python: lon_center = (xmin + xmax) / 2)
+            let lat_center = (bbox.min_y + bbox.max_y) / 2.0;
 
-        let width_m = (bbox.max_x - bbox.min_x) * deg_to_m_lon;
-        let height_m = (bbox.max_y - bbox.min_y) * deg_to_m_lat;
+            // Conversion deg → m (approximate, valid near France)
+            // Python: deg_to_m_lat = 111320, deg_to_m_lon = 40075000 * cos(radians(lat_center)) / 360
+            use std::f64::consts::PI;
+            let deg_to_m_lat = 111320.0;
+            let deg_to_m_lon = 40075000.0 * (lat_center * PI / 180.0).cos() / 360.0;
+
+            (
+                (bbox.max_x - bbox.min_x) * deg_to_m_lon,
+                (bbox.max_y - bbox.min_y) * deg_to_m_lat,
+            )
+        };
 
         let mut width_px = (width_m / resolution) as u32;
         let mut height_px = (height_m / resolution) as u32;
@@ -446,10 +487,16 @@ impl IgnCollect {
         }
 
         // For WMS 1.3.0 with EPSG:4326, Bbox order is inverted for ortho and dem
-        // Python: if key == "ortho" and version == "1.3.0" and crs == "EPSG:4326": Bbox_str = [ymin, xmin, ymax, xmax]
-        // Python for dem: "Bbox": f"{self._Bbox[1]},{self._Bbox[0]},{self._Bbox[3]},{self._Bbox[2]}"
-        // This means: [ymin, xmin, ymax, xmax]
-        let bbox_str = if matches!(key, "ortho" | "dem" | "cosia") {
+        // (ymin, xmin, ymax, xmax). LiDAR HD uses EPSG:2154 grids with (xmin, ymin, xmax, ymax).
+        let bbox_str = if lidar_hd {
+            format!(
+                "{},{},{},{}",
+                request_bbox.min_x,
+                request_bbox.min_y,
+                request_bbox.max_x,
+                request_bbox.max_y
+            )
+        } else if matches!(key, "ortho" | "dem" | "cosia") {
             format!(
                 "{},{},{},{}",
                 bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x
@@ -477,7 +524,12 @@ impl IgnCollect {
         // Build GetMap request according to OGC WMS 1.3.0 specification
         // Required parameters: SERVICE, VERSION, REQUEST, LAYERS, CRS, Bbox, WIDTH, HEIGHT, FORMAT
         // Optional: STYLES, TRANSPARENT, EXCEPTIONS
-        let request_url = if matches!(key, "dem" | "irc" | "cosia" | "dsm") {
+        let request_url = if lidar_hd {
+            format!(
+                "https://data.geopf.fr/wms-r/wms?LAYERS={}&FORMAT=image/geotiff&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:2154&BBOX={}&WIDTH={}&HEIGHT={}",
+                typename, bbox_str, width_px, height_px
+            )
+        } else if matches!(key, "dem" | "irc" | "cosia" | "dsm") {
             // For DEM and other raster services, use wms-r endpoint with exact format
             // Format: LAYERS={couche}&FORMAT={format}&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS={crs}&Bbox={Xmin,Ymin,Xmax,Ymax}&WIDTH={largeur}&HEIGHT={hauteur}
             format!(
@@ -499,22 +551,47 @@ impl IgnCollect {
 
         println!("Request URL WMS: {}", request_url);
 
-        let response = client
-            .get(&request_url)
-            .send()
-            .context("Failed to send WMS request to IGN API")?;
+        const WMS_RETRY_ATTEMPTS: u32 = 3;
+        let mut last_error = String::new();
+        let mut content_bytes = Vec::new();
 
-        if !response.status().is_success() {
-            anyhow::bail!("IGN API returned error: {}", response.status());
+        for attempt in 1..=WMS_RETRY_ATTEMPTS {
+            let response = client
+                .get(&request_url)
+                .send()
+                .context("Failed to send WMS request to IGN API")?;
+
+            if response.status().is_success() {
+                content_bytes = response
+                    .bytes()
+                    .context("Failed to read response body")?
+                    .to_vec();
+                break;
+            }
+
+            let status = response.status();
+            last_error = response.text().unwrap_or_default();
+            let retryable = lidar_hd && (status.as_u16() == 400 || status.as_u16() == 502);
+
+            if retryable && attempt < WMS_RETRY_ATTEMPTS {
+                eprintln!(
+                    "Warning: LiDAR HD WMS attempt {}/{} failed with {} — retrying...",
+                    attempt, WMS_RETRY_ATTEMPTS, status
+                );
+                std::thread::sleep(Duration::from_secs(attempt as u64));
+                continue;
+            }
+
+            let body_preview: String = last_error.chars().take(500).collect();
+            anyhow::bail!("IGN API returned error {}: {}", status, body_preview);
         }
 
-        let content_bytes = response
-            .bytes()
-            .context("Failed to read response body")?
-            .to_vec();
+        if content_bytes.is_empty() {
+            anyhow::bail!("IGN API returned empty WMS response: {}", last_error);
+        }
 
         // For some keys, save to file and validate as GeoTIFF
-        if matches!(key, "irc" | "dem" | "cosia") {
+        if matches!(key, "irc" | "dem" | "cosia" | "mnt" | "mns" | "mnh") {
             let output_path = PathBuf::from(TEMP_PATH).join(format!("{}.tiff", key));
 
             // Create directory if it doesn't exist

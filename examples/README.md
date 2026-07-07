@@ -140,7 +140,28 @@ uv pip install geopandas rasterio numpy shapely
 
 ---
 
-### 7. `lidar_from_wfs.py`
+### 7. `lidar_hd_elevation_from_ign.py`
+
+Example showing how to download LiDAR HD elevation rasters (MNT, MNS, MNH) from the IGN WMS-R service.
+
+**Run:**
+
+```bash
+python examples/lidar_hd_elevation_from_ign.py
+```
+
+**What this example does:**
+
+- Creates `Mnt`, `Mns`, and `Mnh` instances
+- Sets a bounding box in a LiDAR HD covered area
+- Downloads terrain, surface, and height models from IGN WMS-R
+- Saves GeoTIFF files to `./output/lidar_hd_elevation/`
+
+**Note:** LiDAR HD coverage is limited to acquired zones in France.
+
+---
+
+### 8. `lidar_from_wfs.py`
 
 Example showing how to download and process LiDAR data from the IGN WFS service.
 

@@ -3,8 +3,8 @@ use pyo3::prelude::*;
 mod bindings;
 
 use bindings::{
-    PyBoundingBox, PyBuilding, PyCadastre, PyCosia, PyDem, PyGeoCore, PyIris, PyLcz, PyLidar, PyRnb,
-    PyRoad, PyVegetation, PyWater, PyWindConfig, PyWindField,
+    PyBoundingBox, PyBuilding, PyCadastre, PyCosia, PyDem, PyGeoCore, PyIris, PyLcz, PyLidar, PyMnh,
+    PyMns, PyMnt, PyRnb, PyRoad, PyVegetation, PyWater, PyWindConfig, PyWindField,
 };
 
 /// Python bindings for pymdurs
@@ -44,6 +44,9 @@ fn register_geometric_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
     submodule.add_class::<PyIris>()?;
     submodule.add_class::<PyLcz>()?;
     submodule.add_class::<PyLidar>()?;
+    submodule.add_class::<PyMnh>()?;
+    submodule.add_class::<PyMns>()?;
+    submodule.add_class::<PyMnt>()?;
     submodule.add_class::<PyRoad>()?;
     submodule.add_class::<PyRnb>()?;
     submodule.add_class::<PyVegetation>()?;
@@ -57,6 +60,9 @@ fn register_geometric_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
     submodule.setattr("Iris", submodule.getattr("PyIris")?)?;
     submodule.setattr("Lcz", submodule.getattr("PyLcz")?)?;
     submodule.setattr("Lidar", submodule.getattr("PyLidar")?)?;
+    submodule.setattr("Mnh", submodule.getattr("PyMnh")?)?;
+    submodule.setattr("Mns", submodule.getattr("PyMns")?)?;
+    submodule.setattr("Mnt", submodule.getattr("PyMnt")?)?;
     submodule.setattr("Road", submodule.getattr("PyRoad")?)?;
     submodule.setattr("Rnb", submodule.getattr("PyRnb")?)?;
     submodule.setattr("Vegetation", submodule.getattr("PyVegetation")?)?;
@@ -96,6 +102,9 @@ pyo3_stub_gen::type_alias!("pymdurs.geometric", Dem = PyDem);
 pyo3_stub_gen::type_alias!("pymdurs.geometric", Iris = PyIris);
 pyo3_stub_gen::type_alias!("pymdurs.geometric", Lcz = PyLcz);
 pyo3_stub_gen::type_alias!("pymdurs.geometric", Lidar = PyLidar);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Mnh = PyMnh);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Mns = PyMns);
+pyo3_stub_gen::type_alias!("pymdurs.geometric", Mnt = PyMnt);
 pyo3_stub_gen::type_alias!("pymdurs.geometric", Road = PyRoad);
 pyo3_stub_gen::type_alias!("pymdurs.geometric", Rnb = PyRnb);
 pyo3_stub_gen::type_alias!("pymdurs.geometric", Vegetation = PyVegetation);

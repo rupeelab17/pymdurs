@@ -72,6 +72,11 @@ impl PyBuilding {
             .map_err(|e| PyValueError::new_err(format!("Failed to set bbox: {}", e)))
     }
 
+    /// Set CRS
+    fn set_crs(&mut self, epsg: i32) {
+        self.inner.set_crs(epsg);
+    }
+
     /// Run processing: load data, process heights, return self
     #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {

@@ -14,6 +14,9 @@ __all__ = [
     "Iris",
     "Lcz",
     "Lidar",
+    "Mnh",
+    "Mns",
+    "Mnt",
     "PyBuilding",
     "PyCadastre",
     "PyCosia",
@@ -21,6 +24,9 @@ __all__ = [
     "PyIris",
     "PyLcz",
     "PyLidar",
+    "PyMnh",
+    "PyMns",
+    "PyMnt",
     "PyRnb",
     "PyRoad",
     "PyVegetation",
@@ -38,6 +44,9 @@ Dem: TypeAlias = PyDem
 Iris: TypeAlias = PyIris
 Lcz: TypeAlias = PyLcz
 Lidar: TypeAlias = PyLidar
+Mnh: TypeAlias = PyMnh
+Mns: TypeAlias = PyMns
+Mnt: TypeAlias = PyMnt
 Rnb: TypeAlias = PyRnb
 Road: TypeAlias = PyRoad
 Vegetation: TypeAlias = PyVegetation
@@ -56,6 +65,10 @@ class PyBuilding:
     def set_bbox(self, min_x: builtins.float, min_y: builtins.float, max_x: builtins.float, max_y: builtins.float) -> None:
         r"""
         Set bounding box
+        """
+    def set_crs(self, epsg: builtins.int) -> None:
+        r"""
+        Set CRS
         """
     def run(self) -> Self:
         r"""
@@ -276,6 +289,45 @@ class PyLidar:
         Returns:
             Absolute path to the written file.
         """
+
+@typing.final
+class PyMnh:
+    r"""
+    MNH (LiDAR HD) Python binding
+    """
+    @property
+    def geo_core(self) -> pymdurs.GeoCore: ...
+    def __new__(cls, output_path: typing.Optional[builtins.str] = None) -> PyMnh: ...
+    def set_bbox(self, min_x: builtins.float, min_y: builtins.float, max_x: builtins.float, max_y: builtins.float) -> None: ...
+    def set_crs(self, epsg: builtins.int) -> None: ...
+    def run(self) -> Self: ...
+    def get_path_save_tiff(self) -> builtins.str: ...
+
+@typing.final
+class PyMns:
+    r"""
+    MNS (LiDAR HD) Python binding
+    """
+    @property
+    def geo_core(self) -> pymdurs.GeoCore: ...
+    def __new__(cls, output_path: typing.Optional[builtins.str] = None) -> PyMns: ...
+    def set_bbox(self, min_x: builtins.float, min_y: builtins.float, max_x: builtins.float, max_y: builtins.float) -> None: ...
+    def set_crs(self, epsg: builtins.int) -> None: ...
+    def run(self) -> Self: ...
+    def get_path_save_tiff(self) -> builtins.str: ...
+
+@typing.final
+class PyMnt:
+    r"""
+    MNT (LiDAR HD) Python binding
+    """
+    @property
+    def geo_core(self) -> pymdurs.GeoCore: ...
+    def __new__(cls, output_path: typing.Optional[builtins.str] = None) -> PyMnt: ...
+    def set_bbox(self, min_x: builtins.float, min_y: builtins.float, max_x: builtins.float, max_y: builtins.float) -> None: ...
+    def set_crs(self, epsg: builtins.int) -> None: ...
+    def run(self) -> Self: ...
+    def get_path_save_tiff(self) -> builtins.str: ...
 
 @typing.final
 class PyRnb:

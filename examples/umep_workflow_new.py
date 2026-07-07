@@ -86,13 +86,19 @@ def main():
     print("Step 1: Collecting DEM from IGN API...")
     print("=" * 60)
 
+
     dem = pymdurs.geometric.Dem(output_path=output_folder_str)
     dem.set_bbox(*bbox_wgs84)
     dem.set_crs(working_crs)
-    dem = dem.run()
+    dem.run()
 
-    dem_source = Path(output_folder_str) / "DEM.tif"
-    print(f"DEM collected and saved to: {dem_source}")
+    mnt = pymdurs.geometric.Mnt(output_path=output_folder_str)
+    mnt.set_bbox(*bbox_wgs84)
+    mnt.set_crs(working_crs)
+    mnt = mnt.run()
+
+    dem_source = Path(output_folder_str) / "mnt_lidar_hd.tif"
+    print(f"MNT LiDAR HD collected and saved to: {dem_source}")
 
     # ========================================================================
     # Step 2: Load LiDAR data from IGN WFS service
