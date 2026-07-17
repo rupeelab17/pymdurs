@@ -829,7 +829,9 @@ where
 #[cfg(feature = "reqwest")]
 fn head_content_length(client: &reqwest::blocking::Client, url: &str) -> Option<u64> {
     let response = client.head(url).send().ok()?;
-    response.content_length()
+    // Some CDNs (e.g. data.geopf.fr) answer HEAD with Content-Length: 0.
+    // Treat 0 / missing as unknown so callers don't divide by zero or retry forever.
+    response.content_length().filter(|&n| n > 0)
 }
 
 #[inline]
@@ -953,13 +955,15 @@ impl Lidar {
     ) -> Result<Vec<u8>> {
         use std::io::Read;
         println!("  📥 Downloading from: {}", url);
-        let expected_size = head_content_length(client, url);
+        let mut expected_size = head_content_length(client, url);
         if let Some(size) = expected_size {
             println!(
                 "  Expected size: {} bytes ({:.2} MB)",
                 size,
                 size as f64 / 1_048_576.0
             );
+        } else {
+            println!("  Expected size: unknown (no Content-Length from HEAD)");
         }
         let mut retries = 3;
         let data = loop {
@@ -978,6 +982,17 @@ impl Lidar {
             if !response.status().is_success() {
                 return Err(anyhow::anyhow!("HTTP error: {}", response.status()));
             }
+            // Prefer GET Content-Length when HEAD was missing/zero.
+            if expected_size.is_none() {
+                if let Some(size) = response.content_length().filter(|&n| n > 0) {
+                    expected_size = Some(size);
+                    println!(
+                        "  Expected size (from GET): {} bytes ({:.2} MB)",
+                        size,
+                        size as f64 / 1_048_576.0
+                    );
+                }
+            }
             let mut data = Vec::new();
             let mut buffer = [0u8; 65536];
             let mut response = response;
@@ -991,8 +1006,14 @@ impl Lidar {
                         if bytes_read % (10 * 1024 * 1024) < 65536 {
                             if let Some(expected) = expected_size {
                                 println!(
-                                    "  Progress: {:.1}%",
-                                    (bytes_read as f64 / expected as f64) * 100.0
+                                    "  Progress: {:.1}% ({:.2} MB)",
+                                    (bytes_read as f64 / expected as f64) * 100.0,
+                                    bytes_read as f64 / 1_048_576.0
+                                );
+                            } else {
+                                println!(
+                                    "  Progress: {:.2} MB downloaded",
+                                    bytes_read as f64 / 1_048_576.0
                                 );
                             }
                         }

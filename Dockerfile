@@ -3,7 +3,7 @@
 # Run:    docker run --rm -it -v "$(pwd)/examples:/app/examples" pymdurs-examples sh
 # Example: docker run --rm -it -v "$(pwd)/examples:/app/examples" pymdurs-examples python examples/building_basic.py
 
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 
 WORKDIR /app
 
