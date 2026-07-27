@@ -11,3 +11,6 @@ for _name in ("geometric", "thermal"):
     if _sub is not None:
         globals()[_name] = _sub
         sys.modules.setdefault(f"{__name__}.{_name}", _sub)
+
+# Pure-Python helpers (tree extraction from CHM); keep separate from Rust geometric.
+from . import trees as trees  # noqa: E402

@@ -1,3 +1,4 @@
+from . import trees
 from .pymdurs import (
     BoundingBox,
     GeoCore,
@@ -14,4 +15,5 @@ __all__ = [
     "PyGeoCore",
     "geometric",
     "thermal",
+    "trees",
 ]
