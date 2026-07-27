@@ -28,7 +28,7 @@ def main():
         classification_list=[2, 3, 4, 5],
         resolution=1.0,
         min_tree_height=2.0,
-        min_distance=5,
+        min_distance=2,
         lai=4.0,
     )
 
