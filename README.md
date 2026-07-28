@@ -64,6 +64,12 @@ The package is published on [PyPI](https://pypi.org/project/pymdurs/). To instal
 uv pip install pymdurs
 ```
 
+Optional morphometrics stack (DetectionUrbanTypes):
+
+```bash
+uv pip install "pymdurs[urban]"
+```
+
 On **Windows**, the PyPI wheel bundles GDAL, GEOS, and PROJ via `auditwheel repair` — no system GDAL installation is required.
 
 For a specific version (see the [PyPI release history](https://pypi.org/project/pymdurs/#history)):
@@ -583,6 +589,53 @@ lcz.to_geojson(name="lcz")
 
 ---
 
+### 📐 DXF → Cosia (Python helper)
+
+Convert ENON-style DXF layers to shapefiles and Cosia-weighted overlays (pure Python on `pymdurs.geometric`).
+
+```python
+from pymdurs.geometric import dxf_to_polygon_shp, dxf_to_cosia_and_weighted_layers
+
+gdf = dxf_to_polygon_shp("paysage.dxf", "output/dxf_polygons.shp")
+weighted = dxf_to_cosia_and_weighted_layers(
+    "output/dxf_polygons.shp",
+    "output/dxf_cosia_weighted.shp",
+)
+```
+
+**Features:**
+
+- Tree layers (`ENON-arbres*`) → circumscribed circles
+- Layer → Cosia class + overlay weight (`LAYER_PROPERTIES`)
+- Shared color table: `pymdurs.geometric.TABLE_COLOR_COSIA` / `pymdurs.geometric_helpers`
+
+See `examples/dxf2shp_example.py`.
+
+---
+
+### 🏙️ DetectionUrbanTypes (Python helper)
+
+Cluster buildings into urban morphotypes (momepy morphometrics + Clustergram). Requires optional extra `urban`.
+
+```python
+from pymdurs.geometric import DetectionUrbanTypes
+
+detection = DetectionUrbanTypes(output_path="./output")
+detection.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
+detection.set_crs(2154)
+detection = detection.run(nbr_cluster=4)
+gdf = detection.to_gdf()
+detection.to_gpkg("detection")
+```
+
+```bash
+uv pip install "pymdurs[urban]"
+```
+
+See `examples/detection_urban_types_example.py`.
+
+---
+
 ## Requirements
 
 ### Python
@@ -663,6 +716,8 @@ Comprehensive examples are available in the `examples/` directory:
 - **IGN API integration**: `building_from_ign.py`, `dem_from_ign.py`, `cadastre_from_ign.py`, etc.
 - **LiDAR processing**: `lidar_from_wfs.py`
 - **COSIA workflow**: `cosia_from_ign.py`
+- **DXF landscape → Cosia**: `dxf2shp_example.py`
+- **Urban morphotype clustering**: `detection_urban_types_example.py` (requires `pymdurs[urban]`)
 - **UMEP workflow**: `umep_workflow_new.py` (complete urban analysis workflow)
 
 See [examples/README.md](examples/README.md) for detailed documentation of all examples.
@@ -754,6 +809,15 @@ print(f"Output path: {geo.output_path}")
 
 - `run() -> Lcz` - Load LCZ data
 - `get_table_color() -> dict` - Get LCZ color table
+
+#### DXF helpers (Python)
+
+- `dxf_to_polygon_shp(...)` - DXF → shapefile (trees as circles)
+- `dxf_to_cosia_and_weighted_layers(...)` - Cosia-weighted overlay by layer
+
+#### DetectionUrbanTypes (Python, optional `urban` extra)
+
+- `set_bbox` / `set_crs` / `run(nbr_cluster=4)` / `to_gdf()` / `to_gpkg(name)`
 
 ---
 

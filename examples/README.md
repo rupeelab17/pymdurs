@@ -298,7 +298,52 @@ python examples/lcz_from_url.py
 
 ---
 
-### 14. `umep_workflow_new.py`
+### 13. `dxf2shp_example.py`
+
+Convert an ENON-style DXF landscape file to polygons (tree layers → circles), then to Cosia-weighted layers.
+
+**Run:**
+
+```bash
+python examples/dxf2shp_example.py /path/to/file.dxf
+# or:
+export PYMDURS_DXF=/path/to/file.dxf
+python examples/dxf2shp_example.py
+```
+
+**What this example does:**
+
+- Calls `pymdurs.geometric.dxf_to_polygon_shp` (GeoPandas/Shapely)
+- Calls `pymdurs.geometric.dxf_to_cosia_and_weighted_layers` (overlay by layer weight)
+- Writes shapefiles under `./output/` (or `PYMDURS_OUTPUT`)
+
+**Note:** Default CRS for ENON DXF is EPSG:3946. Requires a local DXF path.
+
+---
+
+### 14. `detection_urban_types_example.py`
+
+Detect urban morphotype clusters from IGN buildings and OSM streets (momepy + Clustergram).
+
+**Run:**
+
+```bash
+uv pip install "pymdurs[urban]"
+python examples/detection_urban_types_example.py
+```
+
+**What this example does:**
+
+- Creates `DetectionUrbanTypes`, sets WGS84 bbox and local CRS
+- Downloads OSM streets and IGN buildings
+- Computes morphometrics and Clustergram labels
+- Writes `detection_urban_types.gpkg` under the output path
+
+**Additional prerequisites:** optional extra `urban` (`momepy`, `osmnx`, `libpysal`, `clustergram`, `matplotlib`).
+
+---
+
+### 15. `umep_workflow_new.py`
 
 Alternative UMEP workflow using the `solweig` Python package (SOLWEIG from UMEP-dev/solweig). Collects DEM and LiDAR (DSM/CDSM), clips rasters, runs SOLWEIG for Tmrt/shadow, post-processes UTCI, and can build animated GIFs from preview PNGs.
 
@@ -312,7 +357,7 @@ python examples/umep_workflow_new.py
 
 ---
 
-### 15. `wind_field_from_ign.py`
+### 16. `wind_field_from_ign.py`
 
 Urban wind field (Röckle model) without QGIS: computes `wind_speed.tif` and `wind_direction.tif` from DEM, DSM, and buildings for use in UTCI/SOLWEIG pipelines.
 
@@ -333,7 +378,7 @@ python examples/wind_field_from_ign.py
 
 ---
 
-### 16. `utci_rockle_epw.py`
+### 17. `utci_rockle_epw.py`
 
 UTCI with Röckle wind field and pythermalcomfort: computes wind speed per pixel for 10 directions (0°, 36°, …, 324°) via the Röckle model, loads weather from an EPW file, runs SOLWEIG for Tmrt, then computes UTCI with `pythermalcomfort` using per-pixel wind speed and writes GeoTIFFs.
 
@@ -356,6 +401,34 @@ python examples/utci_rockle_epw.py
 **Output:** `./output/utci_rockle/utci/utci_YYYYMMDD_HHMM.tif` (per timestep), `./output/utci_rockle/utci_mean.tif`.
 
 **Additional prerequisites:** `solweig`, `pythermalcomfort`, `rasterio`. Run `umep_workflow_new.py` or `wind_field_from_ign.py` first to have DEM/DSM (and optionally buildings); place `la_rochelle_2025.epw` in `examples/` or project root.
+
+---
+
+### 18. `utci_qes_epw.py`
+
+UTCI with QES-Winds and pythermalcomfort: same pipeline as `utci_rockle_epw.py`, but wind speed per pixel comes from QES-Winds (`pyQES.pywinds`) for 10 directions (0°, 36°, …, 324°) instead of the Röckle model.
+
+**Run:**
+
+```bash
+uv pip install "pyQES[geo,io]"
+python examples/utci_qes_epw.py
+```
+
+**What this example does:**
+
+- Reuses DEM/DSM (and optionally CDSM/landcover) from `output/umep_workflow` or `output/`
+- Prepares QES inputs (projected/clipped DEM, buildings with `hauteur`, mask)
+- Extracts tree tops from existing CDSM (`extract_tree_crowns`), converts to crown polygons (`trees.shp`), and passes `VegetationParameters` to QES (`wake_flag=0` by default)
+- Runs QES-Winds for 10 wind directions (ref speed 1 m/s) and saves `wind_speed_000.tif` … `wind_speed_324.tif` under `output/utci_qes/wind_10dir/`
+- Loads weather (Ta, RH, wind speed, wind direction) from an EPW file (e.g. `la_rochelle_2025.epw`)
+- Runs SOLWEIG to get Tmrt per timestep
+- For each timestep: selects the nearest QES wind raster by EPW wind direction, scales by EPW wind speed, computes UTCI with `pythermalcomfort.models.utci(tdb, tr, v, rh)`, writes a GeoTIFF
+- Writes a mean UTCI GeoTIFF over the simulated period
+
+**Output:** `./output/utci_qes/utci/utci_YYYYMMDD_HHMM.tif` (per timestep), `./output/utci_qes/utci_mean.tif`, `./output/utci_qes/trees.shp`.
+
+**Additional prerequisites:** `pyQES[geo,io]`, `solweig`, `pythermalcomfort`, `rasterio`, `geopandas`. Trees are thinned (`min_spacing=50` m); set `TREE_WAKE=True` only if you want isolated-tree wake (can blank near-ground wind). Prefer a small bbox (default La Rochelle sample). Run `umep_workflow_new.py` first for DEM/DSM; place `la_rochelle_2025.epw` in `examples/` or project root.
 
 ---
 
@@ -448,7 +521,10 @@ uv pip install 'numpy<2.0.0' --force-reinstall
 # For geospatial examples
 uv pip install geopandas rasterio pyproj shapely
 
-# For umep_workflow.py
+# For detection_urban_types_example.py (morphometrics)
+uv pip install "pymdurs[urban]"
+
+# For umep_workflow / SOLWEIG
 uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
 uv pip install umep  # Optional
 ```
@@ -501,6 +577,8 @@ output/
 ├── vegetation_from_ign/
 ├── water_from_ign/
 ├── lcz_from_url/
+├── dxf_polygons.shp / dxf_cosia_weighted.shp   # dxf2shp_example
+├── detection_urban_types.gpkg                 # detection_urban_types_example
 └── umep_workflow/
     ├── DEM.tif
     ├── DSM.tif

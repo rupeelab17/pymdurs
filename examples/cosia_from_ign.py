@@ -28,25 +28,7 @@ import pymdurs
 # ========================================================================
 # COSIA Color to Class Mapping
 # ========================================================================
-TABLE_COLOR_COSIA = {
-    "Bâtiment": "#ce7079",
-    "Zone imperméable": "#a6aab7",
-    "Zone perméable": "#987752",
-    "Piscine": "#62d0ff",
-    "Serre": "#b9e2d4",
-    "Sol nu": "#bbb096",
-    "Surface eau": "#3375a1",
-    "Neige": "#e9effe",
-    "Conifère": "#216e2e",
-    "Feuillu": "#4c9129",
-    "Coupe": "#e48e4d",
-    "Broussaille": "#b5c335",
-    "Pelouse": "#8cd76a",
-    "Culture": "#decf55",
-    "Terre labourée": "#d0a349",
-    "Vigne": "#b08290",
-    "Autre": "#222222",
-}
+from pymdurs.geometric_helpers import TABLE_COLOR_COSIA
 
 # COSIA to UMEP classification mapping
 COSIA_TO_UMEP = {

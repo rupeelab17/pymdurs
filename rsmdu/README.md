@@ -550,6 +550,8 @@ Located in `examples/` (see [examples/README.md](examples/README.md) for full do
 - **`road_from_ign.py`**: Download road segments from IGN API
 - **`water_from_ign.py`**: Download water bodies from IGN API
 - **`vegetation_from_ign.py`**: Download vegetation zones from IGN API
+- **`dxf2shp_example.py`**: DXF landscape → polygons / Cosia-weighted layers
+- **`detection_urban_types_example.py`**: Urban morphotype clustering (`pymdurs[urban]`)
 - **`umep_workflow.py`**: Complete UMEP workflow for urban climate modeling (SOLWEIG, SVF, etc.)
 - **`umep_workflow_new.py`**: Alternative UMEP workflow using solweig (SOLWEIG from UMEP-dev), with GIF export from preview PNGs
 
@@ -560,6 +562,8 @@ python examples/building_basic.py
 python examples/building_from_ign.py
 python examples/dem_from_ign.py
 python examples/cosia_from_ign.py
+python examples/dxf2shp_example.py /path/to/file.dxf
+python examples/detection_urban_types_example.py
 python examples/umep_workflow.py
 python examples/umep_workflow_new.py
 ```
@@ -687,6 +691,7 @@ pub struct BuildingCollection {
 
 - ✅ Complete Python bindings installable via `pip install pymdurs`
 - ✅ All geometric classes available: `Building`, `Dem`, `Cadastre`, `Iris`, `Lcz`, `Lidar`, `Road`, `Water`, `Vegetation`
+- ✅ Python helpers on `pymdurs.geometric`: DXF→Cosia (`dxf_to_polygon_shp`, …) and `DetectionUrbanTypes`
 - ✅ Geometric submodule (`pymdurs.geometric`) for organized class access
 - ✅ Pythonic API with aliases (e.g., `pymdurs.geometric.Building` instead of `PyBuilding`)
 - ✅ Pandas DataFrame conversion for Building data

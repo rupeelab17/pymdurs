@@ -42,6 +42,13 @@ dev = [
     "pytest>=7.0.0",
     "basedpyright>=1.29.0",
 ]
+urban = [
+    "momepy>=1.0",
+    "osmnx",
+    "libpysal",
+    "clustergram",
+    "matplotlib",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
