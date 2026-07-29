@@ -1,6 +1,9 @@
 {
   "include": ["pymdurs", "examples"],
   "exclude": ["pymdurs/tests"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": ["."],
   "typeCheckingMode": "basic",
   "reportMissingTypeStubs": false,
   "executionEnvironments": [
@@ -9,6 +12,7 @@
     },
     {
       "root": "examples",
+      "extraPaths": ["."],
       "reportArgumentType": "none",
       "reportOptionalOperand": "none",
       "reportOptionalMemberAccess": "none",

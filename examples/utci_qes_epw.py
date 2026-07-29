@@ -45,7 +45,7 @@ import numpy as np
 import rasterio
 
 import pymdurs
-from pymdurs.trees import extract_tree_crowns
+from pymdurs.vegetation import extract_tree_crowns
 
 try:
     import geopandas as gpd

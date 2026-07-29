@@ -10,7 +10,7 @@ Pipeline:
 from pathlib import Path
 
 import pymdurs
-from pymdurs.trees import run_trees
+from pymdurs.vegetation import run_trees
 
 
 def main():

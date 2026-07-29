@@ -12,8 +12,11 @@ for _name in ("geometric", "thermal"):
         globals()[_name] = _sub
         sys.modules.setdefault(f"{__name__}.{_name}", _sub)
 
-# Pure-Python helpers (tree extraction from CHM); keep separate from Rust geometric.
-from . import trees as trees  # noqa: E402
+# Pure-Python vegetation helpers (tree extraction from CHM).
+from . import vegetation as vegetation  # noqa: E402
+
+# Urban indicators (note de biotope CBS / BFF, etc.).
+from . import indicators as indicators  # noqa: E402
 
 # Python geometric helpers injected onto the Rust `geometric` submodule so
 # `from pymdurs.geometric import DetectionUrbanTypes` matches pymdu layout.

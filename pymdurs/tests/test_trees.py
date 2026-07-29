@@ -7,7 +7,7 @@ import math
 import numpy as np
 from rasterio.transform import from_origin
 
-from pymdurs.trees import extract_tree_crowns
+from pymdurs.vegetation import extract_tree_crowns
 
 
 def test_extract_tree_crowns_synthetic_peaks():
