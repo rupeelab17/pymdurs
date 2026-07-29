@@ -594,6 +594,115 @@ def _compute_utci_raster(
     return out
 
 
+_COSIA_TO_UMEP = {
+    "Bâtiment": 2,
+    "Zone imperméable": 1,
+    "Zone perméable": 6,
+    "Piscine": 7,
+    "Serre": 1,
+    "Sol nu": 6,
+    "Surface eau": 7,
+    "Neige": 7,
+    "Conifère": 3,
+    "Feuillu": 4,
+    "Coupe": 5,
+    "Broussaille": 5,
+    "Pelouse": 5,
+    "Culture": 5,
+    "Terre labourée": 6,
+    "Vigne": 5,
+    "Autre": 1,
+}
+
+
+def _generate_landcover(
+    bbox_wgs84: tuple[float, float, float, float],
+    output_data: Path,
+    working_crs: int = WORKING_CRS,
+) -> Path:
+    """Download COSIA from IGN and rasterize to a UMEP landcover GeoTIFF."""
+    from rasterio.features import rasterize, shapes
+    from rasterio.transform import from_bounds
+    from shapely.geometry import shape
+
+    import geopandas as gpd
+    from pymdurs.geometric_helpers import TABLE_COLOR_COSIA
+
+    def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+        h = hex_color.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    lc_path = output_data / "landcover_clip.tif"
+    if lc_path.exists():
+        return lc_path
+
+    print("Landcover not found. Downloading COSIA from IGN API...")
+    cosia = pymdurs.geometric.Cosia(output_path=str(output_data))
+    cosia.set_bbox(*bbox_wgs84)
+    cosia.set_crs(working_crs)
+    cosia = cosia.run_ign()
+    cosia_tiff = cosia.get_path_save_tiff()
+    print(f"  COSIA downloaded: {cosia_tiff}")
+
+    rgb_to_class: dict[tuple[int, int, int], str] = {
+        _hex_to_rgb(color): classe for classe, color in TABLE_COLOR_COSIA.items()
+    }
+
+    with rasterio.open(cosia_tiff) as src:
+        image = src.read()
+        transform = src.transform
+        crs = src.crs
+        combined = (
+            (image[0].astype(np.uint32) << 16)
+            + (image[1].astype(np.uint32) << 8)
+            + image[2].astype(np.uint32)
+        )
+        results = list(shapes(combined, transform=transform))
+
+    geoms, rgb_values = [], []
+    for geom, value in results:
+        v = int(value)
+        rgb_values.append(((v >> 16) & 255, (v >> 8) & 255, v & 255))
+        geoms.append(shape(geom))
+
+    gdf = gpd.GeoDataFrame({"rgb": rgb_values, "geometry": geoms}, crs=crs)
+    gdf["classe"] = gdf["rgb"].apply(
+        lambda rgb: rgb_to_class.get(
+            min(rgb_to_class, key=lambda t: sum((a - b) ** 2 for a, b in zip(rgb, t))),
+            "Autre",
+        )
+    )
+    gdf["type"] = gdf["classe"].map(_COSIA_TO_UMEP).fillna(1).astype(int)
+    gdf = gdf[gdf.geometry.notna()].to_crs(working_crs)
+
+    bounds = gdf.total_bounds
+    resolution = 0.5
+    width = max(1, int((bounds[2] - bounds[0]) / resolution))
+    height = max(1, int((bounds[3] - bounds[1]) / resolution))
+    t = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
+
+    raster = rasterize(
+        shapes=((geom, val) for geom, val in zip(gdf.geometry, gdf["type"])),
+        out_shape=(height, width),
+        transform=t,
+        fill=0,
+        dtype=np.uint8,
+        all_touched=False,
+    )
+
+    with rasterio.open(
+        lc_path, "w",
+        driver="GTiff", height=height, width=width,
+        count=1, dtype=raster.dtype,
+        crs=gdf.crs, transform=t,
+        compress="lzw", nodata=0,
+    ) as dst:
+        dst.write(raster, 1)
+
+    print(f"  Landcover saved: {lc_path}")
+    return lc_path
+
+
 def _resolve_rasters(
     output_umep: Path,
     output_data: Path,
@@ -667,6 +776,9 @@ def _resolve_rasters(
                     "or place DEM.tif and DSM.tif in output/."
                 )
                 sys.exit(1)
+
+    if lc_path is None or not lc_path.exists():
+        lc_path = _generate_landcover(bbox_wgs84, output_data)
 
     return dem_path, dsm_path, cdsm_path, lc_path
 
