@@ -95,6 +95,25 @@ impl PyLidar {
         self.inner.get_output_path().to_string_lossy().to_string()
     }
 
+    /// COPC tile URLs intersecting the current bbox (after `set_bbox`).
+    ///
+    /// Returns URLs like:
+    /// `https://data.geopf.fr/.../LHD_FXX_0399_6580_PTS_LAMB93_IGN69.copc.laz`
+    #[pyo3(text_signature = "(self)")]
+    fn list_copc_urls(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .list_copc_urls()
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`).
+    #[pyo3(text_signature = "(self)")]
+    fn list_laz_urls(&self) -> PyResult<Vec<String>> {
+        self.inner
+            .list_laz_urls()
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
     /// Export loaded LiDAR points (ROI of the current BBOX) to a LAS file.
     /// Uses points already loaded by set_bbox(). Use .las for uncompressed, .laz for compressed.
     ///

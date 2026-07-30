@@ -34,6 +34,11 @@ def main():
     geo = lidar.geo_core
     print(f"🗺️  CRS: {geo.epsg}")
 
+    copc_urls = lidar.list_copc_urls()
+    print(f"📍 {len(copc_urls)} COPC file(s):")
+    for i, url in enumerate(copc_urls, start=1):
+        print(f"   {i}/{len(copc_urls)}: {url}")
+
     # Optional: Set classification filter
     # Following Python: classification_list=[3, 4, 5, 9]
     # 1 = unclassified, 2 = Ground, 3 = Low Vegetation, 4 = Medium Vegetation, 5 = High Vegetation, 9 = Water

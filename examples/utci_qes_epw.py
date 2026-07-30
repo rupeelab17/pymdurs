@@ -703,84 +703,77 @@ def _generate_landcover(
     return lc_path
 
 
+def _fetch_dem(bbox_wgs84: tuple[float, float, float, float], output_data: Path) -> Path:
+    """Download DEM from IGN into ``output_data/DEM.tif``."""
+    dem_path = output_data / "DEM.tif"
+    if dem_path.exists():
+        return dem_path
+    print("DEM not found. Downloading from IGN API...")
+    dem = pymdurs.geometric.Dem(output_path=str(output_data))
+    dem.set_bbox(*bbox_wgs84)
+    dem.set_crs(WORKING_CRS)
+    dem.run()
+    print(f"  Saved {dem_path}")
+    return dem_path
+
+
+def _fetch_dsm_cdsm(
+    bbox_wgs84: tuple[float, float, float, float],
+    output_data: Path,
+) -> tuple[Path, Path]:
+    """Generate DSM/CDSM from LiDAR into ``output_data``."""
+    dsm_path = output_data / "DSM.tif"
+    cdsm_path = output_data / "CDSM.tif"
+    if dsm_path.exists():
+        return dsm_path, cdsm_path
+    print("DSM not found. Generating from LiDAR...")
+    try:
+        lidar = pymdurs.geometric.Lidar(output_path=str(output_data))
+        lidar.set_bbox(*bbox_wgs84)
+        lidar.set_crs(WORKING_CRS)
+        lidar.run(file_name="DSM.tif", classification_list=[2, 6, 9])
+        print(f"  Saved {dsm_path}")
+        if not cdsm_path.exists():
+            lidar.run(file_name="CDSM.tif", classification_list=[3, 4, 5])
+            print(f"  Saved {cdsm_path}")
+    except (ValueError, Exception) as e:
+        print(f"  Could not generate DSM: {e}")
+        print(
+            "  Run first: python examples/umep_workflow_new.py, "
+            "or place DEM.tif and DSM.tif in output/."
+        )
+        sys.exit(1)
+    return dsm_path, cdsm_path
+
+
 def _resolve_rasters(
     output_umep: Path,
     output_data: Path,
-    output_data_str: str,
     bbox_wgs84: tuple[float, float, float, float],
 ) -> tuple[Path, Path, Path | None, Path | None]:
     """Resolve DEM/DSM/CDSM/landcover paths, fetching if missing."""
-    dem_path = dsm_path = cdsm_path = lc_path = None
-    min_x, min_y, max_x, max_y = bbox_wgs84
+    candidates = (
+        (output_umep, "DEM_clip.tif", "DSM_clip.tif", "CDSM_clip.tif"),
+        (output_umep, "DEM.tif", "DSM.tif", "CDSM.tif"),
+        (output_data, "DEM.tif", "DSM.tif", "CDSM.tif"),
+    )
 
-    if (output_umep / "DEM_clip.tif").exists() and (
-        output_umep / "DSM_clip.tif"
-    ).exists():
-        dem_path = output_umep / "DEM_clip.tif"
-        dsm_path = output_umep / "DSM_clip.tif"
-        cdsm_path = output_umep / "CDSM_clip.tif"
-        lc_path = output_umep / "landcover_clip.tif"
-        print(f"Using UMEP workflow rasters (clipped) from {output_umep}")
-    elif (output_umep / "DEM.tif").exists() and (output_umep / "DSM.tif").exists():
-        dem_path = output_umep / "DEM.tif"
-        dsm_path = output_umep / "DSM.tif"
-        cdsm_path = output_umep / "CDSM.tif"
-        lc_path = (
-            output_umep / "landcover_clip.tif"
-            if (output_umep / "landcover_clip.tif").exists()
-            else None
-        )
-        print(f"Using UMEP workflow rasters from {output_umep}")
-    elif (output_data / "DEM.tif").exists() and (output_data / "DSM.tif").exists():
-        dem_path = output_data / "DEM.tif"
-        dsm_path = output_data / "DSM.tif"
-        cdsm_path = output_data / "CDSM.tif"
-        lc_path = (
-            output_data / "landcover_clip.tif"
-            if (output_data / "landcover_clip.tif").exists()
-            else None
-        )
-        print(f"Using DEM/DSM from {output_data}")
+    dem_path = dsm_path = cdsm_path = None
+    for folder, dem_name, dsm_name, cdsm_name in candidates:
+        dem, dsm = folder / dem_name, folder / dsm_name
+        if dem.exists() and dsm.exists():
+            dem_path, dsm_path, cdsm_path = dem, dsm, folder / cdsm_name
+            print(f"Using DEM/DSM from {folder}")
+            break
+    else:
+        dem_path = _fetch_dem(bbox_wgs84, output_data)
+        dsm_path, cdsm_path = _fetch_dsm_cdsm(bbox_wgs84, output_data)
 
-    if dem_path is None or dsm_path is None:
-        dem_path = dem_path or output_data / "DEM.tif"
-        dsm_path = dsm_path or output_data / "DSM.tif"
-        cdsm_path = cdsm_path or output_data / "CDSM.tif"
-        lc_path = lc_path or output_data / "landcover_clip.tif"
-        if not dem_path.exists():
-            print("DEM not found. Downloading from IGN API...")
-            dem = pymdurs.geometric.Dem(output_path=output_data_str)
-            dem.set_bbox(min_x, min_y, max_x, max_y)
-            dem.set_crs(WORKING_CRS)
-            dem.run()
-            print(f"  Saved {dem_path}")
-        if not dsm_path.exists():
-            print("DSM not found. Generating from LiDAR...")
-            try:
-                lidar = pymdurs.geometric.Lidar(output_path=output_data_str)
-                lidar.set_bbox(min_x, min_y, max_x, max_y)
-                lidar.set_crs(WORKING_CRS)
-                lidar.run(file_name="DSM.tif", classification_list=[2, 6, 9])
-                print(f"  Saved {dsm_path}")
-                if cdsm_path is not None and not Path(cdsm_path).exists():
-                    lidar.run(
-                        file_name="CDSM.tif",
-                        classification_list=[3, 4, 5],
-                    )
-                    print(f"  Saved {cdsm_path}")
-            except (ValueError, Exception) as e:
-                err = str(e)
-                print(f"  Could not generate DSM: {err}")
-                print(
-                    "  Run first: python examples/umep_workflow_new.py, "
-                    "or place DEM.tif and DSM.tif in output/."
-                )
-                sys.exit(1)
+    for lc_candidate in (output_umep / "landcover_clip.tif", output_data / "landcover_clip.tif"):
+        if lc_candidate.exists():
+            return dem_path, dsm_path, cdsm_path, lc_candidate
 
-    if lc_path is None or not lc_path.exists():
-        lc_path = _generate_landcover(bbox_wgs84, output_data)
-
-    return dem_path, dsm_path, cdsm_path, lc_path
+    return dem_path, dsm_path, cdsm_path, _generate_landcover(bbox_wgs84, output_data)
 
 
 def _prepare_qes_dem(
@@ -854,18 +847,16 @@ def main() -> None:
         output_umep_base.parent if (base / "output").exists() else output_data_cwd
     )
     output_data.mkdir(parents=True, exist_ok=True)
-    output_data_str = str(output_data)
 
     # Small La Rochelle bbox (safe for QES domain size)
     bbox_wgs84 = (-1.152704,46.181627,-1.139893,46.18699)
 
-    min_x, min_y, max_x, max_y = bbox_wgs84
     print(f"bbox (WGS84): {bbox_wgs84}")
     print(f"cell_size:    {CELL_SIZE}")
     print(f"output:       {output_folder}")
 
     dem_path, dsm_path, cdsm_path, lc_path = _resolve_rasters(
-        output_umep, output_data, output_data_str, bbox_wgs84
+        output_umep, output_data, bbox_wgs84
     )
 
     # QES inputs: projected/clipped DEM + buildings shapefile + mask

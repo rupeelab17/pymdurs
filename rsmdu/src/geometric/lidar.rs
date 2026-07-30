@@ -834,21 +834,10 @@ fn head_content_length(client: &reqwest::blocking::Client, url: &str) -> Option<
     response.content_length().filter(|&n| n > 0)
 }
 
+/// Preserve ASPRS + IGN LiDAR HD extended codes (64, 66, 67, …).
 #[inline]
 fn classification_to_u8(c: &las::point::Classification) -> u8 {
-    match c {
-        las::point::Classification::CreatedNeverClassified => 0,
-        las::point::Classification::Unclassified => 1,
-        las::point::Classification::Ground => 2,
-        las::point::Classification::LowVegetation => 3,
-        las::point::Classification::MediumVegetation => 4,
-        las::point::Classification::HighVegetation => 5,
-        las::point::Classification::Building => 6,
-        las::point::Classification::LowPoint => 7,
-        las::point::Classification::ModelKeyPoint => 8,
-        las::point::Classification::Water => 9,
-        _ => 1,
-    }
+    u8::from(*c)
 }
 
 struct ProcessedRasters {
@@ -906,6 +895,27 @@ impl Lidar {
 
     pub fn get_output_path(&self) -> &Path {
         &self.output_path
+    }
+
+    /// COPC tile URLs for the current bbox (populated by `set_bbox` / ctor with bbox).
+    ///
+    /// Example: `https://data.geopf.fr/.../LHD_FXX_0399_6580_PTS_LAMB93_IGN69.copc.laz`
+    pub fn list_copc_urls(&self) -> Result<Vec<String>> {
+        let urls = self.list_path_laz.as_ref().context(
+            "No COPC/LAZ URLs loaded. Call set_bbox() first.",
+        )?;
+        Ok(urls
+            .iter()
+            .filter(|u| Self::is_copc_url(u))
+            .cloned()
+            .collect())
+    }
+
+    /// All LAZ tile URLs (COPC and non-COPC) for the current bbox.
+    pub fn list_laz_urls(&self) -> Result<Vec<String>> {
+        self.list_path_laz
+            .clone()
+            .context("No LAZ URLs loaded. Call set_bbox() first.")
     }
 
     fn cache_path_for_url(cache_dir: &Path, url: &str) -> PathBuf {
@@ -2301,8 +2311,10 @@ impl Lidar {
                 )
             },
         );
+        // Format 6 (LAS 1.4 extended): full u8 classification — required for IGN LiDAR HD
+        // codes 64/66/67. Format 0 only allows 0–31 and rejects those classes.
         let mut builder = las::Builder::from((1, 4));
-        builder.point_format = las::point::Format::new(0).context("Invalid point format")?;
+        builder.point_format = las::point::Format::new(6).context("Invalid point format")?;
         builder.transforms = las::Vector {
             x: las::Transform {
                 scale: 0.01,
@@ -2340,6 +2352,7 @@ impl Lidar {
                 classification,
                 return_number: 1,
                 number_of_returns: 1,
+                gps_time: Some(0.0), // required by point format 6
                 ..Default::default()
             };
             writer
@@ -2374,6 +2387,21 @@ mod tests {
     }
 
     #[test]
+    fn test_list_copc_urls() {
+        let mut lidar = Lidar::new(Some("/tmp".into()), None, None).unwrap();
+        assert!(lidar.list_copc_urls().is_err());
+
+        let ign = "https://data.geopf.fr/telechargement/download/LiDARHD-NUALID/NUALHD_1-0__LAZ_LAMB93_FK_2025-02-04/LHD_FXX_0399_6580_PTS_LAMB93_IGN69.copc.laz";
+        lidar.list_path_laz = Some(vec![
+            ign.to_string(),
+            "https://example.com/legacy.laz".to_string(),
+        ]);
+        let copc = lidar.list_copc_urls().unwrap();
+        assert_eq!(copc, vec![ign.to_string()]);
+        assert_eq!(lidar.list_laz_urls().unwrap().len(), 2);
+    }
+
+    #[test]
     fn test_classification_to_u8() {
         assert_eq!(classification_to_u8(&las::point::Classification::Ground), 2);
         assert_eq!(
@@ -2383,6 +2411,15 @@ mod tests {
         assert_eq!(
             classification_to_u8(&las::point::Classification::HighVegetation),
             5
+        );
+        // IGN LiDAR HD: 64 sursol pérenne, 66 virtuel, 67 divers bâtis
+        assert_eq!(
+            classification_to_u8(&las::point::Classification::new(67).unwrap()),
+            67
+        );
+        assert_eq!(
+            classification_to_u8(&las::point::Classification::new(64).unwrap()),
+            64
         );
     }
 
@@ -2663,5 +2700,46 @@ mod tests {
         assert_eq!(node.quadrant_for_point(75.0, 25.0), 1);
         assert_eq!(node.quadrant_for_point(25.0, 75.0), 2);
         assert_eq!(node.quadrant_for_point(75.0, 75.0), 3);
+    }
+
+    #[cfg(all(feature = "las", feature = "tempfile"))]
+    #[test]
+    fn test_save_las_ign_extended_classification() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut lidar = Lidar::new(
+            Some(tmp.path().to_string_lossy().into_owned()),
+            None,
+            None,
+        )
+        .unwrap();
+        lidar.loaded_points = Some(vec![
+            LidarPoint {
+                x: 100.0,
+                y: 200.0,
+                z: 10.0,
+                classification: 67, // IGN divers bâtis
+            },
+            LidarPoint {
+                x: 101.0,
+                y: 201.0,
+                z: 11.0,
+                classification: 64, // IGN sursol pérenne
+            },
+            LidarPoint {
+                x: 102.0,
+                y: 202.0,
+                z: 12.0,
+                classification: 6,
+            },
+        ]);
+        let out = lidar.save_las(Path::new("ign_classes.las")).unwrap();
+        assert!(out.exists());
+
+        let mut reader = las::Reader::from_path(&out).unwrap();
+        let classes: Vec<u8> = reader
+            .points()
+            .map(|p| classification_to_u8(&p.unwrap().classification))
+            .collect();
+        assert_eq!(classes, vec![67, 64, 6]);
     }
 }

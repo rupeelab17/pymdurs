@@ -288,6 +288,17 @@ class PyLidar:
         r"""
         Return the output directory path (string).
         """
+    def list_copc_urls(self) -> typing.Sequence[builtins.str]:
+        r"""
+        COPC tile URLs intersecting the current bbox (after `set_bbox`).
+        
+        Returns URLs like:
+        `https://data.geopf.fr/.../LHD_FXX_0399_6580_PTS_LAMB93_IGN69.copc.laz`
+        """
+    def list_laz_urls(self) -> typing.Sequence[builtins.str]:
+        r"""
+        All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`).
+        """
     def save(self, filename: builtins.str = 'bbox.las') -> builtins.str:
         r"""
         Export loaded LiDAR points (ROI of the current BBOX) to a LAS file.
