@@ -3,12 +3,15 @@ Example: Download and process LiDAR data from IGN WFS service using pymdurs
 
 This example demonstrates how to:
 1. Create a Lidar instance
-2. Set a bounding box
-3. Download LAZ files from IGN WFS service
-4. Process points to create DSM, DTM, and CHM rasters
+2. Set a bounding box (resolves COPC URLs via WFS, no download)
+3. List COPC URLs with list_copc_urls()
+4. Process points on run() (download then DSM/DTM/CHM)
 5. Save results as a multi-band GeoTIFF file
 6. Export the point cloud (ROI) as a .las file
 """
+
+from typing import Sequence
+
 
 import os
 
@@ -22,8 +25,7 @@ def main():
     # Following Python: lidar = Lidar(output_path="./", classification=6)
     lidar = pymdurs.geometric.Lidar(output_path="./output")
 
-    # Set bounding box (La Rochelle area, France)
-    # Load points (required for save_las)
+    # Set bbox: resolves COPC URLs via WFS only (no LAZ download yet)
     lidar.set_bbox(-1.152223, 46.183282, -1.149637, 46.185459)
     #    lidar.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
 
@@ -34,14 +36,16 @@ def main():
     geo = lidar.geo_core
     print(f"🗺️  CRS: {geo.epsg}")
 
-    copc_urls = lidar.list_copc_urls()
+    # List COPC URLs without downloading tiles
+    copc_urls: Sequence[str] = lidar.list_copc_urls()
     print(f"📍 {len(copc_urls)} COPC file(s):")
     for i, url in enumerate(copc_urls, start=1):
         print(f"   {i}/{len(copc_urls)}: {url}")
-
+    
     # Optional: Set classification filter
     # Following Python: classification_list=[3, 4, 5, 9]
     # 1 = unclassified, 2 = Ground, 3 = Low Vegetation, 4 = Medium Vegetation, 5 = High Vegetation, 9 = Water
+    # run() downloads COPC/LAZ on first call, then builds rasters
     classification_list = [3, 4, 5]  # Vegetation and water classes
     lidar.run(file_name="CDSM.tif", classification_list=classification_list)
 
@@ -56,7 +60,7 @@ def main():
         las_path = lidar.save(filename="bbox.las")
         print(f"📦 Point cloud (ROI) saved to: {las_path}")
     except ValueError as e:
-        print(f"⚠️  Could not export LAS (ensure set_bbox loaded points): {e}")
+        print(f"⚠️  Could not export LAS (ensure set_bbox then run/save): {e}")
         las_path = None
 
     print(f"✅ LiDAR processing complete!")

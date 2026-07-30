@@ -256,12 +256,12 @@ class PyLidar:
         Args:
             output_path: Directory for output GeoTIFFs and LAZ cache (default: temp).
             classification: Optional default classification filter.
-            bbox: Optional (min_x, min_y, max_x, max_y) in WGS84; if set, fetches LAZ URLs immediately.
+            bbox: Optional (min_x, min_y, max_x, max_y) in WGS84; if set, fetches LAZ URLs only (no download).
         """
     def set_bbox(self, min_x: builtins.float, min_y: builtins.float, max_x: builtins.float, max_y: builtins.float) -> None:
         r"""
-        Set bounding box (WGS84) and fetch LAZ URLs from IGN WFS, then load points.
-        Call this before run() if bbox was not passed to the constructor.
+        Set bounding box (WGS84) and fetch LAZ/COPC URLs from IGN WFS (no download).
+        Point data is downloaded on the first run() or save().
         """
     def set_classification(self, classification: typing.Optional[builtins.int]) -> None:
         r"""
@@ -273,7 +273,7 @@ class PyLidar:
         """
     def run(self, file_name: typing.Optional[builtins.str] = None, classification_list: typing.Optional[typing.Sequence[builtins.int]] = None, resolution: typing.Optional[builtins.float] = None, write_out_file: builtins.bool = True) -> builtins.str:
         r"""
-        Run LiDAR processing: build DSM/DTM/CHM from loaded points and save GeoTIFF.
+        Run LiDAR processing: download points if needed, build DSM/DTM/CHM, save GeoTIFF.
         
         Args:
             file_name: Output filename (e.g. "DSM.tif", "CDSM.tif"). Default "lidar_cdsm.tif".
@@ -290,19 +290,18 @@ class PyLidar:
         """
     def list_copc_urls(self) -> typing.Sequence[builtins.str]:
         r"""
-        COPC tile URLs intersecting the current bbox (after `set_bbox`).
+        COPC tile URLs intersecting the current bbox (after `set_bbox`, no download).
         
         Returns URLs like:
         `https://data.geopf.fr/.../LHD_FXX_0399_6580_PTS_LAMB93_IGN69.copc.laz`
         """
     def list_laz_urls(self) -> typing.Sequence[builtins.str]:
         r"""
-        All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`).
+        All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`, no download).
         """
     def save(self, filename: builtins.str = 'bbox.las') -> builtins.str:
         r"""
-        Export loaded LiDAR points (ROI of the current BBOX) to a LAS file.
-        Uses points already loaded by set_bbox(). Use .las for uncompressed, .laz for compressed.
+        Export LiDAR points (ROI) to a LAS file. Downloads points on first call if not yet loaded.
         
         Args:
             filename: Output path (e.g. "bbox.las"). If relative, saved under the Lidar output directory.

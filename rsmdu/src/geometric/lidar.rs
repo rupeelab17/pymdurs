@@ -875,18 +875,50 @@ impl Lidar {
         Ok(lidar)
     }
 
+    /// Set bbox (WGS84) and resolve COPC/LAZ URLs via IGN WFS.
+    /// Does **not** download point data — that happens on first `run()` / `save_las()`.
     pub fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<()> {
         self.geo_core
             .set_bbox(Some(BoundingBox::new(min_x, min_y, max_x, max_y)));
-        let (min_x, min_y, max_x, max_y, _) = self.get_lidar_points()?;
-        if let Some(ref laz_urls) = self.list_path_laz {
-            if !laz_urls.is_empty() {
-                let filter_bbox = Some((min_x, min_y, max_x, max_y));
-                let points = self.load_lidar_points_internal(laz_urls, filter_bbox)?;
-                self.loaded_points = Some(points);
-            }
-        }
+        self.loaded_points = None;
+        let _ = self.get_lidar_points()?;
         Ok(())
+    }
+
+    /// Download and cache points for the current bbox if not already loaded.
+    fn ensure_points_loaded(&mut self) -> Result<()> {
+        if self.loaded_points.is_some() {
+            return Ok(());
+        }
+        let laz_urls = self
+            .list_path_laz
+            .as_ref()
+            .context("No LAZ URLs available. Call set_bbox() first.")?;
+        if laz_urls.is_empty() {
+            anyhow::bail!("No LAZ files found for the specified bounding box");
+        }
+        let laz_urls = laz_urls.clone();
+        let (min_x, min_y, max_x, max_y) = self.bbox_lambert93()?;
+        let points = self.load_lidar_points_internal(&laz_urls, Some((min_x, min_y, max_x, max_y)))?;
+        self.loaded_points = Some(points);
+        Ok(())
+    }
+
+    /// Current bbox transformed to EPSG:2154 (Lambert-93).
+    fn bbox_lambert93(&self) -> Result<(f64, f64, f64, f64)> {
+        let bbox = self
+            .geo_core
+            .get_bbox()
+            .context("Bounding box must be set")?;
+        let transformer = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
+            .context("Failed to create coordinate transformer")?;
+        let (min_x, min_y) = transformer
+            .convert((bbox.min_x, bbox.min_y))
+            .context("Failed to transform min coordinates")?;
+        let (max_x, max_y) = transformer
+            .convert((bbox.max_x, bbox.max_y))
+            .context("Failed to transform max coordinates")?;
+        Ok((min_x, min_y, max_x, max_y))
     }
 
     pub fn set_classification(&mut self, classification: Option<u8>) {
@@ -2245,29 +2277,12 @@ impl Lidar {
         write_out_file: bool,
     ) -> Result<PathBuf> {
         let resolution = resolution.unwrap_or(1.0);
-        let laz_urls = self
-            .list_path_laz
-            .as_ref()
-            .context("No LAZ URLs available. Call set_bbox() first.")?;
-        if laz_urls.is_empty() {
-            anyhow::bail!("No LAZ files found for the specified bounding box");
-        }
-        let bbox = self
-            .geo_core
-            .get_bbox()
-            .context("Bounding box must be set")?;
-        let transformer = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
-            .context("Failed to create coordinate transformer")?;
-        let (min_x, min_y) = transformer
-            .convert((bbox.min_x, bbox.min_y))
-            .context("Failed to transform min coordinates")?;
-        let (max_x, max_y) = transformer
-            .convert((bbox.max_x, bbox.max_y))
-            .context("Failed to transform max coordinates")?;
+        self.ensure_points_loaded()?;
+        let (min_x, min_y, max_x, max_y) = self.bbox_lambert93()?;
         let points = self
             .loaded_points
             .as_ref()
-            .context("No LiDAR points loaded. Call set_bbox() first.")?
+            .context("No LiDAR points loaded")?
             .clone();
         let rasters = self.process_lidar_points(
             points,
@@ -2283,13 +2298,14 @@ impl Lidar {
     }
 
     #[cfg(feature = "las")]
-    pub fn save_las(&self, path: &Path) -> Result<PathBuf> {
+    pub fn save_las(&mut self, path: &Path) -> Result<PathBuf> {
+        self.ensure_points_loaded()?;
         let points = self
             .loaded_points
             .as_ref()
-            .context("No LiDAR points loaded. Call set_bbox() first.")?;
+            .context("No LiDAR points loaded. Call set_bbox() then run() or save().")?;
         if points.is_empty() {
-            anyhow::bail!("No LiDAR points to export. Call set_bbox() first.");
+            anyhow::bail!("No LiDAR points to export.");
         }
         let (min_x, min_y, min_z, _max_x, _max_y, _max_z) = points.iter().fold(
             (

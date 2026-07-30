@@ -26,7 +26,7 @@ impl PyLidar {
     /// Args:
     ///     output_path: Directory for output GeoTIFFs and LAZ cache (default: temp).
     ///     classification: Optional default classification filter.
-    ///     bbox: Optional (min_x, min_y, max_x, max_y) in WGS84; if set, fetches LAZ URLs immediately.
+    ///     bbox: Optional (min_x, min_y, max_x, max_y) in WGS84; if set, fetches LAZ URLs only (no download).
     fn new(
         output_path: Option<String>,
         classification: Option<u8>,
@@ -41,14 +41,14 @@ impl PyLidar {
         }
     }
 
-    /// Set bounding box (WGS84) and fetch LAZ URLs from IGN WFS, then load points.
-    /// Call this before run() if bbox was not passed to the constructor.
+    /// Set bounding box (WGS84) and fetch LAZ/COPC URLs from IGN WFS (no download).
+    /// Point data is downloaded on the first run() or save().
     #[pyo3(text_signature = "(self, min_x, min_y, max_x, max_y)")]
     fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> PyResult<()> {
         self.inner
             .set_bbox(min_x, min_y, max_x, max_y)
             .map_err(|e| {
-                PyValueError::new_err(format!("Failed to set bbox and get LiDAR points: {}", e))
+                PyValueError::new_err(format!("Failed to set bbox and get LiDAR URLs: {}", e))
             })
     }
 
@@ -62,7 +62,7 @@ impl PyLidar {
         self.inner.geo_core.set_epsg(epsg);
     }
 
-    /// Run LiDAR processing: build DSM/DTM/CHM from loaded points and save GeoTIFF.
+    /// Run LiDAR processing: download points if needed, build DSM/DTM/CHM, save GeoTIFF.
     ///
     /// Args:
     ///     file_name: Output filename (e.g. "DSM.tif", "CDSM.tif"). Default "lidar_cdsm.tif".
@@ -95,7 +95,7 @@ impl PyLidar {
         self.inner.get_output_path().to_string_lossy().to_string()
     }
 
-    /// COPC tile URLs intersecting the current bbox (after `set_bbox`).
+    /// COPC tile URLs intersecting the current bbox (after `set_bbox`, no download).
     ///
     /// Returns URLs like:
     /// `https://data.geopf.fr/.../LHD_FXX_0399_6580_PTS_LAMB93_IGN69.copc.laz`
@@ -106,7 +106,7 @@ impl PyLidar {
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    /// All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`).
+    /// All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`, no download).
     #[pyo3(text_signature = "(self)")]
     fn list_laz_urls(&self) -> PyResult<Vec<String>> {
         self.inner
@@ -114,8 +114,7 @@ impl PyLidar {
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    /// Export loaded LiDAR points (ROI of the current BBOX) to a LAS file.
-    /// Uses points already loaded by set_bbox(). Use .las for uncompressed, .laz for compressed.
+    /// Export LiDAR points (ROI) to a LAS file. Downloads points on first call if not yet loaded.
     ///
     /// Args:
     ///     filename: Output path (e.g. "bbox.las"). If relative, saved under the Lidar output directory.
@@ -124,7 +123,7 @@ impl PyLidar {
     ///     Absolute path to the written file.
     #[pyo3(signature = (filename = "bbox.las"))]
     #[pyo3(text_signature = "(self, filename='bbox.las')")]
-    fn save(&self, filename: &str) -> PyResult<String> {
+    fn save(&mut self, filename: &str) -> PyResult<String> {
         self.inner
             .save_las(Path::new(filename))
             .map(|p: PathBuf| p.to_string_lossy().to_string())
