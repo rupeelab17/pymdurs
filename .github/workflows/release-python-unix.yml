@@ -67,17 +67,20 @@ jobs:
   build-wheels:
     needs: [build-sdist]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
-        architecture: [x86-64, aarch64]
-        exclude:
-          - os: macos-15
-            architecture: x86-64
+        include:
           - os: ubuntu-latest
+            architecture: x86-64
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
             architecture: aarch64
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15
+            architecture: aarch64
+            target: aarch64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +88,7 @@ jobs:
           ref: ${{ inputs.sha }}
 
       - name: Set swap space for Linux
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 10
@@ -100,7 +103,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install GDAL (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgdal-dev gdal-bin libclang-dev
@@ -113,33 +116,15 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Set Rust target
-        id: target
-        run: |
-          if [[ "${{ matrix.architecture }}" == "aarch64" ]]; then
-            if [[ "${{ matrix.os }}" == "macos-15" ]]; then
-              echo "target=aarch64-apple-darwin" >> $GITHUB_OUTPUT
-            else
-              echo "target=aarch64-unknown-linux-gnu" >> $GITHUB_OUTPUT
-            fi
-          elif [[ "${{ matrix.architecture }}" == "x86-64" ]]; then
-            if [[ "${{ matrix.os }}" == "macos-15-intel" ]]; then
-              echo "target=x86_64-apple-darwin" >> $GITHUB_OUTPUT
-            elif [[ "${{ matrix.os }}" == "macos-26" ]]; then
-              echo "target=x86_64-apple-darwin" >> $GITHUB_OUTPUT
-            else
-              echo "target=x86_64-unknown-linux-gnu" >> $GITHUB_OUTPUT
-            fi
-          fi
-
       - name: Install Rust target
-        run: rustup target add ${{ steps.target.outputs.target }}
+        run: rustup target add ${{ matrix.target }}
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          target: ${{ steps.target.outputs.target }}
+          target: ${{ matrix.target }}
+          container: off
           args: >
             --release
             --manifest-path pymdurs/Cargo.toml
