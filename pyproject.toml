@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pymdurs"
-version = "0.1.13"
+version = "0.1.14"
 description = "Rust transpilation of pymdu (Python Urban Data Model) - Python bindings"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -64,6 +64,9 @@ addopts = "-s"
 manifest-path = "pymdurs/Cargo.toml"
 features = ["extension-module"]
 module-name = "pymdurs"
+# pep517/uv: delocate fails on Homebrew @rpath/libabsl_* (SIP strips DYLD_*).
+# Release CI overrides with --auditwheel repair.
+auditwheel = "skip"
 
 [tool.pyo3-stub-gen]
 

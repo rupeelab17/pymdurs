@@ -87,19 +87,9 @@ maturin build --target x86_64-apple-darwin --release    # Intel
 
 ### Erreur maturin : `Cannot repair wheel` et `libabsl_…` (macOS)
 
-Après la compilation Rust, maturin analyse les dépendances dynamiques (GDAL → abseil/protobuf, etc.) pour les copier dans la roue. Les install names du type `@rpath/libabsl_debugging_internal….dylib` sont résolus comme le ferait dyld, avec des répertoires de secours **limités** par défaut (`~/lib`, `/usr/local/lib`, `/lib`, `/usr/lib`). Sur **Apple Silicon**, Homebrew installe les bibliothèques dans `$(brew --prefix)/lib` (souvent `/opt/homebrew/lib`), qui n’est pas dans cette liste : la résolution échoue et le repair s’arrête.
+Après la compilation Rust, maturin analyse les dépendances dynamiques (GDAL → abseil, etc.) pour les copier dans la roue. Homebrew pose ces dylibs dans `$(brew --prefix)/lib` (`/opt/homebrew/lib`), hors des chemins par défaut de lddtree (`~/lib`, `/usr/local/lib`, `/lib`, `/usr/lib`). macOS SIP retire souvent `DYLD_*` des processus enfants (`uv` → maturin), donc un `export DYLD_FALLBACK_LIBRARY_PATH=...` ne suffit en général pas.
 
-**Correctif** : inclure le répertoire `lib` de Homebrew dans `DYLD_FALLBACK_LIBRARY_PATH` pendant le build / `uv pip install` :
-
-```bash
-export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
-# puis, par exemple :
-uv pip install -e .
-# ou
-maturin build --release
-```
-
-En dernier recours (roue non portable, déconseillé pour une publication), on peut désactiver le repair dans `pyproject.toml` : `auditwheel = "skip"` sous `[tool.maturin]`.
+Le `[tool.maturin] auditwheel = "skip"` du `pyproject.toml` évite ce repair pour `uv pip install -e .` / pep517 (GDAL Homebrew reste requis au runtime). La CI Unix passe `--auditwheel repair` et symlink `~/lib` vers Homebrew pour les wheels PyPI.
 
 ---
 

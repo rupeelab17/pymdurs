@@ -113,6 +113,17 @@ jobs:
         run: |
           brew install gdal
 
+      # lddtree only searches ~/lib, /usr/local/lib, /lib, /usr/lib — not Homebrew.
+      # SIP also strips DYLD_* from child processes, so symlink into ~/lib instead.
+      - name: Homebrew libs for delocate
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$HOME/lib"
+          shopt -s nullglob
+          for f in "$(brew --prefix)/lib"/lib*.dylib; do
+            ln -sf "$f" "$HOME/lib/"
+          done
+
       - name: Install maturin
         run: pip install maturin
 
@@ -129,6 +140,7 @@ jobs:
             --release
             --manifest-path pymdurs/Cargo.toml
             --out dist
+            --auditwheel repair
           maturin-version: 1.11.4
 
       - name: Test wheel

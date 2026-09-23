@@ -849,6 +849,72 @@ struct ProcessedRasters {
     transform: [f64; 6],
 }
 
+/// Public Géoplateforme WFS. Layer `IGNF_NUAGES-DE-POINTS-LIDAR-HD:dalle` was removed
+/// (HTTP 400 XML `Unknown namespace`); tile index is now metadata with `url_npl`.
+const LIDAR_WFS_URL: &str = "https://data.geopf.fr/wfs/ows";
+const LIDAR_WFS_TYPENAME: &str = "IGNF_LIDAR-HD_METADONNEE:metadata";
+
+fn fetch_lidar_wfs_json(bbox: &str) -> Result<serde_json::Value> {
+    let params = [
+        ("service", "WFS"),
+        ("version", "2.0.0"),
+        ("request", "GetFeature"),
+        ("typeNames", LIDAR_WFS_TYPENAME),
+        ("outputFormat", "application/json"),
+        ("bbox", bbox),
+    ];
+    let response = reqwest::blocking::Client::new()
+        .get(LIDAR_WFS_URL)
+        .query(&params)
+        .header("Accept", "application/json")
+        .send()
+        .context("Failed to send WFS request")?;
+    let status = response.status();
+    let text = response
+        .text()
+        .context("Failed to read WFS response body")?;
+    if !status.is_success() {
+        anyhow::bail!(
+            "WFS request failed ({}): {}",
+            status,
+            truncate_for_error(&text, 400)
+        );
+    }
+    serde_json::from_str(&text).with_context(|| {
+        format!(
+            "Failed to parse WFS JSON response: {}",
+            truncate_for_error(&text, 300)
+        )
+    })
+}
+
+fn truncate_for_error(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        trimmed.to_string()
+    } else {
+        format!("{}…", trimmed.chars().take(max_chars).collect::<String>())
+    }
+}
+
+fn lidar_tile_url_from_feature(feature: &serde_json::Value) -> Option<String> {
+    let props = feature.get("properties")?;
+    props
+        .get("url_npl")
+        .or_else(|| props.get("url"))
+        .and_then(|u| u.as_str())
+        .map(str::to_string)
+}
+
+fn parse_wfs_tile_urls(json: &serde_json::Value) -> Vec<String> {
+    json.get("features")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(lidar_tile_url_from_feature)
+        .collect()
+}
+
 impl Lidar {
     pub fn new(
         output_path: Option<String>,
@@ -1866,44 +1932,14 @@ impl Lidar {
         let (max_x, max_y) = transformer
             .convert((bbox.max_x, bbox.max_y))
             .context("Failed to transform max coordinates")?;
+        // WFS 2.0 default axis order is lat,lon for EPSG:4326.
         let bbox_string = format!(
             "{},{},{},{}",
             bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x
         );
-        let url = "https://data.geopf.fr/wfs/ows";
-        let params = [
-            ("service", "WFS"),
-            ("version", "2.0.0"),
-            ("request", "GetFeature"),
-            ("typeName", "IGNF_NUAGES-DE-POINTS-LIDAR-HD:dalle"),
-            ("outputFormat", "application/json"),
-            ("bbox", &bbox_string),
-        ];
         println!("🌐 Requesting LiDAR data from WFS...");
-        let response = reqwest::blocking::Client::new()
-            .get(url)
-            .query(&params)
-            .header("Accept", "application/json")
-            .send()
-            .context("Failed to send WFS request")?;
-        let json: serde_json::Value = response
-            .json()
-            .context("Failed to parse WFS JSON response")?;
-        let mut list_path_laz = Vec::new();
-        if let Some(features) = json
-            .get("features")
-            .and_then(|f: &serde_json::Value| f.as_array())
-        {
-            for feature in features {
-                if let Some(url) = feature
-                    .get("properties")
-                    .and_then(|p: &serde_json::Value| p.get("url"))
-                    .and_then(|u: &serde_json::Value| u.as_str())
-                {
-                    list_path_laz.push(url.to_string());
-                }
-            }
-        }
+        let json = fetch_lidar_wfs_json(&bbox_string)?;
+        let list_path_laz = parse_wfs_tile_urls(&json);
         println!("📍 Found {} LAZ file(s)", list_path_laz.len());
         println!("CRS: {}", self.geo_core.get_epsg());
         self.list_path_laz = Some(list_path_laz.clone());
@@ -2415,6 +2451,24 @@ mod tests {
         let copc = lidar.list_copc_urls().unwrap();
         assert_eq!(copc, vec![ign.to_string()]);
         assert_eq!(lidar.list_laz_urls().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_parse_wfs_tile_urls_prefers_url_npl() {
+        let json = serde_json::json!({
+            "features": [
+                {"properties": {"url_npl": "https://example.com/a.copc.laz", "url": "https://old"}},
+                {"properties": {"url": "https://example.com/legacy.laz"}},
+                {"properties": {}}
+            ]
+        });
+        assert_eq!(
+            parse_wfs_tile_urls(&json),
+            vec![
+                "https://example.com/a.copc.laz".to_string(),
+                "https://example.com/legacy.laz".to_string()
+            ]
+        );
     }
 
     #[test]

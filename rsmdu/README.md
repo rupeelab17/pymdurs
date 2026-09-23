@@ -605,7 +605,7 @@ The library integrates with the French IGN (Institut Géographique National) Gé
 - `water`: Water bodies (BDTOPO_V3:plan_d_eau)
 - `cadastre`: Cadastral parcels (CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle)
 - `iris`: IRIS statistical units (STATISTICALUNITS.IRIS:contours_iris)
-- `lidar`: LiDAR point cloud data (IGNF_LIDAR-HD_TA:nuage-dalle)
+- `lidar`: LiDAR point cloud data (IGNF_LIDAR-HD_METADONNEE:metadata)
 - `vegetation`: Vegetation zones
 - `hydrographique`: Hydrographic details
 

@@ -1,6 +1,6 @@
 [package]
 name = "rsmdu"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 description = "Rust transpilation of pymdu (Python Urban Data Model) - Core library"
 license = "GPL-3.0"
@@ -33,6 +33,8 @@ rstar = "0.12"
 
 # Data processing
 polars = { version = "0.51", features = ["lazy", "temporal", "strings"], optional = true }
+# polars-arrow pulls this; 1.5.2 transmutes () into TryFromIntError (E0512 on rustc 1.97+)
+ethnum = "1.5.3"
 
 # HTTP and serialization
 # Use rustls instead of default-tls (OpenSSL) for manylinux CI compatibility
