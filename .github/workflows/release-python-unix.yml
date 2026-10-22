@@ -10,6 +10,12 @@ on:
         description: Dry run
         type: boolean
         default: false
+      windows-run-id:
+        description: >-
+          Run ID de "Release Python (Windows)" lancé en dry-run sur le même SHA
+          (obligatoire hors dry-run)
+        type: string
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.sha || github.sha }}
@@ -157,8 +163,96 @@ jobs:
           name: wheel-${{ matrix.os }}-${{ matrix.architecture }}
           path: dist/*.whl
 
+  # ---------------------------------------------------------------------------
+  # Wheel Windows : construit par release-python-windows.yml (lancé en
+  # dry-run, donc sans publication), récupéré ici pour que les 5 fichiers de
+  # la release soient publiés par ce seul workflow (provenance cohérente).
+  # ---------------------------------------------------------------------------
+  fetch-windows-wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check inputs
+        env:
+          RUN_ID: ${{ inputs.windows-run-id }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          if [ -z "$RUN_ID" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "::notice::Pas de windows-run-id : dry-run sans wheel Windows."
+            else
+              echo "::error::windows-run-id est obligatoire hors dry-run."
+              exit 1
+            fi
+          fi
+
+      - name: Checkout
+        if: inputs.windows-run-id != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Verify Windows run
+        if: inputs.windows-run-id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.windows-run-id }}
+          EXPECTED_SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          run_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")
+          path=$(jq -r '.path' <<<"$run_json")
+          event=$(jq -r '.event' <<<"$run_json")
+          status=$(jq -r '.status' <<<"$run_json")
+          conclusion=$(jq -r '.conclusion' <<<"$run_json")
+          head_sha=$(jq -r '.head_sha' <<<"$run_json")
+          echo "Run $RUN_ID : path=$path event=$event status=$status conclusion=$conclusion head_sha=$head_sha"
+          case "$path" in
+            .github/workflows/release-python-windows.yml*) ;;
+            *) echo "::error::Le run $RUN_ID ne vient pas de release-python-windows.yml ($path)"; exit 1 ;;
+          esac
+          [ "$event" = "workflow_dispatch" ] || { echo "::error::Run non lancé par workflow_dispatch ($event)"; exit 1; }
+          [ "$status" = "completed" ] && [ "$conclusion" = "success" ] \
+            || { echo "::error::Run Windows non terminé avec succès ($status/$conclusion)"; exit 1; }
+          # head_sha = tête de branche au moment du dispatch, pas forcément l'input sha.
+          if [ "$head_sha" != "$EXPECTED_SHA" ]; then
+            echo "::warning::head_sha du run Windows ($head_sha) différent de $EXPECTED_SHA — vérifier que le même sha a été passé en input."
+          fi
+
+      - name: Download Windows wheel
+        if: inputs.windows-run-id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-windows-x86_64
+          path: dist
+          run-id: ${{ inputs.windows-run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Check wheel version
+        if: inputs.windows-run-id != ''
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m 1 -oP 'version = "\K[^"]+' pyproject.toml)
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          [ "${#wheels[@]}" -eq 1 ] || { echo "::error::Attendu 1 wheel, trouvé ${#wheels[@]}"; ls -l dist; exit 1; }
+          expected="dist/pymdurs-${VERSION}-cp312-abi3-win_amd64.whl"
+          [ "${wheels[0]}" = "$expected" ] \
+            || { echo "::error::Wheel ${wheels[0]} ≠ attendu $expected"; exit 1; }
+          sha256sum "${wheels[0]}"
+
+      - name: Upload Windows wheel
+        if: inputs.windows-run-id != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-windows-x86_64
+          path: dist/*.whl
+
   publish-to-pypi:
-    needs: [build-sdist, build-wheels]
+    needs: [build-sdist, build-wheels, fetch-windows-wheel]
     environment:
       name: release-python
       url: https://pypi.org/project/pymdurs
@@ -172,6 +266,20 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Check release contents
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          ls -l dist
+          n_sdist=$(ls dist/*.tar.gz 2>/dev/null | wc -l)
+          n_whl=$(ls dist/*.whl 2>/dev/null | wc -l)
+          n_win=$(ls dist/*win_amd64.whl 2>/dev/null | wc -l)
+          echo "sdist=$n_sdist wheels=$n_whl (dont windows=$n_win)"
+          if [ "$DRY_RUN" != "true" ]; then
+            [ "$n_sdist" -eq 1 ] && [ "$n_whl" -eq 4 ] && [ "$n_win" -eq 1 ] \
+              || { echo "::error::Release incomplète : attendu 1 sdist + 4 wheels dont 1 Windows"; exit 1; }
+          fi
 
       - name: Publish to PyPI
         if: inputs.dry-run == false
