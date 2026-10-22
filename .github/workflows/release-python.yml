@@ -1,4 +1,4 @@
-name: Release Python (Unix)
+name: Release Python
 
 on:
   workflow_dispatch:
