@@ -9,7 +9,7 @@ homepage = "https://github.com/rupeelab17/pymdurs"
 documentation = "https://github.com/rupeelab17/pymdurs#readme"
 
 [features]
-default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "laz", "zip", "tempfile", "geos", "chrono", "quick-xml", "indicatif", "rayon", "laz-memmap", "ndarray"]
+default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "laz", "zip", "tempfile", "geos", "chrono", "quick-xml", "progressbar", "rayon", "laz-memmap", "ndarray"]
 wasm = []
 umep = []
 gdal_src = ["gdal/gdal-src"]
@@ -17,6 +17,10 @@ gdal_src = ["gdal/gdal-src"]
 laz-memmap = ["memmap2"]
 # COPC (Cloud Optimized Point Cloud) support via las::copc::CopcEntryReader
 lidar-copc = []
+# Headless wgpu compute for LiDAR DSM/DTM max-Z binning (same stack as UMEP solweig)
+gpu = ["wgpu", "pollster", "bytemuck"]
+# Progress bars via the indicatif crate
+progressbar = ["dep:indicatif"]
 
 [dependencies]
 # GeoRust ecosystem
@@ -65,6 +69,11 @@ las = { version = "0.11", features = ["laz-parallel"], optional = true }
 # "copc" feature enabled via lidar-copc for CopcEntryReader
 laz = { version = "0.13", optional = true }
 memmap2 = { version = "0.9", optional = true }
+
+# Optional GPU compute (feature = "gpu") — aligned with UMEP-dev/solweig
+wgpu = { version = "27.0", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1.24", optional = true, features = ["derive"] }
 
 
 # [[bin]]

@@ -13,6 +13,8 @@ default = ["extension-module", "lidar-copc"]
 extension-module = ["pyo3/extension-module"]
 # COPC (Cloud Optimized Point Cloud) support via las::copc::CopcEntryReader
 lidar-copc = ["rsmdu/lidar-copc"]
+# Headless wgpu compute for LiDAR DSM/DTM max-Z binning
+gpu = ["rsmdu/gpu"]
 
 [lib]
 name = "pymdurs"
