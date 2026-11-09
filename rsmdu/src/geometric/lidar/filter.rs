@@ -23,7 +23,7 @@ impl Lidar {
                 .cloned()
                 .collect();
         }
-        println!("  Building spatial index for {} points...", point_count);
+        tracing::info!("  Building spatial index for {} points...", point_count);
         let start = std::time::Instant::now();
         let query_area = (x_max - x_min) * (y_max - y_min);
         let sample_size = (point_count / 100).max(100).min(point_count);
@@ -45,15 +45,15 @@ impl Lidar {
         } else {
             1.0
         };
-        println!("  📐 Query selectivity: {:.1}%", selectivity * 100.0);
+        tracing::info!("  📐 Query selectivity: {:.1}%", selectivity * 100.0);
         let result = if selectivity > 0.5 || point_count < 100_000 {
             let cell_size = ((data_max_x - data_min_x) / 100.0)
                 .max((data_max_y - data_min_y) / 100.0)
                 .max(10.0);
             let grid_index = SpatialGridIndex::build_from_points(points, cell_size);
-            println!("  {}", grid_index.stats());
+            tracing::info!("  {}", grid_index.stats());
             let candidate_indices = grid_index.query_bbox(x_min, y_min, x_max, y_max);
-            println!(
+            tracing::info!(
                 "  🔍 Grid query returned {} candidates",
                 candidate_indices.len()
             );
@@ -70,9 +70,9 @@ impl Lidar {
                 .collect()
         } else {
             let quadtree = QuadtreeSpatialIndex::build(points);
-            println!("  {}", quadtree.stats());
+            tracing::info!("  {}", quadtree.stats());
             let candidate_indices = quadtree.query_bbox(x_min, y_min, x_max, y_max);
-            println!(
+            tracing::info!(
                 "  🔍 Quadtree query returned {} candidates",
                 candidate_indices.len()
             );
@@ -88,7 +88,7 @@ impl Lidar {
                 })
                 .collect()
         };
-        println!(
+        tracing::info!(
             "  Spatial indexing and query took {:.2}s",
             start.elapsed().as_secs_f64()
         );
@@ -107,7 +107,7 @@ impl Lidar {
         if point_count < 1_000_000 {
             return Self::filter_points_with_spatial_index(points, x_min, y_min, x_max, y_max);
         }
-        println!(
+        tracing::info!(
             "  🚀 Using parallel spatial indexing for {} points...",
             point_count
         );
@@ -119,7 +119,7 @@ impl Lidar {
             .map(|chunk| Self::filter_points_with_spatial_index(chunk, x_min, y_min, x_max, y_max))
             .collect();
         let result: Vec<LidarPoint> = results.into_iter().flatten().collect();
-        println!(
+        tracing::info!(
             "  Parallel spatial filtering took {:.2}s",
             start.elapsed().as_secs_f64()
         );

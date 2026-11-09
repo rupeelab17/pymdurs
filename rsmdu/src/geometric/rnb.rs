@@ -111,16 +111,11 @@ impl Rnb {
             "{},{},{},{}",
             bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y
         );
-        println!("RNB API bbox parameter: {}", bbox_param);
-        println!("RNB API URL: {}", url);
+        tracing::info!("RNB API bbox parameter: {}", bbox_param);
+        tracing::info!("RNB API URL: {}", url);
 
-        // Make HTTP request
-        // Python: response = requests.get(url=url, headers=headers, params=payload, verify=False)
-        let client = reqwest::blocking::Client::builder()
-            .danger_accept_invalid_certs(true) // Python: verify=False
-            .build()
-            .context("Failed to create HTTP client")?;
-
+        // Python: requests.get(..., verify=False)
+        let client = crate::commons::http::rnb()?;
         let response = client
             .get(url)
             .header("Content-type", "application/json")
@@ -267,11 +262,11 @@ impl Rnb {
         std::fs::write(&output_file, geojson_str)
             .context(format!("Failed to write GeoJSON file: {:?}", output_file))?;
 
-        println!(
+        tracing::info!(
             "RNB saved to: {:?} (as GeoJSON - GeoJSON export temporarily disabled)",
             output_file
         );
-        println!("  TODO: Implement full GeoJSON export using GDAL");
+        tracing::info!("  TODO: Implement full GeoJSON export using GDAL");
 
         Ok(())
     }

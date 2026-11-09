@@ -32,23 +32,6 @@ fn lidar_hd_csv_typename(typename: &str) -> String {
     typename.replace(".LAMB93", ".SHADOW")
 }
 
-/// Client HTTP pour l'IGN : réponses WFS/WMS volumineuses, téléchargements longs.
-fn ign_http_client() -> Result<Client> {
-    Client::builder()
-        // Pas de timeout global par défaut sur `Client::new()` ; les bâtiments WFS peuvent
-        // dépasser plusieurs minutes sur une bbox dense.
-        .timeout(Duration::from_secs(900))
-        .connect_timeout(Duration::from_secs(120))
-        .user_agent(concat!(
-            "Mozilla/5.0 (compatible; pymdurs/0.1; ",
-            "+https://github.com/rupeelab17/pymdurs)"
-        ))
-        // Évite des coupures de flux observées avec HTTP/2 sur certains CDN.
-        .http1_only()
-        .build()
-        .context("Failed to build HTTP client for IGN requests")
-}
-
 /// CSV row structure for IGN services
 #[derive(Debug, Clone)]
 pub struct IgnServiceRow {
@@ -280,9 +263,9 @@ impl IgnCollect {
 
         let bbox = self
             .bbox
-            .context("Bounding box must be set before executing IGN request")?;
+            .context("Bounding box must be set cdbefore executing IGN request")?;
 
-        println!("Bbox: {:?}", bbox);
+        tracing::info!("Bbox: {:?}", bbox);
 
         // Get URL from CSV following Python implementation
         // Python: row = self.df_csv_file.loc[(self.df_csv_file.index == self.ign_keys[key])]
@@ -291,7 +274,7 @@ impl IgnCollect {
             .get_row_ressource(key)
             .context(format!("No CSV row found for key: {}", key))?;
 
-        println!("Row: {:?}", row);
+        tracing::info!("Row: {:?}", row);
 
         // Extract base URL from Géoplateforme URL (remove GetCapabilities part)
         // Following Python: url.split("&REQUEST=GetCapabilities")[0]
@@ -314,9 +297,9 @@ impl IgnCollect {
             row.url_geoplateforme.clone()
         };
 
-        println!("URL: {}", url);
+        tracing::info!("URL: {}", url);
 
-        let client = ign_http_client()?;
+        let client = crate::commons::http::ign()?;
 
         // Handle different service types based on key
         if matches!(
@@ -394,7 +377,7 @@ impl IgnCollect {
         // Add maxfeatures and startindex (following Python: startindex=0, maxfeatures=10000)
         request_url.push_str("&STARTINDEX=0&MAXFEATURES=10000");
 
-        println!("Request URL WFS: {}", request_url);
+        tracing::info!("Request URL WFS: {}", request_url);
 
         let response = client
             .get(&request_url)
@@ -471,7 +454,7 @@ impl IgnCollect {
         let mut height_px = (height_m / resolution) as u32;
 
         if width_px > WMS_MAX_DIMENSION || height_px > WMS_MAX_DIMENSION {
-            eprintln!(
+            tracing::warn!(
                 "Warning: WMS size {width_px}x{height_px} px exceeds IGN limit ({WMS_MAX_DIMENSION} px). \
                  Dimensions capped — reduce the bounding box for 1 m/px resolution."
             );
@@ -479,7 +462,7 @@ impl IgnCollect {
                 .max(height_px as f64 / WMS_MAX_DIMENSION as f64);
             width_px = ((width_px as f64 / scale).floor() as u32).max(1);
             height_px = ((height_px as f64 / scale).floor() as u32).max(1);
-            eprintln!(
+            tracing::warn!(
                 "Warning: using capped WMS size {width_px}x{height_px} px \
                  (~{:.2} m/px effective resolution).",
                 width_m / width_px as f64
@@ -549,7 +532,7 @@ impl IgnCollect {
             )
         };
 
-        println!("Request URL WMS: {}", request_url);
+        tracing::info!("Request URL WMS: {}", request_url);
 
         const WMS_RETRY_ATTEMPTS: u32 = 3;
         let mut last_error = String::new();
@@ -574,7 +557,7 @@ impl IgnCollect {
             let retryable = lidar_hd && (status.as_u16() == 400 || status.as_u16() == 502);
 
             if retryable && attempt < WMS_RETRY_ATTEMPTS {
-                eprintln!(
+                tracing::warn!(
                     "Warning: LiDAR HD WMS attempt {}/{} failed with {} — retrying...",
                     attempt, WMS_RETRY_ATTEMPTS, status
                 );
@@ -608,11 +591,11 @@ impl IgnCollect {
             // GDAL can read a wider variety of GeoTIFF formats
             match gdal::Dataset::open(&output_path) {
                 Ok(_dataset) => {
-                    println!("Saved and validated GeoTIFF: {:?}", output_path);
+                    tracing::info!("Saved and validated GeoTIFF: {:?}", output_path);
                 }
                 Err(e) => {
-                    eprintln!("Warning: File saved but GeoTIFF validation failed: {}", e);
-                    eprintln!("  File may still be valid but GDAL couldn't read it");
+                    tracing::warn!("Warning: File saved but GeoTIFF validation failed: {}", e);
+                    tracing::warn!("  File may still be valid but GDAL couldn't read it");
                 }
             }
         }

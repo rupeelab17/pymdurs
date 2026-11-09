@@ -106,6 +106,7 @@ fn test_process_heights() {
 }
 
 #[test]
+#[cfg(feature = "polars")]
 fn test_to_polars_df() {
     let mut collection = BuildingCollection::new_simple(None);
 

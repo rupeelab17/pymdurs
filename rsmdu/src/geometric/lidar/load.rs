@@ -3,10 +3,9 @@
 use anyhow::{Context, Result};
 use proj::Proj;
 use std::path::Path;
-use std::time::Instant;
 
 use super::io::*;
-use super::types::{classification_to_u8, log_timing, Lidar, LidarPoint};
+use super::types::{classification_to_u8, Lidar, LidarPoint, TimingSpan};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -68,14 +67,14 @@ impl Lidar {
             }
             anyhow::anyhow!("Failed to create LAS reader for {}: {}", url, e)
         };
-        let t_io = Instant::now();
+        let t_io = TimingSpan::enter("download_or_cache_read");
         let mut reader = if cache_path.exists() {
             match Self::verify_cached_file(&cache_path) {
                 Ok(true) => {
-                    println!("Reading LAZ from cache: {:?}", cache_path);
+                    tracing::info!("Reading LAZ from cache: {:?}", cache_path);
                 }
                 Ok(false) | Err(_) => {
-                    eprintln!("  Cached file appears corrupted, removing...");
+                    tracing::warn!("  Cached file appears corrupted, removing...");
                     let _ = std::fs::remove_file(&cache_path);
                 }
             }
@@ -100,40 +99,32 @@ impl Lidar {
                 #[cfg(not(feature = "laz-memmap"))]
                 las::Reader::from_path(&cache_path).map_err(map_reader_err)?
             } else {
-                println!("🌐 Downloading LAZ: {} ...", url);
-                let client = reqwest::blocking::Client::builder()
-                    .connect_timeout(std::time::Duration::from_secs(30))
-                    .timeout(std::time::Duration::from_secs(600))
-                    .build()
-                    .context("Failed to create HTTP client")?;
-                let compressed_data = Self::download_with_verification(&client, url, &cache_path)?;
+                tracing::info!("🌐 Downloading LAZ: {} ...", url);
+                let client = crate::commons::http::download()?;
+                let compressed_data = Self::download_with_verification(client, url, &cache_path)?;
                 las::Reader::new(Cursor::new(compressed_data)).map_err(map_reader_err)?
             }
         } else {
-            println!("🌐 Downloading LAZ: {} ...", url);
-            let client = reqwest::blocking::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .timeout(std::time::Duration::from_secs(600))
-                .build()
-                .context("Failed to create HTTP client")?;
-            let compressed_data: Vec<u8> = match Self::download_laz_via_range(&client, url) {
+            tracing::info!("🌐 Downloading LAZ: {} ...", url);
+            let client = crate::commons::http::download()?;
+            let compressed_data: Vec<u8> = match Self::download_laz_via_range(client, url) {
                 Ok(data) => {
                     if data.len() < 4 || &data[0..4] != b"LASF" {
                         return Err(anyhow::anyhow!("Downloaded file is not a valid LAS/LAZ"));
                     }
                     std::fs::write(&cache_path, &data).context("Failed to write LAZ cache")?;
-                    println!("  Cached to: {:?}", cache_path);
+                    tracing::info!("  Cached to: {:?}", cache_path);
                     data
                 }
-                Err(_) => Self::download_with_verification(&client, url, &cache_path)?,
+                Err(_) => Self::download_with_verification(client, url, &cache_path)?,
             };
             las::Reader::new(Cursor::new(compressed_data)).map_err(map_reader_err)?
         };
-        log_timing("download_or_cache_read", t_io.elapsed(), None);
+        drop(t_io);
 
-        let t_decomp = Instant::now();
+        let mut t_decomp = TimingSpan::enter("decompress_parse");
         let point_count = reader.header().number_of_points() as usize;
-        println!("  Header declares {} points", point_count);
+        tracing::info!("  Header declares {} points", point_count);
         let point_data = reader
             .read_all()
             .map_err(|e| anyhow::anyhow!("Failed to read LAZ points: {}", e))?;
@@ -143,7 +134,7 @@ impl Lidar {
                 raw_points.push(p);
             }
         }
-        println!("  Read {} points", raw_points.len());
+        tracing::info!("  Read {} points", raw_points.len());
 
         #[cfg(feature = "rayon")]
         let all_points: Vec<LidarPoint> = raw_points
@@ -166,13 +157,10 @@ impl Lidar {
                 classification: classification_to_u8(&p.classification),
             })
             .collect();
-        log_timing(
-            "decompress_parse",
-            t_decomp.elapsed(),
-            Some(all_points.len()),
-        );
+        t_decomp.set_points(all_points.len());
+        drop(t_decomp);
 
-        let t_filter = Instant::now();
+        let mut t_filter = TimingSpan::enter("filter");
         let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
             #[cfg(feature = "rayon")]
             {
@@ -191,8 +179,8 @@ impl Lidar {
         } else {
             all_points
         };
-        log_timing("filter", t_filter.elapsed(), Some(file_points.len()));
-        println!("  Loaded {} points after spatial filter", file_points.len());
+        t_filter.set_points(file_points.len());
+        tracing::info!("  Loaded {} points after spatial filter", file_points.len());
         Ok(file_points)
     }
 
@@ -201,7 +189,7 @@ impl Lidar {
             .geo_core
             .get_bbox()
             .context("Bounding box must be set before getting LiDAR points")?;
-        println!("Bounding box set");
+        tracing::info!("Bounding box set");
         let transformer = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
             .context("Failed to create coordinate transformer")?;
         let (min_x, min_y) = transformer
@@ -215,11 +203,11 @@ impl Lidar {
             "{},{},{},{}",
             bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x
         );
-        println!("🌐 Requesting LiDAR data from WFS...");
+        tracing::info!("🌐 Requesting LiDAR data from WFS...");
         let json = fetch_lidar_wfs_json(&bbox_string)?;
         let list_path_laz = parse_wfs_tile_urls(&json);
-        println!("📍 Found {} LAZ file(s)", list_path_laz.len());
-        println!("CRS: {}", self.geo_core.get_epsg());
+        tracing::info!("📍 Found {} LAZ file(s)", list_path_laz.len());
+        tracing::info!("CRS: {}", self.geo_core.get_epsg());
         self.list_path_laz = Some(list_path_laz.clone());
         Ok((min_x, min_y, max_x, max_y, list_path_laz))
     }
@@ -255,7 +243,7 @@ impl Lidar {
 
             // --- COPC séquentiel avec retry/backoff ---
             for (idx, url) in copc_urls.iter().enumerate() {
-                println!("\n📦 COPC {}/{}: {}", idx + 1, copc_urls.len(), url);
+                tracing::info!("\n📦 COPC {}/{}: {}", idx + 1, copc_urls.len(), url);
                 let mut attempt = 0u32;
                 let mut tile_points = 0usize;
                 loop {
@@ -263,7 +251,7 @@ impl Lidar {
                     match self.load_single_copc_file(url, &cache_dir, filter_bbox) {
                         Ok(pts) => {
                             tile_points = pts.len();
-                            println!("  ✅ {} points chargés", tile_points);
+                            tracing::info!("  ✅ {} points chargés", tile_points);
                             all_points.extend(pts);
                             break;
                         }
@@ -275,13 +263,13 @@ impl Lidar {
                                 || msg.contains("connection reset");
                             if retryable && attempt < 5 {
                                 let wait = 2u64.pow(attempt);
-                                eprintln!(
+                                tracing::warn!(
                                     "  ⚠️  Erreur (tentative {}/5): {}. Retry dans {}s...",
                                     attempt, msg, wait
                                 );
                                 std::thread::sleep(std::time::Duration::from_secs(wait));
                             } else {
-                                eprintln!("  ❌ Échec COPC après {} tentative(s): {}", attempt, e);
+                                tracing::warn!("  ❌ Échec COPC après {} tentative(s): {}", attempt, e);
                                 break;
                             }
                         }
@@ -330,7 +318,7 @@ impl Lidar {
             if all_points.is_empty() {
                 anyhow::bail!("No LiDAR points were loaded from any file");
             }
-            println!("Total points loaded: {}", all_points.len());
+            tracing::info!("Total points loaded: {}", all_points.len());
             return Ok(all_points);
         }
 
@@ -351,7 +339,7 @@ impl Lidar {
             };
 
             for (idx, url) in laz_urls.iter().enumerate() {
-                println!("\nProcessing file {}/{}: {}", idx + 1, laz_urls.len(), url);
+                tracing::info!("\nProcessing file {}/{}: {}", idx + 1, laz_urls.len(), url);
                 let mut attempt = 0u32;
                 let mut tile_points = 0usize;
                 loop {
@@ -359,7 +347,7 @@ impl Lidar {
                     match self.load_single_point_file(url, &cache_dir, filter_bbox) {
                         Ok(points) => {
                             tile_points = points.len();
-                            println!("  Loaded {} points", tile_points);
+                            tracing::info!("  Loaded {} points", tile_points);
                             all_points.extend(points);
                             break;
                         }
@@ -371,10 +359,10 @@ impl Lidar {
                                     || msg.contains("timed out"));
                             if retryable && attempt < 5 {
                                 let wait = 2u64.pow(attempt);
-                                eprintln!("  ⚠️  Retry {}/5 dans {}s: {}", attempt, wait, msg);
+                                tracing::warn!("  ⚠️  Retry {}/5 dans {}s: {}", attempt, wait, msg);
                                 std::thread::sleep(std::time::Duration::from_secs(wait));
                             } else {
-                                eprintln!("  ❌ Failed to load: {}", e);
+                                tracing::warn!("  ❌ Failed to load: {}", e);
                                 break;
                             }
                         }
@@ -398,7 +386,7 @@ impl Lidar {
             if all_points.is_empty() {
                 anyhow::bail!("No LiDAR points were loaded from any file");
             }
-            println!("\nTotal points loaded: {}", all_points.len());
+            tracing::info!("\nTotal points loaded: {}", all_points.len());
             Ok(all_points)
         }
     }
@@ -417,7 +405,7 @@ impl Lidar {
             return Ok(());
         }
         for url in &empty {
-            eprintln!("  ⚠️  Tile returned 0 points: {}", url);
+            tracing::warn!("  ⚠️  Tile returned 0 points: {}", url);
         }
         let loaded = tile_point_counts.iter().filter(|(_, n)| *n > 0).count();
         let threshold = laz_urls.len().div_ceil(2);

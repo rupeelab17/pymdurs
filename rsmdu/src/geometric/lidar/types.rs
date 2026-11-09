@@ -18,12 +18,54 @@ pub(super) fn log_timing_backend(
     backend: Option<&str>,
 ) {
     let ms = elapsed.as_secs_f64() * 1000.0;
-    let backend = backend
-        .map(|b| format!(" backend={b}"))
-        .unwrap_or_default();
-    match points {
-        Some(n) => eprintln!("lidar_timing stage={stage} ms={ms:.2} points={n}{backend}"),
-        None => eprintln!("lidar_timing stage={stage} ms={ms:.2}{backend}"),
+    match (points, backend) {
+        (Some(n), Some(b)) => {
+            tracing::info!(target: "rsmdu::lidar_timing", stage, ms, points = n, backend = b, "lidar_timing")
+        }
+        (Some(n), None) => {
+            tracing::info!(target: "rsmdu::lidar_timing", stage, ms, points = n, "lidar_timing")
+        }
+        (None, Some(b)) => {
+            tracing::info!(target: "rsmdu::lidar_timing", stage, ms, backend = b, "lidar_timing")
+        }
+        (None, None) => {
+            tracing::info!(target: "rsmdu::lidar_timing", stage, ms, "lidar_timing")
+        }
+    }
+}
+
+/// Enter a timing span; emits [`log_timing_backend`] on drop.
+pub(super) struct TimingSpan {
+    stage: &'static str,
+    start: std::time::Instant,
+    points: Option<usize>,
+    backend: Option<&'static str>,
+    _span: tracing::span::EnteredSpan,
+}
+
+impl TimingSpan {
+    pub fn enter(stage: &'static str) -> Self {
+        Self {
+            stage,
+            start: std::time::Instant::now(),
+            points: None,
+            backend: None,
+            _span: tracing::info_span!(target: "rsmdu::lidar_timing", "lidar_timing", stage).entered(),
+        }
+    }
+
+    pub fn set_points(&mut self, n: usize) {
+        self.points = Some(n);
+    }
+
+    pub fn set_backend(&mut self, b: &'static str) {
+        self.backend = Some(b);
+    }
+}
+
+impl Drop for TimingSpan {
+    fn drop(&mut self) {
+        log_timing_backend(self.stage, self.start.elapsed(), self.points, self.backend);
     }
 }
 

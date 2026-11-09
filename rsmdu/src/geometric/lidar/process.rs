@@ -2,10 +2,9 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use super::raster::{chm_cpu, fill_dtm_cpu, rasterize_max_z_cpu, to_rows, ClassMask};
-use super::types::{log_timing_backend, DtmFill, Lidar, LidarPoint, ProcessedRasters};
+use super::types::{DtmFill, Lidar, LidarPoint, ProcessedRasters, TimingSpan};
 
 #[cfg(feature = "gpu")]
 use super::gpu::{rasterize_fill_chm_gpu, GPU_MIN_POINTS};
@@ -28,10 +27,10 @@ pub(super) fn compute_rasters(
                     let widen = |v: Vec<f32>| v.into_iter().map(f64::from).collect::<Vec<f64>>();
                     return (widen(r.dsm), widen(r.dtm), widen(r.chm), "gpu");
                 }
-                Err(e) => println!("  GPU raster fallback to CPU: {e}"),
+                Err(e) => tracing::info!("  GPU raster fallback to CPU: {e}"),
             }
         } else {
-            println!(
+            tracing::info!(
                 "  CPU raster ({} points, below GPU_MIN_POINTS)",
                 points.len()
             );
@@ -39,13 +38,19 @@ pub(super) fn compute_rasters(
     }
 
     let (x_min, _y_min, _x_max, y_max) = bbox;
-    let t = Instant::now();
-    let (dsm, dtm) = rasterize_max_z_cpu(points, mask, x_min, y_max, resolution, width, height);
-    log_timing_backend("rasterize", t.elapsed(), Some(points.len()), Some("cpu"));
-    let t = Instant::now();
-    let dtm_filled = fill_dtm_cpu(&dtm, width, height, fill);
-    let chm = chm_cpu(&dsm, &dtm_filled);
-    log_timing_backend("fill_chm", t.elapsed(), None, Some("cpu"));
+    let (dsm, dtm) = {
+        let mut t = TimingSpan::enter("rasterize");
+        t.set_points(points.len());
+        t.set_backend("cpu");
+        rasterize_max_z_cpu(points, mask, x_min, y_max, resolution, width, height)
+    };
+    let (dtm_filled, chm) = {
+        let mut t = TimingSpan::enter("fill_chm");
+        t.set_backend("cpu");
+        let filled = fill_dtm_cpu(&dtm, width, height, fill);
+        let chm = chm_cpu(&dsm, &filled);
+        (filled, chm)
+    };
     (dsm, dtm_filled, chm, "cpu")
 }
 
@@ -54,6 +59,7 @@ impl Lidar {
     ///
     /// The classification filter is applied inside the binning (CPU loop or GPU kernel),
     /// so the point cloud is never copied.
+    #[tracing::instrument(skip(self, points, classification_list), fields(stage = "raster_total"))]
     pub(super) fn process_lidar_points(
         &self,
         points: &[LidarPoint],
@@ -66,15 +72,16 @@ impl Lidar {
 
         let width = ((x_max - x_min) / resolution).ceil() as usize;
         let height = ((y_max - y_min) / resolution).ceil() as usize;
-        println!(
+        tracing::info!(
             "Grid dimensions: {}x{} (resolution: {}m, DTM fill: {:?})",
             width, height, resolution, self.dtm_fill
         );
 
-        let t = Instant::now();
+        let mut t = TimingSpan::enter("raster_total");
+        t.set_points(points.len());
         let (dsm, dtm, chm, backend) =
             compute_rasters(points, bbox, &mask, resolution, width, height, self.dtm_fill);
-        log_timing_backend("raster_total", t.elapsed(), Some(points.len()), Some(backend));
+        t.set_backend(backend);
 
         Ok(ProcessedRasters {
             dsm: to_rows(dsm, width, height),
@@ -141,7 +148,7 @@ impl Lidar {
                 band.set_no_data_value(Some(*nodata))
                     .context(format!("Failed to set nodata for band {}", band_idx + 1))?;
             }
-            println!("GeoTIFF saved to: {:?}", output_path);
+            tracing::info!("GeoTIFF saved to: {:?}", output_path);
         }
         Ok(output_path.to_path_buf())
     }

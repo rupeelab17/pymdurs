@@ -121,7 +121,7 @@ impl<K: RasterKind> LidarRaster<K> {
             self.path_save_tiff
         ))?;
 
-        println!("{} saved to: {:?}", K::LABEL, self.path_save_tiff);
+        tracing::info!("{} saved to: {:?}", K::LABEL, self.path_save_tiff);
         Ok(())
     }
 

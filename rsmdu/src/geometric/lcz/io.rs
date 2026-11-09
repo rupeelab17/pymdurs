@@ -18,13 +18,15 @@ impl Lcz {
     /// Download and extract ZIP file
     #[allow(dead_code)]
     pub(crate) fn download_and_extract_zip(&self, url: &str) -> Result<TempDir> {
-        // Télécharger le fichier
-        let response = reqwest::blocking::get(url).context("Échec du téléchargement")?;
+        let response = crate::commons::http::download()?
+            .get(url)
+            .send()
+            .context("Échec du téléchargement")?;
         let bytes = response.bytes().context("Impossible de lire les bytes")?;
 
         // Créer un dossier temporaire
         let temp_dir = TempDir::new().context("Impossible de créer un dossier temporaire")?;
-        println!("Dossier temporaire créé: {:?}", temp_dir.path());
+        tracing::info!("Dossier temporaire créé: {:?}", temp_dir.path());
 
         // Extraire le ZIP
         let cursor = Cursor::new(bytes);

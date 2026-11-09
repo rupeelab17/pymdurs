@@ -3,10 +3,8 @@
 use anyhow::{Context, Result};
 use laz::laszip::LazVlr;
 use std::path::Path;
-use std::time::Instant;
-
 use super::copc::*;
-use super::types::{classification_to_u8, log_timing, Lidar, LidarPoint};
+use super::types::{classification_to_u8, Lidar, LidarPoint, TimingSpan};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -22,36 +20,28 @@ impl Lidar {
         let cache_path = Self::cache_path_for_url(cache_dir, url);
 
         // --- 1. Obtenir les bytes (cache ou téléchargement) ---
-        let t_io = Instant::now();
+        let t_io = TimingSpan::enter("download_or_cache_read");
         let bytes: Vec<u8> = if cache_path.exists() {
             match Self::verify_cached_file(&cache_path) {
                 Ok(true) => {
-                    println!("Reading COPC from cache: {:?}", cache_path);
+                    tracing::info!("Reading COPC from cache: {:?}", cache_path);
                     std::fs::read(&cache_path).context("Failed to read cached COPC file")?
                 }
                 _ => {
-                    eprintln!("  Cached file appears corrupted, re-downloading...");
+                    tracing::warn!("  Cached file appears corrupted, re-downloading...");
                     let _ = std::fs::remove_file(&cache_path);
-                    let client = reqwest::blocking::Client::builder()
-                        .connect_timeout(std::time::Duration::from_secs(30))
-                        .timeout(std::time::Duration::from_secs(900))
-                        .build()
-                        .context("Failed to create HTTP client")?;
-                    Self::download_with_verification(&client, url, &cache_path)?
+                    let client = crate::commons::http::download()?;
+                    Self::download_with_verification(client, url, &cache_path)?
                 }
             }
         } else {
-            println!("🌐 Downloading COPC: {}", url);
-            let client = reqwest::blocking::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .timeout(std::time::Duration::from_secs(900))
-                .build()
-                .context("Failed to create HTTP client")?;
-            Self::download_with_verification(&client, url, &cache_path)?
+            tracing::info!("🌐 Downloading COPC: {}", url);
+            let client = crate::commons::http::download()?;
+            Self::download_with_verification(client, url, &cache_path)?
         };
-        log_timing("download_or_cache_read", t_io.elapsed(), None);
+        drop(t_io);
 
-        println!(
+        tracing::info!(
             "  File size: {} bytes ({:.2} MB)",
             bytes.len(),
             bytes.len() as f64 / 1_048_576.0
@@ -61,7 +51,7 @@ impl Lidar {
         let hdr = match parse_las14_header(&bytes) {
             Ok(h) => h,
             Err(e) => {
-                eprintln!(
+                tracing::warn!(
                     "  ⚠️  Pas un fichier LAS 1.4 valide ({}), fallback LAZ standard",
                     e
                 );
@@ -69,14 +59,14 @@ impl Lidar {
             }
         };
 
-        println!(
+        tracing::info!(
             "  LAS 1.4 | format={} record_len={} points={} vlrs={}",
             hdr.point_format, hdr.point_record_len, hdr.point_count, hdr.vlr_count
         );
 
         // Vérification : COPC supporte uniquement formats 6, 7, 8
         if hdr.point_format < 6 || hdr.point_format > 8 {
-            eprintln!(
+            tracing::warn!(
                 "  Format de point non supporté par COPC: {} (attendu 6-8), fallback LAZ",
                 hdr.point_format
             );
@@ -90,7 +80,7 @@ impl Lidar {
         const COPC_INFO_DATA_LEN: usize = 160;
 
         if bytes.len() < COPC_INFO_DATA_OFFSET + COPC_INFO_DATA_LEN {
-            eprintln!("  Fichier trop court pour COPC Info VLR, fallback LAZ standard");
+            tracing::warn!("  Fichier trop court pour COPC Info VLR, fallback LAZ standard");
             return Self::read_as_standard_laz(bytes, filter_bbox);
         }
 
@@ -98,9 +88,15 @@ impl Lidar {
         let first_vlr_user_id = std::str::from_utf8(&bytes[377..393])
             .unwrap_or("")
             .trim_end_matches('\0');
-        let first_vlr_record_id = ru16(&bytes, 393);
+        let first_vlr_record_id = match ru16(&bytes, 393) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!("  VLR record_id illisible: {}, fallback LAZ", e);
+                return Self::read_as_standard_laz(bytes, filter_bbox);
+            }
+        };
         if first_vlr_user_id != "copc" || first_vlr_record_id != 1 {
-            eprintln!(
+            tracing::warn!(
                 "  Premier VLR inattendu: user_id='{}' record_id={} (attendu 'copc'/1), fallback LAZ",
                 first_vlr_user_id, first_vlr_record_id
             );
@@ -112,16 +108,16 @@ impl Lidar {
         ) {
             Ok(i) => i,
             Err(e) => {
-                eprintln!("  Échec parse COPC Info VLR: {}, fallback LAZ standard", e);
+                tracing::warn!("  Échec parse COPC Info VLR: {}, fallback LAZ standard", e);
                 return Self::read_as_standard_laz(bytes, filter_bbox);
             }
         };
 
-        println!(
+        tracing::info!(
             "  COPC octree: centre=({:.1},{:.1},{:.1}) halfsize={:.1}",
             copc_info.center_x, copc_info.center_y, copc_info.center_z, copc_info.halfsize
         );
-        println!(
+        tracing::info!(
             "  Hiérarchie racine: offset={} size={}",
             copc_info.root_hier_offset, copc_info.root_hier_size
         );
@@ -130,7 +126,7 @@ impl Lidar {
         let laz_vlr = match find_laz_vlr(&bytes, hdr.vlr_count) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("  LazVlr introuvable: {}, fallback LAZ standard", e);
+                tracing::warn!("  LazVlr introuvable: {}, fallback LAZ standard", e);
                 return Self::read_as_standard_laz(bytes, filter_bbox);
             }
         };
@@ -139,7 +135,7 @@ impl Lidar {
         let all_entries = match read_all_hierarchy_entries(&bytes, &copc_info) {
             Ok(e) => e,
             Err(e) => {
-                eprintln!(
+                tracing::warn!(
                     "  Échec lecture hiérarchie COPC: {}, fallback LAZ standard",
                     e
                 );
@@ -147,12 +143,12 @@ impl Lidar {
             }
         };
 
-        println!("  Hiérarchie COPC: {} entrées totales", all_entries.len());
+        tracing::info!("  Hiérarchie COPC: {} entrées totales", all_entries.len());
 
         // --- 6. Filtrer les entrées qui intersectent le bbox ---
         let entries_to_process: Vec<&CopcEntry> =
             if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
-                println!(
+                tracing::info!(
                     "  Spatial filter: [{:.2}, {:.2}] -> [{:.2}, {:.2}]",
                     qx_min, qy_min, qx_max, qy_max
                 );
@@ -167,7 +163,7 @@ impl Lidar {
                 all_entries.iter().filter(|e| e.point_count > 0).collect()
             };
 
-        println!(
+        tracing::info!(
             "  {} entries à décompresser (sur {})",
             entries_to_process.len(),
             all_entries.len()
@@ -175,7 +171,7 @@ impl Lidar {
 
         let leaf_entry_count = all_entries.iter().filter(|e| e.point_count > 0).count();
         if entries_to_process.is_empty() && leaf_entry_count > 0 {
-            eprintln!(
+            tracing::warn!(
                 "  ⚠️  COPC spatial filter matched 0 chunks ({} leaf entries in hierarchy), falling back to full LAZ read",
                 leaf_entry_count
             );
@@ -183,37 +179,34 @@ impl Lidar {
         }
 
         // --- 7 & 8. Décompresser chaque chunk et décoder les points ---
-        let t_decomp = Instant::now();
+        let mut t_decomp = TimingSpan::enter("decompress_parse");
         let stats =
             Self::decompress_copc_entries(&bytes, &entries_to_process, &laz_vlr, &hdr, filter_bbox);
-        log_timing(
-            "decompress_parse",
-            t_decomp.elapsed(),
-            Some(stats.points.len()),
-        );
+        t_decomp.set_points(stats.points.len());
+        drop(t_decomp);
 
-        println!("  COPC Results:");
-        println!("     - Entries processed: {}", stats.entries_processed);
-        println!("     - Successfully read: {}", stats.entries_success);
+        tracing::info!("  COPC Results:");
+        tracing::info!("     - Entries processed: {}", stats.entries_processed);
+        tracing::info!("     - Successfully read: {}", stats.entries_success);
         if stats.entries_failed > 0 {
             let failure_rate = stats.entries_failed as f64 / stats.entries_processed.max(1) as f64;
-            println!(
+            tracing::info!(
                 "     - Failed to read: {} ({:.1}%)",
                 stats.entries_failed,
                 failure_rate * 100.0
             );
         }
-        println!("     - Points loaded: {}", stats.points.len());
+        tracing::info!("     - Points loaded: {}", stats.points.len());
 
         // --- 9. Fallback si taux d'échec trop élevé ou aucun point ---
         let failure_rate = stats.entries_failed as f64 / stats.entries_processed.max(1) as f64;
         if (failure_rate > 0.5 && stats.entries_processed > 0) || stats.points.is_empty() {
             if stats.points.is_empty() && stats.entries_processed > 0 {
-                eprintln!(
+                tracing::warn!(
                     "  ⚠️  COPC decompression returned 0 points, falling back to full LAZ read"
                 );
             } else if failure_rate > 0.5 {
-                eprintln!(
+                tracing::warn!(
                     "  High failure rate ({:.1}%), falling back to standard LAZ reader (using cached file)",
                     failure_rate * 100.0
                 );
@@ -236,7 +229,7 @@ impl Lidar {
         let chunk_start = entry.offset as usize;
         let chunk_end = chunk_start + entry.byte_size as usize;
         if chunk_end > file_buf.len() {
-            eprintln!(
+            tracing::warn!(
                 "  ⚠️  Chunk {} hors limites (offset={} size={} file_len={})",
                 idx,
                 entry.offset,
@@ -253,7 +246,21 @@ impl Lidar {
                 let mut points = Vec::with_capacity(n);
                 for i in 0..n {
                     let raw = &raw_points[i * point_size..(i + 1) * point_size];
-                    let pt = decode_las14_point(raw, &hdr.scale, &hdr.coord_offset);
+                    let pt = match decode_las14_point(raw, &hdr.scale, &hdr.coord_offset) {
+                        Ok(pt) => pt,
+                        Err(e) => {
+                            if idx < 10 {
+                                tracing::warn!(
+                                    "  ⚠️  Chunk {} point {}/{} illisible: {}",
+                                    idx,
+                                    i + 1,
+                                    n,
+                                    e
+                                );
+                            }
+                            return (Vec::new(), false);
+                        }
+                    };
                     if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
                         if pt.x < qx_min || pt.x > qx_max || pt.y < qy_min || pt.y > qy_max {
                             continue;
@@ -265,7 +272,7 @@ impl Lidar {
             }
             Err(e) => {
                 if idx < 10 {
-                    eprintln!(
+                    tracing::warn!(
                         "  ⚠️  Chunk {} (level={} vx={} vy={}): {}",
                         idx, entry.level, entry.vx, entry.vy, e
                     );
@@ -334,7 +341,7 @@ impl Lidar {
                     entries_failed += 1;
                 }
                 if (idx + 1) % 500 == 0 {
-                    println!(
+                    tracing::info!(
                         "  Progress: {}/{} entries, {} points",
                         idx + 1,
                         entries.len(),
@@ -357,13 +364,13 @@ impl Lidar {
         filter_bbox: Option<(f64, f64, f64, f64)>,
     ) -> Result<Vec<LidarPoint>> {
         use std::io::Cursor;
-        println!("  📖 Reading as standard LAZ file...");
-        let t_decomp = Instant::now();
+        tracing::info!("  📖 Reading as standard LAZ file...");
+        let mut t_decomp = TimingSpan::enter("decompress_parse");
         let cursor = Cursor::new(bytes);
         let mut reader = las::Reader::new(cursor)
             .map_err(|e| anyhow::anyhow!("Failed to create LAZ reader: {}", e))?;
         let point_count = reader.header().number_of_points();
-        println!("  Header declares {} points", point_count);
+        tracing::info!("  Header declares {} points", point_count);
         let point_data = reader
             .read_all()
             .map_err(|e| anyhow::anyhow!("Failed to read LAZ points: {}", e))?;
@@ -378,9 +385,9 @@ impl Lidar {
             }
         }
         if errors > 0 {
-            eprintln!("  {} point read errors", errors);
+            tracing::warn!("  {} point read errors", errors);
         }
-        println!("  Read {} points from LAZ", raw_points.len());
+        tracing::info!("  Read {} points from LAZ", raw_points.len());
 
         #[cfg(feature = "rayon")]
         let all_points: Vec<LidarPoint> = raw_points
@@ -403,20 +410,17 @@ impl Lidar {
                 classification: classification_to_u8(&p.classification),
             })
             .collect();
-        log_timing(
-            "decompress_parse",
-            t_decomp.elapsed(),
-            Some(all_points.len()),
-        );
+        t_decomp.set_points(all_points.len());
+        drop(t_decomp);
 
-        let t_filter = Instant::now();
+        let mut t_filter = TimingSpan::enter("filter");
         let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
             Self::filter_points_with_spatial_index(&all_points, x_min, y_min, x_max, y_max)
         } else {
             all_points
         };
-        log_timing("filter", t_filter.elapsed(), Some(file_points.len()));
-        println!("  Loaded {} points after spatial filter", file_points.len());
+        t_filter.set_points(file_points.len());
+        tracing::info!("  Loaded {} points after spatial filter", file_points.len());
         Ok(file_points)
     }
 

@@ -12,8 +12,14 @@ __all__ = [
     "PyBoundingBox",
     "PyGeoCore",
     "geometric",
+    "init_logging",
     "thermal",
 ]
+
+def init_logging(level: builtins.str = "info") -> None:
+    r"""
+    Install Rust tracing on stderr. Idempotent. Silent until called.
+    """
 
 BoundingBox: TypeAlias = PyBoundingBox
 GeoCore: TypeAlias = PyGeoCore

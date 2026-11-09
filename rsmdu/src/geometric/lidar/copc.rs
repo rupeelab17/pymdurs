@@ -87,26 +87,33 @@ pub(super) struct CopcEntry {
     pub(super) point_count: i32,
 }
 
-// --- helpers binaires little-endian ---
+// --- helpers binaires little-endian (pas de panic sur buffer tronqué) ---
 #[inline]
-pub(super) fn ru16(b: &[u8], o: usize) -> u16 {
-    u16::from_le_bytes(b[o..o + 2].try_into().unwrap())
+fn le_bytes<const N: usize>(b: &[u8], o: usize) -> Result<[u8; N]> {
+    b.get(o..o + N)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| anyhow::anyhow!("buffer trop court @ {o}+{N} (len={})", b.len()))
+}
+
+#[inline]
+pub(super) fn ru16(b: &[u8], o: usize) -> Result<u16> {
+    Ok(u16::from_le_bytes(le_bytes(b, o)?))
 }
 #[inline]
-pub(super) fn ru32(b: &[u8], o: usize) -> u32 {
-    u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
+pub(super) fn ru32(b: &[u8], o: usize) -> Result<u32> {
+    Ok(u32::from_le_bytes(le_bytes(b, o)?))
 }
 #[inline]
-pub(super) fn ru64(b: &[u8], o: usize) -> u64 {
-    u64::from_le_bytes(b[o..o + 8].try_into().unwrap())
+pub(super) fn ru64(b: &[u8], o: usize) -> Result<u64> {
+    Ok(u64::from_le_bytes(le_bytes(b, o)?))
 }
 #[inline]
-pub(super) fn ri32(b: &[u8], o: usize) -> i32 {
-    i32::from_le_bytes(b[o..o + 4].try_into().unwrap())
+pub(super) fn ri32(b: &[u8], o: usize) -> Result<i32> {
+    Ok(i32::from_le_bytes(le_bytes(b, o)?))
 }
 #[inline]
-pub(super) fn rf64(b: &[u8], o: usize) -> f64 {
-    f64::from_le_bytes(b[o..o + 8].try_into().unwrap())
+pub(super) fn rf64(b: &[u8], o: usize) -> Result<f64> {
+    Ok(f64::from_le_bytes(le_bytes(b, o)?))
 }
 
 /// Parse le LAS 1.4 public header depuis un buffer ≥ 375 bytes.
@@ -122,13 +129,13 @@ pub(super) fn parse_las14_header(buf: &[u8]) -> Result<Las14Header> {
     }
     Ok(Las14Header {
         point_format: buf[104] & 0x3F,
-        point_record_len: ru16(buf, 105),
-        offset_to_point_data: ru32(buf, 96) as u64,
-        vlr_count: ru32(buf, 100),
-        scale: [rf64(buf, 131), rf64(buf, 139), rf64(buf, 147)],
-        coord_offset: [rf64(buf, 155), rf64(buf, 163), rf64(buf, 171)],
-        evlr_offset: ru64(buf, 235),
-        point_count: ru64(buf, 247),
+        point_record_len: ru16(buf, 105)?,
+        offset_to_point_data: ru32(buf, 96)? as u64,
+        vlr_count: ru32(buf, 100)?,
+        scale: [rf64(buf, 131)?, rf64(buf, 139)?, rf64(buf, 147)?],
+        coord_offset: [rf64(buf, 155)?, rf64(buf, 163)?, rf64(buf, 171)?],
+        evlr_offset: ru64(buf, 235)?,
+        point_count: ru64(buf, 247)?,
     })
 }
 
@@ -138,33 +145,33 @@ pub(super) fn parse_copc_info(buf: &[u8]) -> Result<CopcInfo> {
         anyhow::bail!("COPC Info VLR trop court: {} bytes", buf.len());
     }
     Ok(CopcInfo {
-        center_x: rf64(buf, 0),
-        center_y: rf64(buf, 8),
-        center_z: rf64(buf, 16),
-        halfsize: rf64(buf, 24),
-        spacing: rf64(buf, 32),
-        root_hier_offset: ru64(buf, 40),
-        root_hier_size: ru64(buf, 48),
+        center_x: rf64(buf, 0)?,
+        center_y: rf64(buf, 8)?,
+        center_z: rf64(buf, 16)?,
+        halfsize: rf64(buf, 24)?,
+        spacing: rf64(buf, 32)?,
+        root_hier_offset: ru64(buf, 40)?,
+        root_hier_size: ru64(buf, 48)?,
     })
 }
 
 /// Parse une page de hiérarchie COPC (entrées de 32 bytes chacune).
-pub(super) fn parse_hierarchy_page(buf: &[u8]) -> Vec<CopcEntry> {
+pub(super) fn parse_hierarchy_page(buf: &[u8]) -> Result<Vec<CopcEntry>> {
     let n = buf.len() / 32;
     let mut entries = Vec::with_capacity(n);
     for i in 0..n {
         let b = i * 32;
         entries.push(CopcEntry {
-            level: ri32(buf, b),
-            vx: ri32(buf, b + 4),
-            vy: ri32(buf, b + 8),
-            vz: ri32(buf, b + 12),
-            offset: ru64(buf, b + 16),
-            byte_size: ri32(buf, b + 24),
-            point_count: ri32(buf, b + 28),
+            level: ri32(buf, b)?,
+            vx: ri32(buf, b + 4)?,
+            vy: ri32(buf, b + 8)?,
+            vz: ri32(buf, b + 12)?,
+            offset: ru64(buf, b + 16)?,
+            byte_size: ri32(buf, b + 24)?,
+            point_count: ri32(buf, b + 28)?,
         });
     }
-    entries
+    Ok(entries)
 }
 
 /// Lit toutes les entrées de hiérarchie COPC en suivant les pages enfants.
@@ -177,7 +184,7 @@ pub(super) fn read_all_hierarchy_entries(file_buf: &[u8], info: &CopcInfo) -> Re
         let start = page_offset as usize;
         let end = start + page_size as usize;
         if end > file_buf.len() {
-            eprintln!(
+            tracing::warn!(
                 "  ⚠️  Page hiérarchie COPC hors limites: offset={} size={} file_len={}",
                 page_offset,
                 page_size,
@@ -185,7 +192,7 @@ pub(super) fn read_all_hierarchy_entries(file_buf: &[u8], info: &CopcInfo) -> Re
             );
             continue;
         }
-        for entry in parse_hierarchy_page(&file_buf[start..end]) {
+        for entry in parse_hierarchy_page(&file_buf[start..end])? {
             if entry.point_count == -1 {
                 // Page enfant — lire récursivement
                 pages_to_read.push((entry.offset, entry.byte_size as u64));
@@ -240,8 +247,8 @@ pub(super) fn find_laz_vlr(file_buf: &[u8], vlr_count: u32) -> Result<LazVlr> {
         let user_id = std::str::from_utf8(&file_buf[pos + 2..pos + 18])
             .unwrap_or("")
             .trim_end_matches('\0');
-        let record_id = ru16(file_buf, pos + 18);
-        let record_len = ru16(file_buf, pos + 20) as usize;
+        let record_id = ru16(file_buf, pos + 18)?;
+        let record_len = ru16(file_buf, pos + 20)? as usize;
         let data_start = pos + VLR_HEADER_SIZE;
         let data_end = data_start + record_len;
 
@@ -315,16 +322,24 @@ pub(super) fn decompress_copc_chunk(
 ///   byte  16    : classification (u8)
 ///   ...          (scanner channel, scan angle, user data, point source, gps time, etc.)
 #[inline]
-pub(super) fn decode_las14_point(raw: &[u8], scale: &[f64; 3], coord_offset: &[f64; 3]) -> LidarPoint {
-    let xi = i32::from_le_bytes(raw[0..4].try_into().unwrap());
-    let yi = i32::from_le_bytes(raw[4..8].try_into().unwrap());
-    let zi = i32::from_le_bytes(raw[8..12].try_into().unwrap());
-    LidarPoint {
+pub(super) fn decode_las14_point(
+    raw: &[u8],
+    scale: &[f64; 3],
+    coord_offset: &[f64; 3],
+) -> Result<LidarPoint> {
+    // Format 6+ : XYZ (12) + … + classification @ offset 16
+    if raw.len() < 17 {
+        anyhow::bail!("point LAS trop court: {} bytes (min 17)", raw.len());
+    }
+    let xi = i32::from_le_bytes(le_bytes(raw, 0)?);
+    let yi = i32::from_le_bytes(le_bytes(raw, 4)?);
+    let zi = i32::from_le_bytes(le_bytes(raw, 8)?);
+    Ok(LidarPoint {
         x: xi as f64 * scale[0] + coord_offset[0],
         y: yi as f64 * scale[1] + coord_offset[1],
         z: zi as f64 * scale[2] + coord_offset[2],
         classification: raw[16],
-    }
+    })
 }
 
 /// Statistiques de lecture COPC

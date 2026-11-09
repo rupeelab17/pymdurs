@@ -9,7 +9,8 @@ homepage = "https://github.com/rupeelab17/pymdurs"
 documentation = "https://github.com/rupeelab17/pymdurs#readme"
 
 [features]
-default = ["proj", "umep", "gdal", "reqwest", "csv", "encoding_rs", "polars", "las", "laz", "zip", "tempfile", "geos", "chrono", "quick-xml", "progressbar", "rayon", "laz-memmap", "ndarray"]
+# polars opt-in: only BuildingCollection::{to_polars_df,to_gdf} — heavy compile
+default = ["proj", "umep", "gdal", "reqwest", "las", "laz", "geos", "quick-xml", "progressbar", "rayon", "laz-memmap", "ndarray"]
 wasm = []
 umep = []
 gdal_src = ["gdal/gdal-src"]
@@ -21,6 +22,8 @@ lidar-copc = []
 gpu = ["wgpu", "pollster", "bytemuck"]
 # Progress bars via the indicatif crate
 progressbar = ["dep:indicatif"]
+# Building → Polars DataFrame export (to_polars_df / to_gdf)
+polars = ["dep:polars", "dep:ethnum"]
 
 [dependencies]
 # GeoRust ecosystem
@@ -35,10 +38,10 @@ gdal = { version = "0.19", git = "https://github.com/AlexanderWillner/gdal.git",
 
 rstar = "0.14"
 
-# Data processing
+# Data processing (opt-in via feature "polars")
 polars = { version = "0.55", features = ["lazy", "temporal", "strings"], optional = true }
 # polars-arrow pulls this; 1.5.2 transmutes () into TryFromIntError (E0512 on rustc 1.97+)
-ethnum = "1.5.3"
+ethnum = { version = "1.5.3", optional = true }
 
 # HTTP and serialization
 # rustls (not OpenSSL) for manylinux CI.
@@ -51,15 +54,18 @@ serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "2.0"
 
+# Logging (silent until `logging::init` / RUST_LOG)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 # Utilities
-chrono = { version = "0.4", features = ["serde"], optional = true }
 url = "2.5"
-csv = { version = "1.4", optional = true }
+csv = "1.4"
 quick-xml = { version = "0.42", features = ["serialize"], optional = true }
-encoding_rs = { version = "0.8", optional = true }
+encoding_rs = "0.8"
 urlencoding = "2.1"
-zip = { version = "9.5", optional = true }
-tempfile = { version = "3.27", optional = true }
+zip = "9.5"
+tempfile = "3.27"
 indicatif = { version = "0.18", optional = true }
 rayon = { version = "1.12", optional = true }
 ndarray = { version = "0.17", optional = true }
@@ -83,3 +89,19 @@ bytemuck = { version = "1.24", optional = true, features = ["derive"] }
 [lib]
 name = "rsmdu"
 crate-type = ["rlib", "cdylib"]
+
+[[example]]
+name = "building_complete"
+required-features = ["polars"]
+[[example]]
+name = "building_from_ign"
+required-features = ["polars"]
+[[example]]
+name = "building_from_ign_api"
+required-features = ["polars"]
+[[example]]
+name = "building_from_geojson"
+required-features = ["polars"]
+[[example]]
+name = "building_manual"
+required-features = ["polars"]

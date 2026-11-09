@@ -146,7 +146,7 @@ impl Cadastre {
         std::fs::write(&output_file, geojson_str)
             .context(format!("Failed to write GeoJSON file: {:?}", output_file))?;
 
-        println!(
+        tracing::info!(
             "Cadastre saved to: {:?} (as GeoJSON - GeoJSON export temporarily disabled)",
             output_file
         );

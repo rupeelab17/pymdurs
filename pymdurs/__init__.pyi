@@ -14,6 +14,7 @@ from .pymdurs import (
     PyBoundingBox,
     PyGeoCore,
     geometric,
+    init_logging,
     thermal,
 )
 
@@ -57,12 +58,15 @@ def dxf_to_cosia_and_weighted_layers(
     layer_properties: dict[str, dict[str, float | str]] | None = ...,
 ) -> GeoDataFrame: ...
 
+def init_logging(level: str = ...) -> None: ...
+
 __all__ = [
     "BoundingBox",
     "GeoCore",
     "PyBoundingBox",
     "PyGeoCore",
     "geometric",
+    "init_logging",
     "thermal",
     "indicators",
     "vegetation",

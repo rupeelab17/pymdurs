@@ -128,7 +128,7 @@ impl Water {
                 .parse()
                 .context("Failed to parse GeoJSON from IGN API response")?;
 
-            println!("GeoJSON: {:?}", geojson);
+            tracing::info!("GeoJSON: {:?}", geojson);
 
             self.geojson = Some(geojson);
         } else {
@@ -253,7 +253,7 @@ impl Water {
         std::fs::write(&output_file, geojson_str)
             .context(format!("Failed to write GeoJSON file: {:?}", output_file))?;
 
-        println!(
+        tracing::info!(
             "Water saved to: {:?} (as GeoJSON - GeoJSON export temporarily disabled)",
             output_file
         );

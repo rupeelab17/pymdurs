@@ -145,15 +145,15 @@ impl Dem {
             self.path_temp_tiff, self.path_save_tiff
         ))?;
 
-        println!(
+        tracing::info!(
             "DEM saved to: {:?} (reprojection temporarily disabled)",
             self.path_save_tiff
         );
-        println!(
+        tracing::info!(
             "  TODO: Implement full GDAL reprojection to EPSG:{}",
             self.geo_core.get_epsg()
         );
-        println!(
+        tracing::info!(
             "  Python equivalent: dataarray.rio.reproject(dst_crs={}, resolution=1)",
             self.geo_core.get_epsg()
         );
@@ -226,21 +226,21 @@ impl Dem {
         #[cfg(not(feature = "wasm"))]
         {
             self.export_mask_to_shapefile(&polygon)?;
-            println!("Mask shapefile saved to: {:?}", self.path_save_mask);
+            tracing::info!("Mask shapefile saved to: {:?}", self.path_save_mask);
             //self.warp_and_clip_dem(&self.path_save_tiff, &self.path_save_tiff_clip)?;
-            //println!("DEM warped and clipped to: {:?}", self.path_save_mask);
+            // println!("DEM warped and clipped to: {:?}", self.path_save_mask);
         }
 
         #[cfg(feature = "wasm")]
         {
-            println!("Mask geometry created (shapefile export disabled in WASM mode)");
+            tracing::info!("Mask geometry created (shapefile export disabled in WASM mode)");
         }
 
-        println!(
+        tracing::info!(
             "  Scaled Bbox (EPSG:2154): ({:.2}, {:.2}) to ({:.2}, {:.2})",
             scaled_min_x, scaled_min_y, scaled_max_x, scaled_max_y
         );
-        println!(
+        tracing::info!(
             "  Original Bbox (EPSG:2154): ({:.2}, {:.2}) to ({:.2}, {:.2})",
             min_x, min_y, max_x, max_y
         );
@@ -326,7 +326,7 @@ impl Dem {
             anyhow::bail!("ogr2ogr failed to convert GeoJSON to shapefile");
         }
 
-        println!("Mask shapefile saved to: {:?}", self.path_save_mask);
+        tracing::info!("Mask shapefile saved to: {:?}", self.path_save_mask);
 
         Ok(())
     }
@@ -403,7 +403,7 @@ impl Dem {
             anyhow::bail!("gdalwarp failed to warp and clip DEM");
         }
 
-        println!("DEM warped and clipped to: {:?}", output_clip_path);
+        tracing::info!("DEM warped and clipped to: {:?}", output_clip_path);
 
         Ok(())
     }

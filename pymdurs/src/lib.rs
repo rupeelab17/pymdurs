@@ -3,8 +3,8 @@ use pyo3::prelude::*;
 mod bindings;
 
 use bindings::{
-    PyBoundingBox, PyBuilding, PyCadastre, PyCosia, PyDem, PyGeoCore, PyIris, PyLcz, PyLidar, PyMnh,
-    PyMns, PyMnt, PyRnb, PyRoad, PyVegetation, PyWater, PyWindConfig, PyWindField,
+    init_logging, PyBoundingBox, PyBuilding, PyCadastre, PyCosia, PyDem, PyGeoCore, PyIris, PyLcz,
+    PyLidar, PyMnh, PyMns, PyMnt, PyRnb, PyRoad, PyVegetation, PyWater, PyWindConfig, PyWindField,
 };
 
 /// Python bindings for pymdurs
@@ -22,6 +22,8 @@ fn pymdurs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Add aliases for Pythonic API
     m.setattr("BoundingBox", m.getattr("PyBoundingBox")?)?;
     m.setattr("GeoCore", m.getattr("PyGeoCore")?)?;
+
+    m.add_function(wrap_pyfunction!(init_logging, m)?)?;
 
     m.add(
         "__doc__",

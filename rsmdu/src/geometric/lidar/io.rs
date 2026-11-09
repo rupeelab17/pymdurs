@@ -158,11 +158,10 @@ pub(super) fn fetch_lidar_wfs_json(bbox: &str) -> Result<serde_json::Value> {
         ("outputFormat", "application/json"),
         ("bbox", bbox),
     ];
-    let response = reqwest::blocking::Client::new()
+    let response = crate::commons::http::query()?
         .get(LIDAR_WFS_URL)
         .query(&params)
         .header("Accept", "application/json")
-        .header("User-Agent", "pymdurs/0.1")
         .send()
         .with_context(|| format!("Failed to send WFS request to {LIDAR_WFS_URL}"))?;
     let status = response.status();

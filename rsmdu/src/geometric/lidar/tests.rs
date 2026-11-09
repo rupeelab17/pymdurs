@@ -435,7 +435,7 @@ fn test_parse_hierarchy_page() {
     buf[16..24].copy_from_slice(&1000u64.to_le_bytes());
     buf[24..28].copy_from_slice(&500i32.to_le_bytes());
     buf[28..32].copy_from_slice(&100i32.to_le_bytes());
-    let entries = parse_hierarchy_page(&buf);
+    let entries = parse_hierarchy_page(&buf).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].level, 1);
     assert_eq!(entries[0].vx, 2);
@@ -454,11 +454,19 @@ fn test_decode_las14_point() {
     raw[4..8].copy_from_slice(&20000i32.to_le_bytes()); // Y=200.0
     raw[8..12].copy_from_slice(&5000i32.to_le_bytes()); // Z=50.0
     raw[16] = 2; // classification = Ground
-    let pt = decode_las14_point(&raw, &scale, &coord_offset);
+    let pt = decode_las14_point(&raw, &scale, &coord_offset).unwrap();
     assert!((pt.x - 100.0).abs() < 1e-9);
     assert!((pt.y - 200.0).abs() < 1e-9);
     assert!((pt.z - 50.0).abs() < 1e-9);
     assert_eq!(pt.classification, 2);
+}
+
+#[test]
+fn test_decode_las14_point_truncated() {
+    let scale = [0.01, 0.01, 0.01];
+    let coord_offset = [0.0, 0.0, 0.0];
+    assert!(decode_las14_point(&[0u8; 16], &scale, &coord_offset).is_err());
+    assert!(ru16(&[0u8; 1], 0).is_err());
 }
 
 #[test]
@@ -597,6 +605,7 @@ fn test_octree_node_quadrant() {
 #[test]
 #[ignore = "network + IGN LiDAR HD; run manually with --ignored --nocapture"]
 fn test_lidar_run_stage_timings() {
+    let _ = crate::logging::init("rsmdu::lidar_timing=info,info");
     let output = std::env::temp_dir().join("rsmdu_lidar_e2e_timings");
     let _ = std::fs::create_dir_all(&output);
 
@@ -636,7 +645,7 @@ fn test_lidar_run_stage_timings() {
     }
 }
 
-#[cfg(all(feature = "las", feature = "tempfile"))]
+#[cfg(feature = "las")]
 #[test]
 fn test_save_las_ign_extended_classification() {
     let tmp = tempfile::tempdir().unwrap();

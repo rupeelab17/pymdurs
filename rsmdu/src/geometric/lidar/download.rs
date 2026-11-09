@@ -57,16 +57,16 @@ impl Lidar {
         cache_path: &Path,
     ) -> Result<Vec<u8>> {
         use std::io::Read;
-        println!("  📥 Downloading from: {}", url);
+        tracing::info!("  📥 Downloading from: {}", url);
         let mut expected_size = head_content_length(client, url);
         if let Some(size) = expected_size {
-            println!(
+            tracing::info!(
                 "  Expected size: {} bytes ({:.2} MB)",
                 size,
                 size as f64 / 1_048_576.0
             );
         } else {
-            println!("  Expected size: unknown (no Content-Length from HEAD)");
+            tracing::info!("  Expected size: unknown (no Content-Length from HEAD)");
         }
         let mut retries = 3;
         let data = loop {
@@ -75,7 +75,7 @@ impl Lidar {
                 Err(e) => {
                     retries -= 1;
                     if retries > 0 {
-                        eprintln!("  Download error (retrying in 2s): {}", e);
+                        tracing::warn!("  Download error (retrying in 2s): {}", e);
                         std::thread::sleep(std::time::Duration::from_secs(2));
                         continue;
                     }
@@ -89,7 +89,7 @@ impl Lidar {
             if expected_size.is_none() {
                 if let Some(size) = response.content_length().filter(|&n| n > 0) {
                     expected_size = Some(size);
-                    println!(
+                    tracing::info!(
                         "  Expected size (from GET): {} bytes ({:.2} MB)",
                         size,
                         size as f64 / 1_048_576.0
@@ -108,13 +108,13 @@ impl Lidar {
                         bytes_read += n as u64;
                         if bytes_read % (10 * 1024 * 1024) < 65536 {
                             if let Some(expected) = expected_size {
-                                println!(
+                                tracing::info!(
                                     "  Progress: {:.1}% ({:.2} MB)",
                                     (bytes_read as f64 / expected as f64) * 100.0,
                                     bytes_read as f64 / 1_048_576.0
                                 );
                             } else {
-                                println!(
+                                tracing::info!(
                                     "  Progress: {:.2} MB downloaded",
                                     bytes_read as f64 / 1_048_576.0
                                 );
@@ -124,7 +124,7 @@ impl Lidar {
                     Err(e) => {
                         retries -= 1;
                         if retries > 0 {
-                            eprintln!("  Read error (retrying): {}", e);
+                            tracing::warn!("  Read error (retrying): {}", e);
                             std::thread::sleep(std::time::Duration::from_secs(2));
                             break;
                         }
@@ -137,7 +137,7 @@ impl Lidar {
                     if data.len() as u64 != expected {
                         retries -= 1;
                         if retries > 0 {
-                            eprintln!(
+                            tracing::warn!(
                                 "  Incomplete download: got {} bytes, expected {} (retrying)",
                                 data.len(),
                                 expected
@@ -158,7 +158,7 @@ impl Lidar {
             if retries == 0 {
                 return Err(anyhow::anyhow!("Empty response after retries"));
             }
-            eprintln!("  Empty response (retrying)");
+            tracing::warn!("  Empty response (retrying)");
             std::thread::sleep(std::time::Duration::from_secs(2));
         };
         if data.len() < 4 || &data[0..4] != b"LASF" {
@@ -166,13 +166,13 @@ impl Lidar {
                 "Downloaded file is not a valid LAS/LAZ file (missing LASF signature)"
             ));
         }
-        println!(
+        tracing::info!(
             "  Downloaded {} bytes ({:.2} MB)",
             data.len(),
             data.len() as f64 / 1_048_576.0
         );
         std::fs::write(cache_path, &data).context("Failed to write cache file")?;
-        println!("  Cached to: {:?}", cache_path);
+        tracing::info!("  Cached to: {:?}", cache_path);
         Ok(data)
     }
 

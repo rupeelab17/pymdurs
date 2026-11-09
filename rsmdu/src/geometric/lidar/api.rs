@@ -3,11 +3,11 @@
 use anyhow::{Context, Result};
 use proj::Proj;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::geo_core::{BoundingBox, GeoCore};
 
-use super::types::{log_timing, DtmFill, Lidar};
+use super::types::{log_timing, DtmFill, Lidar, TimingSpan};
 
 impl Lidar {
 
@@ -43,6 +43,7 @@ impl Lidar {
     }
 
     /// Download and cache points for the current bbox if not already loaded.
+    #[tracing::instrument(skip(self), fields(stage = "load_total"))]
     pub(super) fn ensure_points_loaded(&mut self) -> Result<()> {
         if let Some(ref pts) = self.loaded_points {
             log_timing("load_total", Duration::ZERO, Some(pts.len()));
@@ -57,9 +58,9 @@ impl Lidar {
         }
         let laz_urls = laz_urls.clone();
         let (min_x, min_y, max_x, max_y) = self.bbox_lambert93()?;
-        let t0 = Instant::now();
+        let mut t = TimingSpan::enter("load_total");
         let points = self.load_lidar_points_internal(&laz_urls, Some((min_x, min_y, max_x, max_y)))?;
-        log_timing("load_total", t0.elapsed(), Some(points.len()));
+        t.set_points(points.len());
         self.loaded_points = Some(points);
         Ok(())
     }
@@ -115,6 +116,7 @@ impl Lidar {
             .context("No LAZ URLs loaded. Call set_bbox() first.")
     }
 
+    #[tracing::instrument(skip(self, classification_list), fields(stage = "run"))]
     pub fn run(
         &mut self,
         file_name: Option<String>,
@@ -138,10 +140,8 @@ impl Lidar {
         let output_file = self
             .output_path
             .join(file_name.unwrap_or("lidar_cdsm.tif".to_string()));
-        let t_tif = Instant::now();
-        let output_path = self.to_tif(&rasters, &output_file, write_out_file)?;
-        log_timing("geotiff", t_tif.elapsed(), None);
-        Ok(output_path)
+        let _t = TimingSpan::enter("geotiff");
+        self.to_tif(&rasters, &output_file, write_out_file)
     }
 
     #[cfg(feature = "las")]

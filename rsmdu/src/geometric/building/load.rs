@@ -39,7 +39,7 @@ impl BuildingCollection {
                         }
                         Err(e) => {
                             // Log error but continue processing other features
-                            eprintln!("Warning: Failed to process feature: {}", e);
+                            tracing::warn!("Warning: Failed to process feature: {}", e);
                             continue;
                         }
                     }
@@ -56,7 +56,7 @@ impl BuildingCollection {
                     }
                     Err(e) => {
                         // Log error but don't fail completely
-                        eprintln!("Warning: Failed to process feature: {}", e);
+                        tracing::warn!("Warning: Failed to process feature: {}", e);
                     }
                 }
             }

@@ -27,16 +27,16 @@ impl Lcz {
             .bbox
             .context("Bounding box must be set before running LCZ processing")?;
 
-        println!("Bbox (EPSG:4326): {:?}", bbox);
+        tracing::info!("Bbox (EPSG:4326): {:?}", bbox);
 
-        println!("Téléchargement du fichier ZIP depuis: {}", url);
+        tracing::info!("Téléchargement du fichier ZIP depuis: {}", url);
 
         // 1. Télécharger et extraire le ZIP
         let temp_dir = self.download_and_extract_zip(url)?;
         // 2. Trouver le fichier .shp dans le dossier temporaire
         let shp_path = self.find_shapefile(&temp_dir)?;
 
-        println!("Shapefile trouvé: {:?}", shp_path);
+        tracing::info!("Shapefile trouvé: {:?}", shp_path);
 
         // Lire le shapefile avec GDAL (no ogr2ogr step: conversion was unused and required CLI GDAL)
         let dataset = Dataset::open(&shp_path).context("Impossible d'ouvrir le shapefile")?;
@@ -51,8 +51,8 @@ impl Lcz {
             .context("Impossible d'obtenir le SRS source")?;
         let target_srs = SpatialRef::from_epsg(self.geo_core.epsg as u32)
             .context("Impossible de créer le SRS cible")?;
-        println!("Source SRS: {:?}", source_srs);
-        println!("Target SRS: {:?}", target_srs);
+        tracing::info!("Source SRS: {:?}", source_srs);
+        tracing::info!("Target SRS: {:?}", target_srs);
 
         let transform = CoordTransform::new(&source_srs, &target_srs)
             .context("Impossible de créer la transformation")?;
@@ -78,7 +78,7 @@ impl Lcz {
         let geom2: OgrGeometry = geom.transform_to(&dst)?;
         // Convertir en WKT pour l'affichage
         if let Ok(wkt) = geom2.wkt() {
-            println!("Bbox polygon (WKT): {}", wkt);
+            tracing::info!("Bbox polygon (WKT): {}", wkt);
         }
 
         // Convertir OGR Geometry en geo::Geometry pour l'intersection (must use projected geom2)
@@ -95,7 +95,7 @@ impl Lcz {
             .context("Failed to get bounding rect for spatial filter")?;
 
         let extent = layer.get_extent()?;
-        println!("{:?}", extent);
+        tracing::info!("{:?}", extent);
         layer.set_spatial_filter_rect(
             bbox_rect_filter.min().x,
             bbox_rect_filter.min().y,
@@ -111,7 +111,7 @@ impl Lcz {
         let mut transformed = 0;
         let mut converted = 0;
 
-        println!("Étape 1: Collecte et transformation des géométries...");
+        tracing::info!("Étape 1: Collecte et transformation des géométries...");
 
         // Trouver l'index du champ "lcz_int" en utilisant la première feature
         // Puis collecter toutes les features pour les traiter
@@ -182,23 +182,23 @@ impl Lcz {
             }
 
             if idx % 1000 == 0 && idx > 0 {
-                println!("  Traitement de {} features...", idx);
+                tracing::info!("  Traitement de {} features...", idx);
             }
         }
 
-        println!("Statistiques de collecte:");
-        println!("  Total features: {}", total_features);
-        println!("  Avec géométrie: {}", with_geometry);
-        println!("  Transformées: {}", transformed);
-        println!("  Converties et indexées: {}", converted);
+        tracing::info!("Statistiques de collecte:");
+        tracing::info!("  Total features: {}", total_features);
+        tracing::info!("  Avec géométrie: {}", with_geometry);
+        tracing::info!("  Transformées: {}", transformed);
+        tracing::info!("  Converties et indexées: {}", converted);
 
         // 7. Étape 2: Construire l'index spatial RTree
-        println!("Étape 2: Construction de l'index spatial RTree...");
+        tracing::info!("Étape 2: Construction de l'index spatial RTree...");
         let tree = RTree::bulk_load(indexed_geometries);
-        println!("  Index construit avec {} géométries", tree.size());
+        tracing::info!("  Index construit avec {} géométries", tree.size());
 
         // 8. Étape 3: Requête spatiale rapide avec le bbox
-        println!("Étape 3: Requête spatiale avec le bbox...");
+        tracing::info!("Étape 3: Requête spatiale avec le bbox...");
         let bbox_rect = bbox_polygon_geo
             .bounding_rect()
             .context("Failed to get bounding rect from polygon")?;
@@ -206,14 +206,14 @@ impl Lcz {
             [bbox_rect.min().x, bbox_rect.min().y],
             [bbox_rect.max().x, bbox_rect.max().y],
         );
-        println!("Envelope: {:?}", envelope);
+        tracing::info!("Envelope: {:?}", envelope);
 
         let candidates: Vec<_> = tree.locate_in_envelope_intersecting(envelope).collect();
         let num_candidates = candidates.len();
-        println!("  {} candidats trouvés dans l'enveloppe", num_candidates);
+        tracing::info!("  {} candidats trouvés dans l'enveloppe", num_candidates);
 
         // 9. Étape 4: Test d'intersection exacte sur les candidats
-        println!("Étape 4: Test d'intersection exacte...");
+        tracing::info!("Étape 4: Test d'intersection exacte...");
         let mut features = Vec::new();
         let mut exact_intersections = 0;
 
@@ -231,10 +231,10 @@ impl Lcz {
             }
         }
 
-        println!("Statistiques finales:");
-        println!("  Candidats dans l'enveloppe: {}", num_candidates);
-        println!("  Intersections exactes: {}", exact_intersections);
-        println!("  Features finales: {}", features.len());
+        tracing::info!("Statistiques finales:");
+        tracing::info!("  Candidats dans l'enveloppe: {}", num_candidates);
+        tracing::info!("  Intersections exactes: {}", exact_intersections);
+        tracing::info!("  Features finales: {}", features.len());
 
         // 7. Créer le GeoJSON FeatureCollection
         let feature_collection = geojson::FeatureCollection {

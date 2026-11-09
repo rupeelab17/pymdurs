@@ -123,7 +123,7 @@ impl Cosia {
             self.path_temp_tiff, self.path_save_tiff
         ))?;
 
-        println!("Cosia saved to: {:?}", self.path_save_tiff);
+        tracing::info!("Cosia saved to: {:?}", self.path_save_tiff);
 
         Ok(())
     }

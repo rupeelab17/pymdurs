@@ -100,58 +100,40 @@ impl PyBuilding {
         }
     }
 
-    /// Convert to pandas DataFrame
+    /// Convert to pandas DataFrame (built in Python — no Rust polars dependency)
     #[gen_stub(override_return_type(type_repr = "pandas.DataFrame", imports = ("pandas",)))]
     fn to_pandas(&self, py: Python) -> PyResult<Py<PyAny>> {
-        // Convert Polars Rust DataFrame to pandas via Python polars package
-        match self.inner.to_polars_df() {
-            Ok(_polars_df_rust) => {
-                let pandas = py.import("pandas")?;
+        let pandas = py.import("pandas")?;
 
-                let mut height_vec: Vec<Option<f64>> = Vec::new();
-                let mut area_vec: Vec<f64> = Vec::new();
-                let mut centroid_x_vec: Vec<f64> = Vec::new();
-                let mut centroid_y_vec: Vec<f64> = Vec::new();
-                let mut nombre_d_etages_vec: Vec<Option<f64>> = Vec::new();
-                let mut hauteur_2_vec: Vec<Option<f64>> = Vec::new();
-                let mut no_hauteur_vec: Vec<bool> = Vec::new();
+        let mut height_vec: Vec<Option<f64>> = Vec::new();
+        let mut area_vec: Vec<f64> = Vec::new();
+        let mut centroid_x_vec: Vec<f64> = Vec::new();
+        let mut centroid_y_vec: Vec<f64> = Vec::new();
+        let mut nombre_d_etages_vec: Vec<Option<f64>> = Vec::new();
+        let mut hauteur_2_vec: Vec<Option<f64>> = Vec::new();
+        let mut no_hauteur_vec: Vec<bool> = Vec::new();
 
-                for building in &self.inner.buildings {
-                    height_vec.push(building.height);
-                    area_vec.push(building.area);
-                    centroid_x_vec.push(building.centroid.x());
-                    centroid_y_vec.push(building.centroid.y());
-                    nombre_d_etages_vec.push(building.nombre_d_etages);
-                    hauteur_2_vec.push(building.hauteur_2);
-                    no_hauteur_vec.push(building.no_hauteur);
-                }
-
-                // Convert to Python lists using helper functions
-                let height_py = option_vec_f64_to_pylist(py, &height_vec)?;
-                let area_py = vec_f64_to_pylist(py, &area_vec)?;
-                let centroid_x_py = vec_f64_to_pylist(py, &centroid_x_vec)?;
-                let centroid_y_py = vec_f64_to_pylist(py, &centroid_y_vec)?;
-                let nombre_d_etages_py = option_vec_f64_to_pylist(py, &nombre_d_etages_vec)?;
-                let hauteur_2_py = option_vec_f64_to_pylist(py, &hauteur_2_vec)?;
-                let no_hauteur_py = vec_bool_to_pylist(py, &no_hauteur_vec)?;
-                // Create pandas DataFrame
-                let data = PyDict::new(py);
-                data.set_item("hauteur", height_py)?;
-                data.set_item("area", area_py)?;
-                data.set_item("centroid_x", centroid_x_py)?;
-                data.set_item("centroid_y", centroid_y_py)?;
-                data.set_item("nombre_d_etages", nombre_d_etages_py)?;
-                data.set_item("hauteur_2", hauteur_2_py)?;
-                data.set_item("noHauteur", no_hauteur_py)?;
-
-                let df: pyo3::Bound<PyAny> = pandas.call_method1("DataFrame", (data,))?;
-                Ok(df.unbind())
-            }
-            Err(e) => Err(PyValueError::new_err(format!(
-                "Failed to convert to DataFrame: {}",
-                e
-            ))),
+        for building in &self.inner.buildings {
+            height_vec.push(building.height);
+            area_vec.push(building.area);
+            centroid_x_vec.push(building.centroid.x());
+            centroid_y_vec.push(building.centroid.y());
+            nombre_d_etages_vec.push(building.nombre_d_etages);
+            hauteur_2_vec.push(building.hauteur_2);
+            no_hauteur_vec.push(building.no_hauteur);
         }
+
+        let data = PyDict::new(py);
+        data.set_item("hauteur", option_vec_f64_to_pylist(py, &height_vec)?)?;
+        data.set_item("area", vec_f64_to_pylist(py, &area_vec)?)?;
+        data.set_item("centroid_x", vec_f64_to_pylist(py, &centroid_x_vec)?)?;
+        data.set_item("centroid_y", vec_f64_to_pylist(py, &centroid_y_vec)?)?;
+        data.set_item("nombre_d_etages", option_vec_f64_to_pylist(py, &nombre_d_etages_vec)?)?;
+        data.set_item("hauteur_2", option_vec_f64_to_pylist(py, &hauteur_2_vec)?)?;
+        data.set_item("noHauteur", vec_bool_to_pylist(py, &no_hauteur_vec)?)?;
+
+        let df: pyo3::Bound<PyAny> = pandas.call_method1("DataFrame", (data,))?;
+        Ok(df.unbind())
     }
 
     /// Load from GeoJSON

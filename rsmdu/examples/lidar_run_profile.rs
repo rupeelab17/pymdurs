@@ -11,6 +11,8 @@ use anyhow::Result;
 use rsmdu::geometric::lidar::Lidar;
 
 fn main() -> Result<()> {
+    let _ = rsmdu::logging::init("rsmdu::lidar_timing=info,info");
+
     // Small La Rochelle / Atlantec emprise (WGS84)
     let bbox = (-1.153414, 46.180217, -1.141098, 46.186531);
     let output = "./output/lidar_run_profile";
