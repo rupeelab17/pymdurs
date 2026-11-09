@@ -17,7 +17,7 @@ Inspired by:
    - pyQES examples/pymdurs_workflow/run_from_bbox.py (QES-Winds + trees)
 
 Prerequisites:
-   - DEM and DSM (e.g. from umep_workflow or wind_field_from_ign).
+   - DEM/DSM/CDSM/landcover fetched into ``./output`` if missing.
    - Buildings and trees (loaded from IGN / LiDAR in this script).
    - EPW file (e.g. la_rochelle_2025.epw).
    - solweig, pythermalcomfort, rasterio, numpy, geopandas.
@@ -365,7 +365,7 @@ def resolve_trees(
         )
 
     if cdsm_path is None or not Path(cdsm_path).is_file():
-        print("Warning: no CDSM — omitting vegetation (run umep_workflow for CDSM).")
+        print("Warning: no CDSM — omitting vegetation.")
         return None
 
     print(f"Extracting trees from CDSM: {cdsm_path}")
@@ -738,42 +738,20 @@ def _fetch_dsm_cdsm(
             print(f"  Saved {cdsm_path}")
     except (ValueError, Exception) as e:
         print(f"  Could not generate DSM: {e}")
-        print(
-            "  Run first: python examples/umep_workflow_new.py, "
-            "or place DEM.tif and DSM.tif in output/."
-        )
+        print("  Place DEM.tif and DSM.tif in output/, or fix LiDAR access.")
         sys.exit(1)
     return dsm_path, cdsm_path
 
 
 def _resolve_rasters(
-    output_umep: Path,
     output_data: Path,
     bbox_wgs84: tuple[float, float, float, float],
 ) -> tuple[Path, Path, Path | None, Path | None]:
-    """Resolve DEM/DSM/CDSM/landcover paths, fetching if missing."""
-    candidates = (
-        (output_umep, "DEM_clip.tif", "DSM_clip.tif", "CDSM_clip.tif"),
-        (output_umep, "DEM.tif", "DSM.tif", "CDSM.tif"),
-        (output_data, "DEM.tif", "DSM.tif", "CDSM.tif"),
-    )
-
-    dem_path = dsm_path = cdsm_path = None
-    for folder, dem_name, dsm_name, cdsm_name in candidates:
-        dem, dsm = folder / dem_name, folder / dsm_name
-        if dem.exists() and dsm.exists():
-            dem_path, dsm_path, cdsm_path = dem, dsm, folder / cdsm_name
-            print(f"Using DEM/DSM from {folder}")
-            break
-    else:
-        dem_path = _fetch_dem(bbox_wgs84, output_data)
-        dsm_path, cdsm_path = _fetch_dsm_cdsm(bbox_wgs84, output_data)
-
-    for lc_candidate in (output_umep / "landcover_clip.tif", output_data / "landcover_clip.tif"):
-        if lc_candidate.exists():
-            return dem_path, dsm_path, cdsm_path, lc_candidate
-
-    return dem_path, dsm_path, cdsm_path, _generate_landcover(bbox_wgs84, output_data)
+    """Resolve DEM/DSM/CDSM/landcover under ``output_data``, fetching if missing."""
+    dem_path = _fetch_dem(bbox_wgs84, output_data)
+    dsm_path, cdsm_path = _fetch_dsm_cdsm(bbox_wgs84, output_data)
+    lc_path = _generate_landcover(bbox_wgs84, output_data)
+    return dem_path, dsm_path, cdsm_path, lc_path
 
 
 def _prepare_qes_dem(
@@ -785,25 +763,18 @@ def _prepare_qes_dem(
     mask_shp = output_folder / "mask.shp"
     dem_clip = output_folder / "DEM_clip.tif"
 
-    umep_mask = Path("output/umep_workflow").resolve() / "mask.shp"
     if not mask_shp.exists():
-        if umep_mask.exists():
+        print("Fetching DEM + mask from IGN for QES...")
+        dem = pymdurs.geometric.Dem(output_path=str(output_folder))
+        dem.set_bbox(*bbox_wgs84)
+        dem.set_crs(WORKING_CRS)
+        dem = dem.run()
+        mask_from_dem = Path(dem.get_path_save_mask())
+        if mask_from_dem.is_file() and mask_from_dem != mask_shp:
             for ext in (".shp", ".shx", ".dbf", ".prj", ".cpg"):
-                src = umep_mask.with_suffix(ext)
+                src = mask_from_dem.with_suffix(ext)
                 if src.exists():
                     shutil.copy2(src, mask_shp.with_suffix(ext))
-        else:
-            print("Fetching DEM + mask from IGN for QES...")
-            dem = pymdurs.geometric.Dem(output_path=str(output_folder))
-            dem.set_bbox(*bbox_wgs84)
-            dem.set_crs(WORKING_CRS)
-            dem = dem.run()
-            mask_from_dem = Path(dem.get_path_save_mask())
-            if mask_from_dem.is_file() and mask_from_dem != mask_shp:
-                for ext in (".shp", ".shx", ".dbf", ".prj", ".cpg"):
-                    src = mask_from_dem.with_suffix(ext)
-                    if src.exists():
-                        shutil.copy2(src, mask_shp.with_suffix(ext))
 
     dem_m = project_dem_to_meters(dem_path)
     if mask_shp.exists():
@@ -836,27 +807,21 @@ def main() -> None:
         sys.exit(1)
 
     base = Path(__file__).resolve().parent.parent
-    output_umep_cwd = Path("output/umep_workflow").resolve()
-    output_umep_base = base / "output" / "umep_workflow"
-    output_umep = output_umep_cwd if output_umep_cwd.exists() else output_umep_base
+    output_data = Path("output").resolve()
+    output_data.mkdir(parents=True, exist_ok=True)
     output_folder = Path("output/utci_qes").resolve()
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    output_data_cwd = Path("output").resolve()
-    output_data = (
-        output_umep_base.parent if (base / "output").exists() else output_data_cwd
-    )
-    output_data.mkdir(parents=True, exist_ok=True)
-
-    # Small La Rochelle bbox (safe for QES domain size)
-    bbox_wgs84 = (-1.152704,46.181627,-1.139893,46.18699)
+    # Atlantec / La Rochelle sample bbox
+    bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
 
     print(f"bbox (WGS84): {bbox_wgs84}")
     print(f"cell_size:    {CELL_SIZE}")
+    print(f"data:         {output_data}")
     print(f"output:       {output_folder}")
 
     dem_path, dsm_path, cdsm_path, lc_path = _resolve_rasters(
-        output_umep, output_data, bbox_wgs84
+        output_folder, bbox_wgs84
     )
 
     # QES inputs: projected/clipped DEM + buildings shapefile + mask
@@ -925,10 +890,15 @@ def main() -> None:
     # 3) SOLWEIG: surface + Tmrt per timestep
     if lc_path is None or not lc_path.exists():
         lc_path = None
+    working_dir = output_folder / "working"
+    if working_dir.exists():
+        print(f"Removing stale SOLWEIG cache: {working_dir}")
+        shutil.rmtree(working_dir)
     print("\nPreparing surface and running SOLWEIG (Tmrt)...")
+    
     surface = solweig.SurfaceData.prepare(
         dsm=str(dsm_path),
-        working_dir=str(output_folder / "working"),
+        working_dir=str(working_dir),
         cdsm=str(cdsm_path) if (cdsm_path and cdsm_path.exists()) else None,
         pixel_size=1.0,
         land_cover=str(lc_path) if lc_path and lc_path.exists() else None,

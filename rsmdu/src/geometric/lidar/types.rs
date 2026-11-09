@@ -39,12 +39,25 @@ pub(super) fn progress_style() -> ProgressStyle {
 }
 
 
+/// How DTM cells without ground points (under buildings, dense canopy…) are filled
+/// before computing the CHM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DtmFill {
+    /// Legacy: one 3×3 pass taking the min ground neighbour; cells with no ground
+    /// neighbour get 0.0 (CHM then equals the absolute DSM there).
+    #[default]
+    Neighbor3x3,
+    /// Height of the nearest ground cell (Jump Flooding): no 0.0 holes.
+    Nearest,
+}
+
 pub struct Lidar {
     pub geo_core: GeoCore,
     pub(super) output_path: PathBuf,
     pub(super) classification: Option<u8>,
     pub(super) list_path_laz: Option<Vec<String>>,
     pub(super) loaded_points: Option<Vec<LidarPoint>>,
+    pub(super) dtm_fill: DtmFill,
 }
 
 #[derive(Debug, Clone)]

@@ -16,7 +16,7 @@ mod types;
 mod gpu;
 
 pub use spatial::QuadtreeSpatialIndex;
-pub use types::Lidar;
+pub use types::{DtmFill, Lidar};
 
 #[cfg(test)]
 mod tests;

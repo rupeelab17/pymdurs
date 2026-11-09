@@ -267,6 +267,10 @@ class PyLidar:
         r"""
         Set classification filter (optional).
         """
+    def set_dtm_fill(self, mode: builtins.str) -> None:
+        r"""
+        How DTM holes are filled before CHM: ``"neighbor3x3"`` (legacy default) or ``"nearest"`` (JFA).
+        """
     def set_crs(self, epsg: builtins.int) -> None:
         r"""
         Set CRS (e.g. 2154 for Lambert-93). Default is 2154.

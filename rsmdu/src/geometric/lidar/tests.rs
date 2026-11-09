@@ -2,155 +2,231 @@ use std::path::{Path, PathBuf};
 
 use super::copc::*;
 use super::io::*;
-use super::raster::rasterize_max_z_cpu;
+use super::raster::{
+    chm_cpu, fill_dtm_cpu, nearest_ground_seeds, rasterize_max_z_cpu, ClassMask, NO_SEED,
+};
 use super::spatial::*;
-use super::types::{classification_to_u8, Lidar, LidarPoint};
+use super::types::{classification_to_u8, DtmFill, Lidar, LidarPoint};
 
 #[cfg(feature = "gpu")]
-use super::gpu::rasterize_max_z_gpu;
+use super::gpu::rasterize_fill_chm_gpu_batched;
 
+/// Deterministic pseudo-random generator (no `rand` dependency in tests).
+struct Lcg(u64);
+impl Lcg {
+    fn next_f64(&mut self) -> f64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn below(&mut self, n: usize) -> usize {
+        ((self.next_f64() * n as f64) as usize).min(n - 1)
+    }
+}
 
+/// Points near cell centres (no rounding ambiguity at cell edges), with a central
+/// "building" where no ground point exists.
+fn synthetic_points(n: usize, width: usize, height: usize, res: f64) -> Vec<LidarPoint> {
+    let classes = [1u8, 2, 3, 5, 6, 7, 66];
+    let mut rng = Lcg(42);
+    (0..n)
+        .map(|_| {
+            let (cx, cy) = (rng.below(width), rng.below(height));
+            let mut classification = classes[rng.below(classes.len())];
+            let in_building = cx > width / 4 && cx < width / 2 && cy > height / 4 && cy < 3 * height / 4;
+            if in_building && classification == 2 {
+                classification = 6;
+            }
+            LidarPoint {
+                x: (cx as f64 + 0.5 + (rng.next_f64() - 0.5) * 0.8) * res,
+                // bbox y_max = height * res; rows count downward from y_max
+                y: (height as f64 - (cy as f64 + 0.5 + (rng.next_f64() - 0.5) * 0.8)) * res,
+                z: 10.0 + 20.0 * rng.next_f64(),
+                classification,
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn test_class_mask() {
+    let all = ClassMask::from_list(None);
+    assert!((0..=255u8).all(|c| all.contains(c)));
+    let some = ClassMask::from_list(Some(&[2, 6, 66, 255]));
+    for c in 0..=255u8 {
+        assert_eq!(some.contains(c), matches!(c, 2 | 6 | 66 | 255), "class {c}");
+    }
+    assert!((0..=255u8).all(|c| !ClassMask::from_list(Some(&[])).contains(c)));
+}
+
+#[test]
+fn test_rasterize_cpu_class_filter_and_bounds() {
+    let pts = vec![
+        LidarPoint { x: 0.5, y: 1.5, z: 10.0, classification: 2 },
+        LidarPoint { x: 0.5, y: 1.5, z: 12.0, classification: 1 },
+        LidarPoint { x: 1.5, y: 1.5, z: 8.0, classification: 2 },
+        LidarPoint { x: 0.5, y: 0.5, z: 5.0, classification: 6 },
+        LidarPoint { x: -0.2, y: 1.5, z: 99.0, classification: 1 }, // outside: must not land in col 0
+    ];
+    let (dsm, dtm) = rasterize_max_z_cpu(&pts, &ClassMask::all(), 0.0, 2.0, 1.0, 2, 2);
+    assert_eq!(dsm, vec![12.0, 8.0, 5.0, f64::NEG_INFINITY]);
+    assert_eq!(dtm, vec![10.0, 8.0, f64::NEG_INFINITY, f64::NEG_INFINITY]);
+
+    let mask = ClassMask::from_list(Some(&[2]));
+    let (dsm, _) = rasterize_max_z_cpu(&pts, &mask, 0.0, 2.0, 1.0, 2, 2);
+    assert_eq!(dsm, vec![10.0, 8.0, f64::NEG_INFINITY, f64::NEG_INFINITY]);
+}
+
+#[test]
+fn test_fill_legacy_leaves_zero_holes_nearest_does_not() {
+    // 7x5 DTM: ground on the border only, 5x3 hole inside.
+    let (w, h) = (7usize, 5usize);
+    let dtm: Vec<f64> = (0..w * h)
+        .map(|i| {
+            let (r, c) = (i / w, i % w);
+            if r == 0 || r == h - 1 || c == 0 || c == w - 1 {
+                100.0 + i as f64
+            } else {
+                f64::NEG_INFINITY
+            }
+        })
+        .collect();
+    let legacy = fill_dtm_cpu(&dtm, w, h, DtmFill::Neighbor3x3);
+    assert_eq!(legacy[2 * w + 3], 0.0, "centre cell has no ground neighbour in 3x3");
+
+    let nearest = fill_dtm_cpu(&dtm, w, h, DtmFill::Nearest);
+    assert!(nearest.iter().all(|&v| v >= 100.0), "no 0.0 hole with nearest fill");
+
+    let chm = chm_cpu(&vec![120.0; w * h], &nearest);
+    assert!(chm.iter().all(|&v| v < 20.0 + 1e-9));
+}
+
+#[test]
+fn test_jfa_nearest_distance_exact_on_reference_grids() {
+    // Checked against brute force; JFA+1 is exact on these grids.
+    for (w, h) in [(40usize, 30usize), (64, 64), (97, 33)] {
+        let ground: Vec<bool> = (0..w * h)
+            .map(|i| {
+                let (r, c) = (i / w, i % w);
+                (r * 31 + c * 17) % 11 == 0
+                    && !(c >= w / 4 && c < 3 * w / 4 && r >= h / 4 && r < 3 * h / 4)
+            })
+            .collect();
+        let dtm: Vec<f64> = ground
+            .iter()
+            .map(|&g| if g { 1.0 } else { f64::NEG_INFINITY })
+            .collect();
+        let seeds = nearest_ground_seeds(&dtm, w, h);
+        let d2 = |a: usize, b: usize| {
+            let (ax, ay, bx, by) = ((a % w) as i64, (a / w) as i64, (b % w) as i64, (b / w) as i64);
+            (ax - bx).pow(2) + (ay - by).pow(2)
+        };
+        for i in 0..w * h {
+            let truth = (0..w * h).filter(|&j| ground[j]).map(|j| d2(i, j)).min().unwrap();
+            assert_ne!(seeds[i], NO_SEED);
+            assert_eq!(d2(i, seeds[i] as usize), truth, "grid {w}x{h}, cell {i}");
+        }
+    }
+}
+
+/// GPU (several upload batches, class mask) vs CPU, both fill modes.
 #[cfg(feature = "gpu")]
 #[test]
-fn test_rasterize_max_z_gpu_matches_cpu() {
-    let points = vec![
-        LidarPoint {
-            x: 0.5,
-            y: 0.5,
-            z: 10.0,
-            classification: 2,
-        },
-        LidarPoint {
-            x: 0.5,
-            y: 0.5,
-            z: 12.0,
-            classification: 1,
-        },
-        LidarPoint {
-            x: 1.5,
-            y: 0.5,
-            z: 8.0,
-            classification: 2,
-        },
-        LidarPoint {
-            x: 0.5,
-            y: 1.5,
-            z: 5.0,
-            classification: 6,
-        },
-    ];
-    let bbox = (0.0, 0.0, 2.0, 2.0);
-    let resolution = 1.0;
-    let width = 2;
-    let height = 2;
-    let (cpu_dsm, cpu_dtm) =
-        rasterize_max_z_cpu(&points, bbox.0, bbox.3, resolution, width, height);
-    let (gpu_dsm, gpu_dtm) = match rasterize_max_z_gpu(&points, bbox, resolution, width, height)
-    {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("skip GPU parity test (no adapter / init failed): {e}");
-            return;
-        }
-    };
-    for row in 0..height {
-        for col in 0..width {
-            let cd = cpu_dsm[row][col];
-            let gd = gpu_dsm[row][col];
-            if cd.is_finite() || gd.is_finite() {
-                assert!(
-                    (cd - gd).abs() < 1e-3,
-                    "DSM mismatch at ({row},{col}): cpu={cd} gpu={gd}"
-                );
+fn test_gpu_matches_cpu_fill_chm() {
+    let (w, h, res) = (120usize, 80usize, 1.0);
+    let bbox = (0.0, 0.0, w as f64 * res, h as f64 * res);
+    let points = synthetic_points(60_000, w, h, res);
+
+    for (mask, fill) in [
+        (ClassMask::all(), DtmFill::Neighbor3x3),
+        (ClassMask::from_list(Some(&[1, 2, 6, 66])), DtmFill::Neighbor3x3),
+        (ClassMask::all(), DtmFill::Nearest),
+        (ClassMask::from_list(Some(&[2, 6])), DtmFill::Nearest),
+    ] {
+        // 7 000 points per batch → 9 batches: exercises the batched upload.
+        let gpu = match rasterize_fill_chm_gpu_batched(&points, bbox, &mask, res, w, h, fill, 7_000) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skip GPU parity test (no adapter / init failed): {e}");
+                return;
             }
-            let ct = cpu_dtm[row][col];
-            let gt = gpu_dtm[row][col];
-            if ct.is_finite() || gt.is_finite() {
-                assert!(
-                    (ct - gt).abs() < 1e-3,
-                    "DTM mismatch at ({row},{col}): cpu={ct} gpu={gt}"
-                );
+        };
+        let (dsm, dtm) = rasterize_max_z_cpu(&points, &mask, bbox.0, bbox.3, res, w, h);
+        let dtm = fill_dtm_cpu(&dtm, w, h, fill);
+        let chm = chm_cpu(&dsm, &dtm);
+        for (name, g, c) in [("dsm", &gpu.dsm, &dsm), ("dtm", &gpu.dtm, &dtm), ("chm", &gpu.chm, &chm)] {
+            assert_eq!(g.len(), c.len());
+            for i in 0..c.len() {
+                let (gv, cv) = (g[i] as f64, c[i]);
+                if cv.is_infinite() || gv.is_infinite() {
+                    assert_eq!(gv, cv, "{name}[{i}] {fill:?}");
+                } else {
+                    assert!((gv - cv).abs() < 1e-3, "{name}[{i}] {fill:?}: gpu={gv} cpu={cv}");
+                }
             }
         }
     }
 }
 
-/// GPU vs CPU max-Z binning ratio (solweig-style loose floor).
+/// Fused GPU path vs CPU (bin + fill + CHM), legacy fill.
 #[cfg(feature = "gpu")]
 #[test]
-fn test_rasterize_max_z_gpu_vs_cpu_perf() {
+fn test_raster_gpu_vs_cpu_perf() {
+    use super::gpu::GPU_BATCH_POINTS;
     use std::time::Instant;
 
     const N_POINTS: usize = 1_000_000;
     const REPEATS: usize = 3;
     const MIN_RATIO_FAIL: f64 = 0.5;
 
-    let bbox = (0.0_f64, 0.0, 1000.0, 1000.0);
-    let resolution = 1.0_f64;
-    let width = 1000;
-    let height = 1000;
-    let (x_min, _y_min, _x_max, y_max) = bbox;
-
-    let points: Vec<LidarPoint> = (0..N_POINTS)
-        .map(|i| {
-            let t = i as f64;
-            LidarPoint {
-                x: (t * 37.0) % 1000.0,
-                y: (t * 53.0) % 1000.0,
-                z: 10.0 + (t % 50.0),
-                classification: if i % 3 == 0 { 2 } else { 1 },
-            }
-        })
-        .collect();
-
-    // Warm-up / skip if no adapter.
-    if let Err(e) = rasterize_max_z_gpu(&points, bbox, resolution, width, height) {
+    let (w, h, res) = (1000usize, 1000usize, 1.0);
+    let bbox = (0.0, 0.0, 1000.0, 1000.0);
+    let points = synthetic_points(N_POINTS, w, h, res);
+    let mask = ClassMask::all();
+    let run_gpu = || {
+        rasterize_fill_chm_gpu_batched(&points, bbox, &mask, res, w, h, DtmFill::Nearest, GPU_BATCH_POINTS)
+    };
+    if let Err(e) = run_gpu() {
         eprintln!("skip GPU perf gate (no adapter / init failed): {e}");
         return;
     }
-
-    let median = |samples: &mut [f64]| -> f64 {
-        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        samples[samples.len() / 2]
+    let median = |s: &mut Vec<f64>| {
+        s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        s[s.len() / 2]
     };
-
-    let mut cpu_samples = Vec::with_capacity(REPEATS);
+    let (mut cpu, mut gpu) = (Vec::new(), Vec::new());
     for _ in 0..REPEATS {
-        let t0 = Instant::now();
-        let _ = rasterize_max_z_cpu(&points, x_min, y_max, resolution, width, height);
-        cpu_samples.push(t0.elapsed().as_secs_f64());
+        let t = Instant::now();
+        let (dsm, dtm) = rasterize_max_z_cpu(&points, &mask, bbox.0, bbox.3, res, w, h);
+        let dtm = fill_dtm_cpu(&dtm, w, h, DtmFill::Nearest);
+        let _ = chm_cpu(&dsm, &dtm);
+        cpu.push(t.elapsed().as_secs_f64());
+        let t = Instant::now();
+        run_gpu().expect("GPU raster failed after successful warm-up");
+        gpu.push(t.elapsed().as_secs_f64());
     }
+    let (c, g) = (median(&mut cpu), median(&mut gpu));
+    let ratio = if g > 0.0 { c / g } else { f64::INFINITY };
+    println!("lidar raster perf (bin+JFA+CHM): gpu={g:.4}s cpu={c:.4}s ratio={ratio:.2} (n={N_POINTS})");
+    assert!(ratio >= MIN_RATIO_FAIL, "GPU significantly slower than CPU: ratio={ratio:.2}");
+}
 
-    let mut gpu_samples = Vec::with_capacity(REPEATS);
-    for _ in 0..REPEATS {
-        let t0 = Instant::now();
-        rasterize_max_z_gpu(&points, bbox, resolution, width, height)
-            .expect("GPU rasterize failed after successful warm-up");
-        gpu_samples.push(t0.elapsed().as_secs_f64());
+/// Real-tile scale: > 16.7 M points (old dispatch limit) and > 128 MiB of points
+/// (old binding limit). Slow on CPU-only machines.
+#[cfg(feature = "gpu")]
+#[test]
+#[ignore = "large allocation; run manually with --ignored --nocapture"]
+fn test_gpu_raster_large_point_count() {
+    use super::gpu::rasterize_fill_chm_gpu;
+    let (w, h, res) = (2000usize, 2000usize, 0.5);
+    let bbox = (0.0, 0.0, w as f64 * res, h as f64 * res);
+    let points = synthetic_points(20_000_000, w, h, res);
+    match rasterize_fill_chm_gpu(&points, bbox, &ClassMask::all(), res, w, h, DtmFill::Nearest) {
+        Ok(r) => assert_eq!(r.dsm.len(), w * h),
+        Err(e) => eprintln!("GPU path refused (would fall back to CPU): {e}"),
     }
-
-    let cpu_median = median(&mut cpu_samples);
-    let gpu_median = median(&mut gpu_samples);
-    let ratio = if gpu_median > 0.0 {
-        cpu_median / gpu_median
-    } else {
-        f64::INFINITY
-    };
-
-    println!(
-        "lidar max-Z perf: gpu={gpu_median:.4}s cpu={cpu_median:.4}s ratio={ratio:.2} (n={N_POINTS})"
-    );
-
-    if ratio < 1.0 {
-        eprintln!(
-            "warning: GPU not faster than CPU (ratio={ratio:.2} < 1.0); gpu={gpu_median:.4}s cpu={cpu_median:.4}s"
-        );
-    }
-
-    assert!(
-        ratio >= MIN_RATIO_FAIL,
-        "GPU significantly slower than CPU: gpu={gpu_median:.4}s cpu={cpu_median:.4}s ratio={ratio:.2} < {MIN_RATIO_FAIL}"
-    );
 }
 
 #[test]

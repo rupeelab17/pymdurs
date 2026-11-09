@@ -26,8 +26,9 @@ def main():
     lidar = pymdurs.geometric.Lidar(output_path="./output")
 
     # Set bbox: resolves COPC URLs via WFS only (no LAZ download yet)
-    lidar.set_bbox(-1.152223, 46.183282, -1.149637, 46.185459)
-    #    lidar.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
+    
+    #lidar.set_bbox(-1.152223, 46.183282, -1.149637, 46.185459)
+    lidar.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699)
 
     # Set CRS (optional, defaults to EPSG:2154)
     lidar.set_crs(2154)

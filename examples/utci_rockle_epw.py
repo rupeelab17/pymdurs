@@ -193,6 +193,16 @@ def _nearest_direction_index(wind_direction_deg: float) -> int:
     return idx
 
 
+def _sanitize_wind(arr: np.ndarray, nodata: float | None = None) -> np.ndarray:
+    """Replace QES/Röckle sentinels (−9999, negatives) with NaN before UTCI scale."""
+    out = arr.astype(np.float32, copy=True)
+    bad = ~np.isfinite(out) | (out < 0) | (out <= -9000)
+    if nodata is not None and np.isfinite(nodata):
+        bad |= out == nodata
+    out[bad] = np.nan
+    return out
+
+
 def _compute_utci_raster(
     ta: float,
     rh: float,
@@ -208,32 +218,31 @@ def _compute_utci_raster(
 
     valid = np.isfinite(tmrt) & np.isfinite(v_pixel) & (v_pixel >= 0)
     out = np.full_like(tmrt, nodata, dtype=np.float32)
-    # Clamp v to avoid 0 (utci can be sensitive); use small minimum
-    v_safe = np.where(valid, np.maximum(v_pixel, 0.01), 0.01)
+    if not np.any(valid):
+        return out
 
-    # pythermalcomfort.utci() returns a UTCI object: use .utci for the numeric value
+    tr = tmrt[valid].astype(np.float64, copy=False)
+    v_safe = np.maximum(v_pixel[valid].astype(np.float64, copy=False), 0.01)
+
     def _utci_value(res):
         v = getattr(res, "utci", res)
         return np.asarray(v, dtype=np.float64)
 
     try:
-        res = ptc_utci(tdb=ta, tr=tmrt, v=v_safe, rh=rh, round_output=False)
-        u = _utci_value(res)
-        out[valid] = u.astype(np.float32)[valid]
+        res = ptc_utci(tdb=ta, tr=tr, v=v_safe, rh=rh, round_output=False)
+        out[valid] = _utci_value(res).astype(np.float32)
     except Exception:
-        # Fallback: scalar loop (extract .utci from return object)
-        for i in range(tmrt.shape[0]):
-            for j in range(tmrt.shape[1]):
-                if valid[i, j]:
-                    res = ptc_utci(
-                        tdb=ta,
-                        tr=float(tmrt[i, j]),
-                        v=max(0.01, float(v_pixel[i, j])),
-                        rh=rh,
-                        round_output=False,
-                    )
-                    val = getattr(res, "utci", res)
-                    out[i, j] = float(val)
+        flat_idx = np.flatnonzero(valid)
+        for k in flat_idx:
+            i, j = np.unravel_index(int(k), tmrt.shape)
+            res = ptc_utci(
+                tdb=ta,
+                tr=float(tmrt[i, j]),
+                v=max(0.01, float(v_pixel[i, j])),
+                rh=rh,
+                round_output=False,
+            )
+            out[i, j] = float(getattr(res, "utci", res))
     return out
 
 
@@ -486,17 +495,17 @@ def main() -> None:
         with rasterio.open(tmrt_path) as src:
             tmrt = src.read(1)
         with rasterio.open(wind_path) as src:
-            wind_speed_raster = src.read(1)
+            wind_nodata = src.nodata
+            wind_speed_raster = _sanitize_wind(src.read(1), wind_nodata)
 
         # Align wind to Tmrt/DSM grid if SOLWEIG output resolution differs
         if tmrt.shape != (height, width) or wind_speed_raster.shape != (height, width):
             from rasterio.warp import Resampling, reproject
 
             if wind_speed_raster.shape != (height, width):
-                wind_resampled = np.empty(
-                    (height, width), dtype=wind_speed_raster.dtype
-                )
+                wind_resampled = np.full((height, width), np.nan, dtype=np.float32)
                 with rasterio.open(wind_path) as wsrc:
+                    src_nd = wsrc.nodata if wsrc.nodata is not None else -9999.0
                     reproject(
                         source=rasterio.band(wsrc, 1),
                         destination=wind_resampled,
@@ -504,11 +513,13 @@ def main() -> None:
                         src_crs=wsrc.crs,
                         dst_transform=profile["transform"],
                         dst_crs=profile["crs"],
+                        src_nodata=src_nd,
+                        dst_nodata=np.nan,
                         resampling=Resampling.bilinear,
                     )
-                wind_speed_raster = wind_resampled
+                wind_speed_raster = _sanitize_wind(wind_resampled, np.nan)
             if tmrt.shape != (height, width):
-                tmrt_resampled = np.empty((height, width), dtype=tmrt.dtype)
+                tmrt_resampled = np.full((height, width), np.nan, dtype=tmrt.dtype)
                 with rasterio.open(tmrt_path) as tsrc:
                     reproject(
                         source=rasterio.band(tsrc, 1),
@@ -517,6 +528,8 @@ def main() -> None:
                         src_crs=tsrc.crs,
                         dst_transform=profile["transform"],
                         dst_crs=profile["crs"],
+                        src_nodata=tsrc.nodata,
+                        dst_nodata=np.nan,
                         resampling=Resampling.bilinear,
                     )
                 tmrt = tmrt_resampled

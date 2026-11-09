@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::*;
-use rsmdu::geometric::lidar::Lidar;
+use rsmdu::geometric::lidar::{DtmFill, Lidar};
 use std::path::{Path, PathBuf};
 
 use crate::bindings::geo_core::PyGeoCore;
@@ -55,6 +55,22 @@ impl PyLidar {
     /// Set classification filter (optional).
     fn set_classification(&mut self, classification: Option<u8>) {
         self.inner.set_classification(classification);
+    }
+
+    /// How DTM holes are filled before CHM: `"neighbor3x3"` (legacy default) or `"nearest"` (JFA).
+    #[pyo3(text_signature = "(self, mode)")]
+    fn set_dtm_fill(&mut self, mode: &str) -> PyResult<()> {
+        let fill = match mode {
+            "neighbor3x3" | "Neighbor3x3" => DtmFill::Neighbor3x3,
+            "nearest" | "Nearest" => DtmFill::Nearest,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown dtm_fill mode '{other}' (expected 'neighbor3x3' or 'nearest')"
+                )));
+            }
+        };
+        self.inner.set_dtm_fill(fill);
+        Ok(())
     }
 
     /// Set CRS (e.g. 2154 for Lambert-93). Default is 2154.

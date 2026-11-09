@@ -1,63 +1,97 @@
-//! Optional wgpu headless max-Z rasterization (feature = "gpu").
+//! Optional wgpu compute path (feature = "gpu"): max-Z binning, DTM hole filling, CHM.
+//!
+//! Rasters stay on the device between kernels; a single readback at the end.
+//!
+//! 1. `lidar_bin`       — DSM max-Z (enabled classes) + ground max-Z (class 2), uploaded in
+//!                        batches that respect the device limits (binding size, dispatch size).
+//! 2. `lidar_jfa_*`     — nearest ground cell by Jump Flooding (only for [`DtmFill::Nearest`]).
+//! 3. `lidar_fill_chm`  — decode DSM, fill DTM holes, CHM = max(DSM − DTM, 0).
+//!
+//! Every failure (no adapter, raster too large, validation / OOM error) returns `Err`, so the
+//! caller can fall back to the CPU path in `raster.rs`, which computes the same results.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use std::sync::{Mutex, OnceLock};
+use wgpu::util::DeviceExt;
 
-use super::types::LidarPoint;
+use super::raster::{jfa_steps, ClassMask};
+use super::types::{DtmFill, LidarPoint};
 
-#[cfg(feature = "gpu")]
 pub(super) const GPU_MIN_POINTS: usize = 500_000;
+/// Upper bound per upload batch (4 Mi points = 64 MiB); device limits may lower it.
+pub(super) const GPU_BATCH_POINTS: usize = 1 << 22;
 
-#[cfg(feature = "gpu")]
-pub(super) fn f32_to_sortable_u32(f: f32) -> u32 {
-    let bits = f.to_bits();
-    if bits & 0x8000_0000 != 0 {
-        !bits
-    } else {
-        bits | 0x8000_0000
-    }
-}
+const BIN_WORKGROUP: u32 = 256;
+const GRID_WORKGROUP: u32 = 16;
+/// `f32_to_sortable(-inf)`: marker of an empty cell in the binned rasters.
+const EMPTY_BITS: u32 = 0x007f_ffff;
+/// JFA distances are computed in i32/u32 on the GPU: keep dx² + dy² below 2³¹.
+const JFA_MAX_DIM: usize = 32_768;
 
-#[cfg(feature = "gpu")]
-pub(super) fn sortable_u32_to_f32(u: u32) -> f32 {
-    if u & 0x8000_0000 != 0 {
-        f32::from_bits(u & 0x7fff_ffff)
-    } else {
-        f32::from_bits(!u)
-    }
-}
+static GPU_LOCK: Mutex<()> = Mutex::new(());
 
-#[cfg(feature = "gpu")]
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct GpuLidarPoint {
+struct GpuLidarPoint {
+    /// X − x_min
     x: f32,
+    /// y_max − Y
     y: f32,
     z: f32,
     classification: u32,
 }
 
-#[cfg(feature = "gpu")]
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct GpuRasterParams {
-    x_min: f32,
-    y_max: f32,
+struct BinParams {
     resolution: f32,
     width: u32,
     height: u32,
-    _pad: [u32; 3],
+    n_points: u32,
+    class_mask: [u32; 8],
 }
 
-#[cfg(feature = "gpu")]
-pub(super) struct GpuRasterContext {
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GridParams {
+    width: u32,
+    height: u32,
+    step: u32,
+    mode: u32,
+}
+
+/// Row-major rasters (`row * width + col`). Empty DSM cells are `-inf`.
+pub(super) struct GpuRasters {
+    pub(super) dsm: Vec<f32>,
+    pub(super) dtm: Vec<f32>,
+    pub(super) chm: Vec<f32>,
+}
+
+struct GpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    pipeline: wgpu::ComputePipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    bin: wgpu::ComputePipeline,
+    jfa_init: wgpu::ComputePipeline,
+    jfa_step: wgpu::ComputePipeline,
+    fill_chm: wgpu::ComputePipeline,
 }
 
-#[cfg(feature = "gpu")]
-impl GpuRasterContext {
+fn make_pipeline(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ComputePipeline {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some(label),
+        layout: None, // derived from the shader: one bind group, bindings 0..n in order
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    })
+}
+
+impl GpuContext {
     async fn new() -> Result<Self, String> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -72,11 +106,20 @@ impl GpuRasterContext {
             .await
             .map_err(|e| format!("Failed to find GPU adapter: {e:?}"))?;
 
+        // Raise only the limits that bound point batches and raster size.
+        // `Limits::default()` caps a storage binding at 128 MiB (~8.4 M points).
+        let adapter_limits = adapter.limits();
+        let required_limits = wgpu::Limits {
+            max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
+            max_buffer_size: adapter_limits.max_buffer_size,
+            ..wgpu::Limits::default()
+        };
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("Lidar max-Z compute"),
+                label: Some("Lidar raster compute"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 memory_hints: Default::default(),
                 experimental_features: Default::default(),
                 trace: Default::default(),
@@ -84,307 +127,375 @@ impl GpuRasterContext {
             .await
             .map_err(|e| format!("Failed to create GPU device: {e}"))?;
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("lidar_max_z"),
-            source: wgpu::ShaderSource::Wgsl(
-                r#"
-struct Params {
-    x_min: f32,
-    y_max: f32,
-    resolution: f32,
-    width: u32,
-    height: u32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
-}
-
-struct Point {
-    x: f32,
-    y: f32,
-    z: f32,
-    classification: u32,
-}
-
-@group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> points: array<Point>;
-@group(0) @binding(2) var<storage, read_write> dsm: array<atomic<u32>>;
-@group(0) @binding(3) var<storage, read_write> dtm: array<atomic<u32>>;
-
-fn f32_to_sortable(f: f32) -> u32 {
-    let bits = bitcast<u32>(f);
-    if ((bits & 0x80000000u) != 0u) {
-        return ~bits;
-    }
-    return bits | 0x80000000u;
-}
-
-@compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i >= arrayLength(&points)) {
-        return;
-    }
-    let p = points[i];
-    let col = u32(floor((p.x - params.x_min) / params.resolution));
-    let row = u32(floor((params.y_max - p.y) / params.resolution));
-    if (col >= params.width || row >= params.height) {
-        return;
-    }
-    let idx = row * params.width + col;
-    let z_bits = f32_to_sortable(p.z);
-    atomicMax(&dsm[idx], z_bits);
-    if (p.classification == 2u) {
-        atomicMax(&dtm[idx], z_bits);
-    }
-}
-"#
-                .into(),
-            ),
-        });
-
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("lidar_max_z_bgl"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("lidar_max_z_pl"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("lidar_max_z_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let bin = make_pipeline(&device, "lidar_bin", include_str!("shaders/lidar_bin.wgsl"));
+        let jfa_init = make_pipeline(
+            &device,
+            "lidar_jfa_init",
+            include_str!("shaders/lidar_jfa_init.wgsl"),
+        );
+        let jfa_step = make_pipeline(
+            &device,
+            "lidar_jfa_step",
+            include_str!("shaders/lidar_jfa_step.wgsl"),
+        );
+        let fill_chm = make_pipeline(
+            &device,
+            "lidar_fill_chm",
+            include_str!("shaders/lidar_fill_chm.wgsl"),
+        );
+        if let Some(e) = device.pop_error_scope().await {
+            return Err(format!("Lidar WGSL pipelines failed validation: {e}"));
+        }
 
         Ok(Self {
             device,
             queue,
-            pipeline,
-            bind_group_layout,
+            bin,
+            jfa_init,
+            jfa_step,
+            fill_chm,
+        })
+    }
+
+    fn bind(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        label: &str,
+        buffers: &[&wgpu::Buffer],
+    ) -> wgpu::BindGroup {
+        let layout = pipeline.get_bind_group_layout(0);
+        let entries: Vec<wgpu::BindGroupEntry> = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, b)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: b.as_entire_binding(),
+            })
+            .collect();
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &layout,
+            entries: &entries,
+        })
+    }
+
+    fn grid_uniform(&self, width: u32, height: u32, step: u32, mode: u32) -> wgpu::Buffer {
+        self.device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("lidar_grid_params"),
+                contents: bytemuck::bytes_of(&GridParams {
+                    width,
+                    height,
+                    step,
+                    mode,
+                }),
+                usage: wgpu::BufferUsages::UNIFORM,
+            })
+    }
+
+    fn storage(&self, label: &str, bytes: u64, extra: wgpu::BufferUsages) -> wgpu::Buffer {
+        self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: bytes,
+            usage: wgpu::BufferUsages::STORAGE | extra,
+            mapped_at_creation: false,
         })
     }
 }
 
-#[cfg(feature = "gpu")]
-pub(super) fn gpu_raster_context() -> Result<&'static GpuRasterContext, String> {
-    use std::sync::OnceLock;
-    static CTX: OnceLock<Result<GpuRasterContext, String>> = OnceLock::new();
-    match CTX.get_or_init(|| pollster::block_on(GpuRasterContext::new())) {
+fn gpu_context() -> Result<&'static GpuContext, String> {
+    static CTX: OnceLock<Result<GpuContext, String>> = OnceLock::new();
+    match CTX.get_or_init(|| pollster::block_on(GpuContext::new())) {
         Ok(ctx) => Ok(ctx),
         Err(e) => Err(e.clone()),
     }
 }
 
-/// Bin max-Z DSM (+ DTM class 2) on GPU. Err → caller falls back to CPU.
-#[cfg(feature = "gpu")]
-pub(super) fn rasterize_max_z_gpu(
+fn dispatch(
+    encoder: &mut wgpu::CommandEncoder,
+    label: &str,
+    pipeline: &wgpu::ComputePipeline,
+    bind_group: &wgpu::BindGroup,
+    groups: (u32, u32),
+) {
+    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        label: Some(label),
+        timestamp_writes: None,
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    pass.dispatch_workgroups(groups.0, groups.1, 1);
+}
+
+fn read_f32(buffer: &wgpu::Buffer) -> Vec<f32> {
+    let out = {
+        let view = buffer.slice(..).get_mapped_range();
+        bytemuck::cast_slice::<u8, f32>(&view).to_vec()
+    };
+    buffer.unmap();
+    out
+}
+
+/// DSM / filled DTM / CHM on GPU. `Err` → caller falls back to CPU.
+pub(super) fn rasterize_fill_chm_gpu(
     points: &[LidarPoint],
     bbox: (f64, f64, f64, f64),
+    mask: &ClassMask,
     resolution: f64,
     width: usize,
     height: usize,
-) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
-    if width == 0 || height == 0 || points.is_empty() {
-        return Ok((
-            vec![vec![f64::NEG_INFINITY; width]; height],
-            vec![vec![f64::NEG_INFINITY; width]; height],
-        ));
+    fill: DtmFill,
+) -> Result<GpuRasters> {
+    rasterize_fill_chm_gpu_batched(
+        points,
+        bbox,
+        mask,
+        resolution,
+        width,
+        height,
+        fill,
+        GPU_BATCH_POINTS,
+    )
+}
+
+/// Same as [`rasterize_fill_chm_gpu`] with an explicit batch size (tests force several batches).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn rasterize_fill_chm_gpu_batched(
+    points: &[LidarPoint],
+    bbox: (f64, f64, f64, f64),
+    mask: &ClassMask,
+    resolution: f64,
+    width: usize,
+    height: usize,
+    fill: DtmFill,
+    max_batch_points: usize,
+) -> Result<GpuRasters> {
+    let cells = width
+        .checked_mul(height)
+        .context("raster dimensions overflow")?;
+    if cells == 0 {
+        return Ok(GpuRasters {
+            dsm: Vec::new(),
+            dtm: Vec::new(),
+            chm: Vec::new(),
+        });
     }
-    let ctx = gpu_raster_context().map_err(|e| anyhow::anyhow!(e))?;
-    let (x_min, _y_min, _x_max, y_max) = bbox;
+    let w32 = u32::try_from(width).context("raster width exceeds u32")?;
+    let h32 = u32::try_from(height).context("raster height exceeds u32")?;
+    if fill == DtmFill::Nearest && width.max(height) > JFA_MAX_DIM {
+        bail!("raster {width}x{height} too large for GPU JFA (max side {JFA_MAX_DIM})");
+    }
 
-    // Local origin before f32: Lambert-93 absolutes lose ~0.5 m in f32.
-    let gpu_points: Vec<GpuLidarPoint> = points
-        .iter()
-        .map(|p| GpuLidarPoint {
-            x: (p.x - x_min) as f32,
-            y: (p.y - y_max) as f32,
-            z: p.z as f32,
-            classification: p.classification as u32,
-        })
-        .collect();
+    let ctx = gpu_context().map_err(|e| anyhow::anyhow!(e))?;
+    // Error scopes are per device: serialize concurrent callers.
+    let _guard = GPU_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
-    let params = GpuRasterParams {
-        x_min: 0.0,
-        y_max: 0.0,
-        resolution: resolution as f32,
-        width: width as u32,
-        height: height as u32,
-        _pad: [0; 3],
+    // ---- Limits ---------------------------------------------------------------------------
+    let limits = ctx.device.limits();
+    let max_binding = limits.max_storage_buffer_binding_size as u64;
+    let max_buffer = limits.max_buffer_size as u64;
+    let max_groups = limits.max_compute_workgroups_per_dimension;
+
+    let grid_bytes = (cells as u64) * 4;
+    if grid_bytes > max_binding || grid_bytes > max_buffer {
+        bail!(
+            "raster {width}x{height} ({grid_bytes} B per band) exceeds GPU buffer limits \
+             (binding {max_binding} B, buffer {max_buffer} B)"
+        );
+    }
+    let groups_x = w32.div_ceil(GRID_WORKGROUP);
+    let groups_y = h32.div_ceil(GRID_WORKGROUP);
+    if groups_x > max_groups || groups_y > max_groups {
+        bail!("raster {width}x{height} exceeds GPU dispatch limits ({max_groups} groups/dim)");
+    }
+
+    let point_size = std::mem::size_of::<GpuLidarPoint>() as u64;
+    let batch_cap = (max_batch_points.max(1) as u64)
+        .min(max_binding / point_size)
+        .min(max_buffer / point_size)
+        .min(max_groups as u64 * BIN_WORKGROUP as u64)
+        .min(points.len().max(1) as u64) as usize;
+
+    let mode = match fill {
+        DtmFill::Neighbor3x3 => 0u32,
+        DtmFill::Nearest => 1u32,
     };
 
-    let cell_count = width * height;
-    let empty_bits = f32_to_sortable_u32(f32::NEG_INFINITY);
-    let init_grid = vec![empty_bits; cell_count];
+    ctx.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    ctx.device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+    // ---- 1. Binning, batch by batch ------------------------------------------------------
+    let empty = vec![EMPTY_BITS; cells];
+    let init_grid = |label: &str| {
+        ctx.device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: bytemuck::cast_slice(&empty),
+                usage: wgpu::BufferUsages::STORAGE,
+            })
+    };
+    let dsm_bits = init_grid("lidar_dsm_bits");
+    let dtm_bits = init_grid("lidar_dtm_bits");
+    drop(empty);
 
     let params_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("lidar_params"),
-        size: std::mem::size_of::<GpuRasterParams>() as u64,
+        label: Some("lidar_bin_params"),
+        size: std::mem::size_of::<BinParams>() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    ctx.queue
-        .write_buffer(&params_buf, 0, bytemuck::bytes_of(&params));
+    let points_buf = ctx.storage(
+        "lidar_points",
+        batch_cap as u64 * point_size,
+        wgpu::BufferUsages::COPY_DST,
+    );
+    let bin_bg = ctx.bind(
+        &ctx.bin,
+        "lidar_bin_bg",
+        &[&params_buf, &points_buf, &dsm_bits, &dtm_bits],
+    );
 
-    let points_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("lidar_points"),
-        size: (gpu_points.len() * std::mem::size_of::<GpuLidarPoint>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    ctx.queue
-        .write_buffer(&points_buf, 0, bytemuck::cast_slice(&gpu_points));
+    let (x_min, _y_min, _x_max, y_max) = bbox;
+    let mut batch: Vec<GpuLidarPoint> = Vec::with_capacity(batch_cap);
+    for chunk in points.chunks(batch_cap) {
+        // Local origin before f32: Lambert-93 absolutes lose ~0.5 m in f32.
+        batch.clear();
+        batch.extend(chunk.iter().map(|p| GpuLidarPoint {
+            x: (p.x - x_min) as f32,
+            y: (y_max - p.y) as f32,
+            z: p.z as f32,
+            classification: p.classification as u32,
+        }));
+        let params = BinParams {
+            resolution: resolution as f32,
+            width: w32,
+            height: h32,
+            n_points: chunk.len() as u32,
+            class_mask: mask.words(),
+        };
+        // write_buffer takes effect at the next submit, after previously submitted work:
+        // reusing the same points buffer across batches is safe, and the CPU converts the
+        // next batch while the GPU bins the current one.
+        ctx.queue
+            .write_buffer(&params_buf, 0, bytemuck::bytes_of(&params));
+        ctx.queue
+            .write_buffer(&points_buf, 0, bytemuck::cast_slice(&batch));
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("lidar_bin_enc"),
+            });
+        dispatch(
+            &mut encoder,
+            "lidar_bin_pass",
+            &ctx.bin,
+            &bin_bg,
+            ((chunk.len() as u32).div_ceil(BIN_WORKGROUP), 1),
+        );
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+    drop(batch);
 
-    let grid_bytes = (cell_count * std::mem::size_of::<u32>()) as u64;
-    let dsm_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("lidar_dsm"),
-        size: grid_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let dtm_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("lidar_dtm"),
-        size: grid_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    ctx.queue
-        .write_buffer(&dsm_buf, 0, bytemuck::cast_slice(&init_grid));
-    ctx.queue
-        .write_buffer(&dtm_buf, 0, bytemuck::cast_slice(&init_grid));
-
-    let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("lidar_staging"),
-        size: grid_bytes * 2,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("lidar_max_z_bg"),
-        layout: &ctx.bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: points_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: dsm_buf.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: dtm_buf.as_entire_binding(),
-            },
-        ],
-    });
-
+    // ---- 2. Nearest ground seeds (JFA) ----------------------------------------------------
     let mut encoder = ctx
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("lidar_max_z_enc"),
+            label: Some("lidar_fill_enc"),
         });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("lidar_max_z_pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&ctx.pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = (gpu_points.len() as u32).div_ceil(256);
-        pass.dispatch_workgroups(workgroups, 1, 1);
-    }
-    encoder.copy_buffer_to_buffer(&dsm_buf, 0, &staging, 0, grid_bytes);
-    encoder.copy_buffer_to_buffer(&dtm_buf, 0, &staging, grid_bytes, grid_bytes);
+    let seeds: Option<wgpu::Buffer> = if mode == 1 {
+        let mut src = ctx.storage("lidar_seeds_a", grid_bytes, wgpu::BufferUsages::empty());
+        let mut dst = ctx.storage("lidar_seeds_b", grid_bytes, wgpu::BufferUsages::empty());
+        let bg = ctx.bind(
+            &ctx.jfa_init,
+            "lidar_jfa_init_bg",
+            &[&ctx.grid_uniform(w32, h32, 0, mode), &dtm_bits, &src],
+        );
+        dispatch(&mut encoder, "lidar_jfa_init", &ctx.jfa_init, &bg, (groups_x, groups_y));
+        for step in jfa_steps(width, height) {
+            let bg = ctx.bind(
+                &ctx.jfa_step,
+                "lidar_jfa_step_bg",
+                &[&ctx.grid_uniform(w32, h32, step, mode), &src, &dst],
+            );
+            dispatch(&mut encoder, "lidar_jfa_step", &ctx.jfa_step, &bg, (groups_x, groups_y));
+            std::mem::swap(&mut src, &mut dst);
+        }
+        Some(src)
+    } else {
+        None
+    };
+    // Mode 0 never reads the seeds: bind the (read-only) DTM there instead of a dummy buffer.
+    let seeds_ref = seeds.as_ref().unwrap_or(&dtm_bits);
 
-    let submission_index = ctx.queue.submit(Some(encoder.finish()));
-    let slice = staging.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
+    // ---- 3. Fill + CHM, then readback ----------------------------------------------------
+    let outputs: [wgpu::Buffer; 3] = std::array::from_fn(|i| {
+        ctx.storage(
+            ["lidar_out_dsm", "lidar_out_dtm", "lidar_out_chm"][i],
+            grid_bytes,
+            wgpu::BufferUsages::COPY_SRC,
+        )
     });
+    let fill_bg = ctx.bind(
+        &ctx.fill_chm,
+        "lidar_fill_chm_bg",
+        &[
+            &ctx.grid_uniform(w32, h32, 0, mode),
+            &dsm_bits,
+            &dtm_bits,
+            seeds_ref,
+            &outputs[0],
+            &outputs[1],
+            &outputs[2],
+        ],
+    );
+    dispatch(&mut encoder, "lidar_fill_chm", &ctx.fill_chm, &fill_bg, (groups_x, groups_y));
+
+    let staging: [wgpu::Buffer; 3] = std::array::from_fn(|_| {
+        ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lidar_staging"),
+            size: grid_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    });
+    for (src, dst) in outputs.iter().zip(&staging) {
+        encoder.copy_buffer_to_buffer(src, 0, dst, 0, grid_bytes);
+    }
+    let submission_index = ctx.queue.submit(Some(encoder.finish()));
+
+    let validation = pollster::block_on(ctx.device.pop_error_scope());
+    let oom = pollster::block_on(ctx.device.pop_error_scope());
+    if let Some(e) = validation.or(oom) {
+        bail!("GPU raster pipeline error: {e}");
+    }
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    for buffer in &staging {
+        let sender = sender.clone();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+    }
+    drop(sender);
     ctx.device
         .poll(wgpu::PollType::Wait {
             submission_index: Some(submission_index),
             timeout: None,
         })
         .map_err(|e| anyhow::anyhow!("GPU poll failed: {e:?}"))?;
-    receiver
-        .recv()
-        .context("GPU map channel closed")?
-        .map_err(|e| anyhow::anyhow!("Failed to map GPU staging buffer: {e:?}"))?;
-
-    let data = slice.get_mapped_range();
-    let words: &[u32] = bytemuck::cast_slice(&data);
-    let mut dsm = vec![vec![f64::NEG_INFINITY; width]; height];
-    let mut dtm = vec![vec![f64::NEG_INFINITY; width]; height];
-    for row in 0..height {
-        for col in 0..width {
-            let idx = row * width + col;
-            let dsm_v = sortable_u32_to_f32(words[idx]);
-            let dtm_v = sortable_u32_to_f32(words[cell_count + idx]);
-            if dsm_v.is_finite() {
-                dsm[row][col] = dsm_v as f64;
-            }
-            if dtm_v.is_finite() {
-                dtm[row][col] = dtm_v as f64;
-            }
-        }
+    for _ in 0..staging.len() {
+        receiver
+            .recv()
+            .context("GPU map channel closed")?
+            .map_err(|e| anyhow::anyhow!("Failed to map GPU staging buffer: {e:?}"))?;
     }
-    drop(data);
-    staging.unmap();
-    Ok((dsm, dtm))
+
+    Ok(GpuRasters {
+        dsm: read_f32(&staging[0]),
+        dtm: read_f32(&staging[1]),
+        chm: read_f32(&staging[2]),
+    })
 }

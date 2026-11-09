@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::geo_core::{BoundingBox, GeoCore};
 
-use super::types::{log_timing, Lidar};
+use super::types::{log_timing, DtmFill, Lidar};
 
 impl Lidar {
 
@@ -29,6 +29,7 @@ impl Lidar {
             classification,
             list_path_laz: None,
             loaded_points: None,
+            dtm_fill: DtmFill::default(),
         };
         if let Some((min_x, min_y, max_x, max_y)) = bbox {
             lidar.set_bbox(min_x, min_y, max_x, max_y)?;
@@ -83,6 +84,11 @@ impl Lidar {
             .convert((bbox.max_x, bbox.max_y))
             .context("Failed to transform max coordinates")?;
         Ok((min_x, min_y, max_x, max_y))
+    }
+
+    /// Choose how DTM holes are filled before the CHM (see [`DtmFill`]).
+    pub fn set_dtm_fill(&mut self, mode: DtmFill) {
+        self.dtm_fill = mode;
     }
 
     pub fn set_classification(&mut self, classification: Option<u8>) {
