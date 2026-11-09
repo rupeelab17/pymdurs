@@ -2,10 +2,11 @@
 
 use anyhow::{Context, Result};
 use proj::Proj;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::Instant;
 
 use super::io::*;
-use super::types::{classification_to_u8, Lidar, LidarPoint};
+use super::types::{classification_to_u8, log_timing, Lidar, LidarPoint};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -20,6 +21,8 @@ use super::types::progress_style;
 impl Lidar {
 
 
+    /// Dispatcher COPC vs LAZ — used by the non-rayon load path only.
+    #[cfg(not(feature = "rayon"))]
     pub(super) fn load_single_point_file(
         &self,
         url: &str,
@@ -65,6 +68,7 @@ impl Lidar {
             }
             anyhow::anyhow!("Failed to create LAS reader for {}: {}", url, e)
         };
+        let t_io = Instant::now();
         let mut reader = if cache_path.exists() {
             match Self::verify_cached_file(&cache_path) {
                 Ok(true) => {
@@ -125,7 +129,9 @@ impl Lidar {
             };
             las::Reader::new(Cursor::new(compressed_data)).map_err(map_reader_err)?
         };
+        log_timing("download_or_cache_read", t_io.elapsed(), None);
 
+        let t_decomp = Instant::now();
         let point_count = reader.header().number_of_points() as usize;
         println!("  Header declares {} points", point_count);
         let point_data = reader
@@ -160,7 +166,13 @@ impl Lidar {
                 classification: classification_to_u8(&p.classification),
             })
             .collect();
+        log_timing(
+            "decompress_parse",
+            t_decomp.elapsed(),
+            Some(all_points.len()),
+        );
 
+        let t_filter = Instant::now();
         let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
             #[cfg(feature = "rayon")]
             {
@@ -179,6 +191,7 @@ impl Lidar {
         } else {
             all_points
         };
+        log_timing("filter", t_filter.elapsed(), Some(file_points.len()));
         println!("  Loaded {} points after spatial filter", file_points.len());
         Ok(file_points)
     }

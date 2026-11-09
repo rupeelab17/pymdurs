@@ -1,8 +1,31 @@
 //! Core LiDAR types.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::geo_core::GeoCore;
+
+/// Structured stage timing for `Lidar::run` profiling (cache cold/hot).
+pub(super) fn log_timing(stage: &str, elapsed: Duration, points: Option<usize>) {
+    log_timing_backend(stage, elapsed, points, None);
+}
+
+/// Like [`log_timing`], with optional `backend=cpu|gpu`.
+pub(super) fn log_timing_backend(
+    stage: &str,
+    elapsed: Duration,
+    points: Option<usize>,
+    backend: Option<&str>,
+) {
+    let ms = elapsed.as_secs_f64() * 1000.0;
+    let backend = backend
+        .map(|b| format!(" backend={b}"))
+        .unwrap_or_default();
+    match points {
+        Some(n) => eprintln!("lidar_timing stage={stage} ms={ms:.2} points={n}{backend}"),
+        None => eprintln!("lidar_timing stage={stage} ms={ms:.2}{backend}"),
+    }
+}
 
 #[cfg(feature = "progressbar")]
 use indicatif::ProgressStyle;

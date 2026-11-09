@@ -7,8 +7,6 @@ use super::io::*;
 use super::types::Lidar;
 
 #[cfg(feature = "progressbar")]
-use indicatif::ProgressBar;
-#[cfg(feature = "progressbar")]
 use super::types::progress_style;
 
 impl Lidar {

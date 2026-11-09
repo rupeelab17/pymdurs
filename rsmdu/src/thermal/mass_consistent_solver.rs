@@ -9,7 +9,7 @@
 use ndarray::Array3;
 use rayon::prelude::*;
 
-#[cfg(feature = "indicatif")]
+#[cfg(feature = "progressbar")]
 use indicatif::{ProgressBar, ProgressStyle};
 
 /// SOR relaxation parameter. ω = 1 gives red-black Gauss–Seidel (stable).
@@ -60,7 +60,7 @@ pub fn solve_mass_consistent(
         .copied()
         .collect();
 
-    #[cfg(feature = "indicatif")]
+    #[cfg(feature = "progressbar")]
     let pb = {
         let pb = ProgressBar::new(max_iter as u64);
         pb.set_style(
@@ -234,27 +234,27 @@ pub fn solve_mass_consistent(
 
         let max_diff = max_diff_red.max(max_diff_black);
         if !max_diff.is_finite() || max_diff > 1e30 {
-            #[cfg(feature = "indicatif")]
+            #[cfg(feature = "progressbar")]
             pb.finish_with_message("diverged (keeping last λ)");
             break;
         }
         lam = lam_new;
 
-        #[cfg(feature = "indicatif")]
+        #[cfg(feature = "progressbar")]
         {
             pb.set_position(iter as u64);
             pb.set_message(format!("max_diff = {:.2e}", max_diff));
         }
 
         if max_diff < epsilon {
-            #[cfg(feature = "indicatif")]
+            #[cfg(feature = "progressbar")]
             pb.finish_with_message("converged");
             break;
         }
         iter += 1;
     }
 
-    #[cfg(feature = "indicatif")]
+    #[cfg(feature = "progressbar")]
     if iter >= max_iter {
         pb.finish_with_message("max iter reached");
     }

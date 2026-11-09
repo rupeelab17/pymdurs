@@ -511,6 +511,55 @@ fn test_octree_node_quadrant() {
     assert_eq!(node.quadrant_for_point(75.0, 75.0), 3);
 }
 
+/// End-to-end stage timings for `Lidar::run` on a small IGN bbox.
+///
+/// Skips cleanly when WFS/cache/network is unavailable.
+///
+/// ```text
+/// cargo test -p rsmdu --lib geometric::lidar::tests::test_lidar_run_stage_timings -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "network + IGN LiDAR HD; run manually with --ignored --nocapture"]
+fn test_lidar_run_stage_timings() {
+    let output = std::env::temp_dir().join("rsmdu_lidar_e2e_timings");
+    let _ = std::fs::create_dir_all(&output);
+
+    let bbox = (-1.153414, 46.180217, -1.141098, 46.186531);
+    let mut lidar = match Lidar::new(
+        Some(output.to_string_lossy().into_owned()),
+        None,
+        None,
+    ) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("skip lidar E2E timings (Lidar::new failed): {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = lidar.set_bbox(bbox.0, bbox.1, bbox.2, bbox.3) {
+        eprintln!("skip lidar E2E timings (set_bbox/WFS failed): {e}");
+        return;
+    }
+
+    match lidar.run(Some("e2e_timings.tif".into()), None, Some(1.0), false) {
+        Ok(path) => {
+            eprintln!("lidar E2E run ok: {:?}", path);
+            assert!(
+                lidar
+                    .loaded_points
+                    .as_ref()
+                    .map(|p| !p.is_empty())
+                    .unwrap_or(false),
+                "expected loaded points after successful run"
+            );
+        }
+        Err(e) => {
+            eprintln!("skip lidar E2E timings (run failed): {e}");
+        }
+    }
+}
+
 #[cfg(all(feature = "las", feature = "tempfile"))]
 #[test]
 fn test_save_las_ign_extended_classification() {

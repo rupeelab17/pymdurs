@@ -242,19 +242,20 @@ pub(super) fn rasterize_max_z_gpu(
     let ctx = gpu_raster_context().map_err(|e| anyhow::anyhow!(e))?;
     let (x_min, _y_min, _x_max, y_max) = bbox;
 
+    // Local origin before f32: Lambert-93 absolutes lose ~0.5 m in f32.
     let gpu_points: Vec<GpuLidarPoint> = points
         .iter()
         .map(|p| GpuLidarPoint {
-            x: p.x as f32,
-            y: p.y as f32,
+            x: (p.x - x_min) as f32,
+            y: (p.y - y_max) as f32,
             z: p.z as f32,
             classification: p.classification as u32,
         })
         .collect();
 
     let params = GpuRasterParams {
-        x_min: x_min as f32,
-        y_max: y_max as f32,
+        x_min: 0.0,
+        y_max: 0.0,
         resolution: resolution as f32,
         width: width as u32,
         height: height as u32,

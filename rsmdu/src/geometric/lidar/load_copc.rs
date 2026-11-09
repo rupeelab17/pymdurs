@@ -2,19 +2,14 @@
 
 use anyhow::{Context, Result};
 use laz::laszip::LazVlr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::Instant;
 
 use super::copc::*;
-use super::io::*;
-use super::types::{classification_to_u8, Lidar, LidarPoint};
+use super::types::{classification_to_u8, log_timing, Lidar, LidarPoint};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
-
-#[cfg(feature = "progressbar")]
-use indicatif::ProgressBar;
-#[cfg(feature = "progressbar")]
-use super::types::progress_style;
 
 impl Lidar {
 
@@ -27,6 +22,7 @@ impl Lidar {
         let cache_path = Self::cache_path_for_url(cache_dir, url);
 
         // --- 1. Obtenir les bytes (cache ou téléchargement) ---
+        let t_io = Instant::now();
         let bytes: Vec<u8> = if cache_path.exists() {
             match Self::verify_cached_file(&cache_path) {
                 Ok(true) => {
@@ -53,6 +49,7 @@ impl Lidar {
                 .context("Failed to create HTTP client")?;
             Self::download_with_verification(&client, url, &cache_path)?
         };
+        log_timing("download_or_cache_read", t_io.elapsed(), None);
 
         println!(
             "  File size: {} bytes ({:.2} MB)",
@@ -186,8 +183,14 @@ impl Lidar {
         }
 
         // --- 7 & 8. Décompresser chaque chunk et décoder les points ---
+        let t_decomp = Instant::now();
         let stats =
             Self::decompress_copc_entries(&bytes, &entries_to_process, &laz_vlr, &hdr, filter_bbox);
+        log_timing(
+            "decompress_parse",
+            t_decomp.elapsed(),
+            Some(stats.points.len()),
+        );
 
         println!("  COPC Results:");
         println!("     - Entries processed: {}", stats.entries_processed);
@@ -221,7 +224,58 @@ impl Lidar {
         Ok(stats.points)
     }
 
-    /// Décompresse les entries COPC sélectionnées et retourne les points avec statistiques.
+    /// Décompresse une entry COPC ; retourne (points, success).
+    fn decompress_one_copc_entry(
+        file_buf: &[u8],
+        entry: &CopcEntry,
+        laz_vlr: &LazVlr,
+        hdr: &Las14Header,
+        filter_bbox: Option<(f64, f64, f64, f64)>,
+        idx: usize,
+    ) -> (Vec<LidarPoint>, bool) {
+        let chunk_start = entry.offset as usize;
+        let chunk_end = chunk_start + entry.byte_size as usize;
+        if chunk_end > file_buf.len() {
+            eprintln!(
+                "  ⚠️  Chunk {} hors limites (offset={} size={} file_len={})",
+                idx,
+                entry.offset,
+                entry.byte_size,
+                file_buf.len()
+            );
+            return (Vec::new(), false);
+        }
+        let chunk_buf = &file_buf[chunk_start..chunk_end];
+        match decompress_copc_chunk(chunk_buf, laz_vlr, hdr.point_record_len, entry.point_count) {
+            Ok(raw_points) => {
+                let point_size = hdr.point_record_len as usize;
+                let n = entry.point_count as usize;
+                let mut points = Vec::with_capacity(n);
+                for i in 0..n {
+                    let raw = &raw_points[i * point_size..(i + 1) * point_size];
+                    let pt = decode_las14_point(raw, &hdr.scale, &hdr.coord_offset);
+                    if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
+                        if pt.x < qx_min || pt.x > qx_max || pt.y < qy_min || pt.y > qy_max {
+                            continue;
+                        }
+                    }
+                    points.push(pt);
+                }
+                (points, true)
+            }
+            Err(e) => {
+                if idx < 10 {
+                    eprintln!(
+                        "  ⚠️  Chunk {} (level={} vx={} vy={}): {}",
+                        idx, entry.level, entry.vx, entry.vy, e
+                    );
+                }
+                (Vec::new(), false)
+            }
+        }
+    }
+
+    /// Décompresse les entries COPC sélectionnées (parallèle si feature `rayon`).
     pub(super) fn decompress_copc_entries(
         file_buf: &[u8],
         entries: &[&CopcEntry],
@@ -229,79 +283,72 @@ impl Lidar {
         hdr: &Las14Header,
         filter_bbox: Option<(f64, f64, f64, f64)>,
     ) -> CopcReadStats {
-        let mut result_points: Vec<LidarPoint> = Vec::new();
-        let mut entries_processed = 0usize;
-        let mut entries_success = 0usize;
-        let mut entries_failed = 0usize;
+        #[cfg(feature = "rayon")]
+        {
+            let results: Vec<(Vec<LidarPoint>, bool)> = entries
+                .par_iter()
+                .enumerate()
+                .map(|(idx, entry)| {
+                    Self::decompress_one_copc_entry(
+                        file_buf, entry, laz_vlr, hdr, filter_bbox, idx,
+                    )
+                })
+                .collect();
 
-        for (idx, entry) in entries.iter().enumerate() {
-            let chunk_start = entry.offset as usize;
-            let chunk_end = chunk_start + entry.byte_size as usize;
-
-            if chunk_end > file_buf.len() {
-                eprintln!(
-                    "  ⚠️  Chunk {} hors limites (offset={} size={} file_len={})",
-                    idx,
-                    entry.offset,
-                    entry.byte_size,
-                    file_buf.len()
-                );
-                entries_processed += 1;
-                entries_failed += 1;
-                continue;
-            }
-
-            entries_processed += 1;
-            let chunk_buf = &file_buf[chunk_start..chunk_end];
-
-            match decompress_copc_chunk(chunk_buf, laz_vlr, hdr.point_record_len, entry.point_count)
-            {
-                Ok(raw_points) => {
+            let entries_processed = results.len();
+            let mut entries_success = 0usize;
+            let mut entries_failed = 0usize;
+            let mut result_points = Vec::new();
+            for (pts, ok) in results {
+                if ok {
                     entries_success += 1;
-                    let point_size = hdr.point_record_len as usize;
-                    let n = entry.point_count as usize;
-
-                    for i in 0..n {
-                        let raw = &raw_points[i * point_size..(i + 1) * point_size];
-                        let pt = decode_las14_point(raw, &hdr.scale, &hdr.coord_offset);
-
-                        // Filtre spatial précis post-décompression
-                        if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
-                            if pt.x < qx_min || pt.x > qx_max || pt.y < qy_min || pt.y > qy_max {
-                                continue;
-                            }
-                        }
-                        result_points.push(pt);
-                    }
-                }
-                Err(e) => {
+                    result_points.extend(pts);
+                } else {
                     entries_failed += 1;
-                    // Log seulement les 10 premières erreurs pour ne pas noyer les logs
-                    if entries_failed <= 10 {
-                        eprintln!(
-                            "  ⚠️  Chunk {} (level={} vx={} vy={}): {}",
-                            idx, entry.level, entry.vx, entry.vy, e
-                        );
-                    }
                 }
             }
-
-            // Progress tous les 500 chunks
-            if (idx + 1) % 500 == 0 {
-                println!(
-                    "  Progress: {}/{} entries, {} points",
-                    idx + 1,
-                    entries.len(),
-                    result_points.len()
-                );
-            }
+            return CopcReadStats {
+                points: result_points,
+                entries_processed,
+                entries_success,
+                entries_failed,
+            };
         }
 
-        CopcReadStats {
-            points: result_points,
-            entries_processed,
-            entries_success,
-            entries_failed,
+        #[cfg(not(feature = "rayon"))]
+        {
+            let mut result_points: Vec<LidarPoint> = Vec::new();
+            let mut entries_processed = 0usize;
+            let mut entries_success = 0usize;
+            let mut entries_failed = 0usize;
+
+            for (idx, entry) in entries.iter().enumerate() {
+                entries_processed += 1;
+                let (pts, ok) = Self::decompress_one_copc_entry(
+                    file_buf, entry, laz_vlr, hdr, filter_bbox, idx,
+                );
+                if ok {
+                    entries_success += 1;
+                    result_points.extend(pts);
+                } else {
+                    entries_failed += 1;
+                }
+                if (idx + 1) % 500 == 0 {
+                    println!(
+                        "  Progress: {}/{} entries, {} points",
+                        idx + 1,
+                        entries.len(),
+                        result_points.len()
+                    );
+                }
+            }
+
+            CopcReadStats {
+                points: result_points,
+                entries_processed,
+                entries_success,
+                entries_failed,
+            }
         }
     }
 
@@ -311,6 +358,7 @@ impl Lidar {
     ) -> Result<Vec<LidarPoint>> {
         use std::io::Cursor;
         println!("  📖 Reading as standard LAZ file...");
+        let t_decomp = Instant::now();
         let cursor = Cursor::new(bytes);
         let mut reader = las::Reader::new(cursor)
             .map_err(|e| anyhow::anyhow!("Failed to create LAZ reader: {}", e))?;
@@ -355,12 +403,19 @@ impl Lidar {
                 classification: classification_to_u8(&p.classification),
             })
             .collect();
+        log_timing(
+            "decompress_parse",
+            t_decomp.elapsed(),
+            Some(all_points.len()),
+        );
 
+        let t_filter = Instant::now();
         let file_points = if let Some((x_min, y_min, x_max, y_max)) = filter_bbox {
             Self::filter_points_with_spatial_index(&all_points, x_min, y_min, x_max, y_max)
         } else {
             all_points
         };
+        log_timing("filter", t_filter.elapsed(), Some(file_points.len()));
         println!("  Loaded {} points after spatial filter", file_points.len());
         Ok(file_points)
     }

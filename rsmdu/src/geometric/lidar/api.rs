@@ -3,10 +3,11 @@
 use anyhow::{Context, Result};
 use proj::Proj;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::geo_core::{BoundingBox, GeoCore};
 
-use super::types::{Lidar, LidarPoint};
+use super::types::{log_timing, Lidar};
 
 impl Lidar {
 
@@ -47,7 +48,8 @@ impl Lidar {
 
     /// Download and cache points for the current bbox if not already loaded.
     pub(super) fn ensure_points_loaded(&mut self) -> Result<()> {
-        if self.loaded_points.is_some() {
+        if let Some(ref pts) = self.loaded_points {
+            log_timing("load_total", Duration::ZERO, Some(pts.len()));
             return Ok(());
         }
         let laz_urls = self
@@ -59,7 +61,9 @@ impl Lidar {
         }
         let laz_urls = laz_urls.clone();
         let (min_x, min_y, max_x, max_y) = self.bbox_lambert93()?;
+        let t0 = Instant::now();
         let points = self.load_lidar_points_internal(&laz_urls, Some((min_x, min_y, max_x, max_y)))?;
+        log_timing("load_total", t0.elapsed(), Some(points.len()));
         self.loaded_points = Some(points);
         Ok(())
     }
@@ -123,8 +127,7 @@ impl Lidar {
         let points = self
             .loaded_points
             .as_ref()
-            .context("No LiDAR points loaded")?
-            .clone();
+            .context("No LiDAR points loaded")?;
         let rasters = self.process_lidar_points(
             points,
             (min_x, min_y, max_x, max_y),
@@ -134,7 +137,9 @@ impl Lidar {
         let output_file = self
             .output_path
             .join(file_name.unwrap_or("lidar_cdsm.tif".to_string()));
+        let t_tif = Instant::now();
         let output_path = self.to_tif(&rasters, &output_file, write_out_file)?;
+        log_timing("geotiff", t_tif.elapsed(), None);
         Ok(output_path)
     }
 

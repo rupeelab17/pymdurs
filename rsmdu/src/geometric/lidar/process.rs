@@ -2,99 +2,92 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use super::raster::rasterize_max_z_cpu;
-use super::types::{Lidar, LidarPoint, ProcessedRasters};
+use super::types::{log_timing, log_timing_backend, Lidar, LidarPoint, ProcessedRasters};
 
 #[cfg(feature = "gpu")]
 use super::gpu::{rasterize_max_z_gpu, GPU_MIN_POINTS};
 
 impl Lidar {
-
+    /// Rasterize already bbox-filtered points into DSM/DTM/CHM.
+    ///
+    /// Bbox filtering is done at load time; only optional classification filter remains here.
     pub(super) fn process_lidar_points(
         &self,
-        points: Vec<LidarPoint>,
+        points: &[LidarPoint],
         bbox: (f64, f64, f64, f64),
         classification_list: Option<Vec<u8>>,
         resolution: f64,
     ) -> Result<ProcessedRasters> {
         let (x_min, y_min, x_max, y_max) = bbox;
-        let filtered_points: Vec<LidarPoint> = points
-            .into_iter()
-            .filter(|p| p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max)
-            .collect();
-        println!("Filtered {} points within bbox", filtered_points.len());
-        let filtered_points: Vec<LidarPoint> = if let Some(ref class_list) = classification_list {
-            filtered_points
-                .into_iter()
+
+        let t_filter = Instant::now();
+        let owned: Option<Vec<LidarPoint>> = classification_list.as_ref().map(|class_list| {
+            points
+                .iter()
                 .filter(|p| class_list.contains(&p.classification))
+                .cloned()
                 .collect()
-        } else {
-            filtered_points
-        };
-        println!(
-            "After classification filter: {} points",
-            filtered_points.len()
-        );
+        });
+        let pts: &[LidarPoint] = owned.as_deref().unwrap_or(points);
+        log_timing("filter", t_filter.elapsed(), Some(pts.len()));
+        println!("After classification filter: {} points", pts.len());
+
         let width = ((x_max - x_min) / resolution).ceil() as usize;
         let height = ((y_max - y_min) / resolution).ceil() as usize;
         println!(
             "Grid dimensions: {}x{} (resolution: {}m)",
             width, height, resolution
         );
-        let (dsm, dtm) = {
+
+        let t_rast = Instant::now();
+        let ((dsm, dtm), rast_backend) = {
             #[cfg(feature = "gpu")]
             {
-                if filtered_points.len() >= GPU_MIN_POINTS {
-                    match rasterize_max_z_gpu(
-                        &filtered_points,
-                        bbox,
-                        resolution,
-                        width,
-                        height,
-                    ) {
+                if pts.len() >= GPU_MIN_POINTS {
+                    match rasterize_max_z_gpu(pts, bbox, resolution, width, height) {
                         Ok(grids) => {
-                            println!(
-                                "  GPU max-Z rasterize ({} points)",
-                                filtered_points.len()
-                            );
-                            grids
+                            println!("  GPU max-Z rasterize ({} points)", pts.len());
+                            (grids, "gpu")
                         }
                         Err(e) => {
                             println!("  GPU rasterize fallback to CPU: {e}");
-                            rasterize_max_z_cpu(
-                                &filtered_points,
-                                x_min,
-                                y_max,
-                                resolution,
-                                width,
-                                height,
+                            (
+                                rasterize_max_z_cpu(pts, x_min, y_max, resolution, width, height),
+                                "cpu",
                             )
                         }
                     }
                 } else {
-                    rasterize_max_z_cpu(
-                        &filtered_points,
-                        x_min,
-                        y_max,
-                        resolution,
-                        width,
-                        height,
+                    println!(
+                        "  CPU max-Z rasterize ({} points, below GPU_MIN_POINTS)",
+                        pts.len()
+                    );
+                    (
+                        rasterize_max_z_cpu(pts, x_min, y_max, resolution, width, height),
+                        "cpu",
                     )
                 }
             }
             #[cfg(not(feature = "gpu"))]
             {
-                rasterize_max_z_cpu(
-                    &filtered_points,
-                    x_min,
-                    y_max,
-                    resolution,
-                    width,
-                    height,
+                println!("  CPU max-Z rasterize ({} points)", pts.len());
+                (
+                    rasterize_max_z_cpu(pts, x_min, y_max, resolution, width, height),
+                    "cpu",
                 )
             }
         };
+        log_timing_backend(
+            "rasterize",
+            t_rast.elapsed(),
+            Some(pts.len()),
+            Some(rast_backend),
+        );
+
+        let t_fill = Instant::now();
         let mut dtm_filled = dtm.clone();
         for row in 0..height {
             for col in 0..width {
@@ -128,6 +121,8 @@ impl Lidar {
                 }
             }
         }
+        log_timing("fill_chm", t_fill.elapsed(), None);
+
         Ok(ProcessedRasters {
             dsm,
             dtm: dtm_filled,
@@ -197,5 +192,4 @@ impl Lidar {
         }
         Ok(output_path.to_path_buf())
     }
-
 }
