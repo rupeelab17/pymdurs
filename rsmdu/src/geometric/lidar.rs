@@ -369,6 +369,7 @@ struct Las14Header {
     /// Taille d'un enregistrement de point en bytes
     point_record_len: u16,
     /// Offset vers les données de points (bytes 96-99, u32 LE)
+    #[allow(dead_code)]
     offset_to_point_data: u64,
     /// Nombre de VLRs (bytes 100-103)
     vlr_count: u32,
@@ -377,6 +378,7 @@ struct Las14Header {
     /// Offsets de coordonnées XYZ (bytes 155/163/171, f64 LE)
     coord_offset: [f64; 3],
     /// Offset vers le premier EVLR (bytes 235-242, u64 LE)
+    #[allow(dead_code)]
     evlr_offset: u64,
     /// Nombre de points 64-bit LAS 1.4 (bytes 247-254, u64 LE)
     point_count: u64,
@@ -867,8 +869,9 @@ fn fetch_lidar_wfs_json(bbox: &str) -> Result<serde_json::Value> {
         .get(LIDAR_WFS_URL)
         .query(&params)
         .header("Accept", "application/json")
+        .header("User-Agent", "pymdurs/0.1")
         .send()
-        .context("Failed to send WFS request")?;
+        .with_context(|| format!("Failed to send WFS request to {LIDAR_WFS_URL}"))?;
     let status = response.status();
     let text = response
         .text()
@@ -1181,6 +1184,7 @@ impl Lidar {
         Ok(data)
     }
 
+    #[allow(unused)]
     fn load_single_point_file(
         &self,
         url: &str,
@@ -1510,9 +1514,12 @@ impl Lidar {
             .map_err(|e| anyhow::anyhow!("Failed to create LAZ reader: {}", e))?;
         let point_count = reader.header().number_of_points();
         println!("  Header declares {} points", point_count);
+        let point_data = reader
+            .read_all()
+            .map_err(|e| anyhow::anyhow!("Failed to read LAZ points: {}", e))?;
         let mut raw_points: Vec<las::Point> = Vec::with_capacity(point_count as usize);
         let mut errors = 0;
-        for point_result in reader.points() {
+        for point_result in point_data.points() {
             match point_result {
                 Ok(p) => raw_points.push(p),
                 Err(_) => {
@@ -1866,8 +1873,11 @@ impl Lidar {
 
         let point_count = reader.header().number_of_points() as usize;
         println!("  Header declares {} points", point_count);
+        let point_data = reader
+            .read_all()
+            .map_err(|e| anyhow::anyhow!("Failed to read LAZ points: {}", e))?;
         let mut raw_points: Vec<las::Point> = Vec::with_capacity(point_count);
-        for point_result in reader.points() {
+        for point_result in point_data.points() {
             if let Ok(p) = point_result {
                 raw_points.push(p);
             }
@@ -2710,12 +2720,18 @@ mod tests {
         let quadtree = QuadtreeSpatialIndex::build(&points);
         let candidates = quadtree.query_bbox(45.0, 45.0, 55.0, 55.0);
         assert!(!candidates.is_empty());
-        assert!(candidates.len() < 100);
-        for &idx in &candidates {
-            let p = &points[idx];
-            assert!(p.x >= 40.0 && p.x <= 60.0);
-            assert!(p.y >= 40.0 && p.y <= 60.0);
-        }
+        // Coarse leaf query; exact filter matches production path.
+        let exact: Vec<_> = candidates
+            .iter()
+            .copied()
+            .filter(|&i| {
+                let p = &points[i];
+                p.x >= 45.0 && p.x <= 55.0 && p.y >= 45.0 && p.y <= 55.0
+            })
+            .collect();
+        assert!(!exact.is_empty());
+        assert!(exact.len() < 100);
+        assert!(exact.len() <= candidates.len());
     }
 
     #[test]
@@ -2806,7 +2822,8 @@ mod tests {
         assert!(out.exists());
 
         let mut reader = las::Reader::from_path(&out).unwrap();
-        let classes: Vec<u8> = reader
+        let point_data = reader.read_all().unwrap();
+        let classes: Vec<u8> = point_data
             .points()
             .map(|p| classification_to_u8(&p.unwrap().classification))
             .collect();

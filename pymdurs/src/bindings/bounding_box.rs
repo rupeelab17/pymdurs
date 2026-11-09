@@ -5,7 +5,7 @@ use pyo3_stub_gen::derive::*;
 
 /// BoundingBox Python binding
 #[gen_stub_pyclass(module = "pymdurs")]
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyBoundingBox {
     pub(crate) inner: BoundingBox, // pub(crate) allows access from other modules in the same crate

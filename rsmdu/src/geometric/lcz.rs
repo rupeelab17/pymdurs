@@ -15,7 +15,7 @@ use gdal::Dataset;
 use geo::algorithm::bounding_rect::BoundingRect;
 use geo::algorithm::intersects::Intersects;
 use geo::{Geometry as GeoGeometry, Polygon};
-use geos::{CoordDimensions, CoordSeq, GResult, Geom, Geometry as GeosGeometry};
+use geos::{CoordSeq, CoordType, GResult, Geom, Geometry as GeosGeometry};
 use rstar::{RTree, RTreeObject, AABB};
 
 /// Structure pour indexer les géométries avec rstar
@@ -369,7 +369,7 @@ impl Lcz {
         );
         println!("Envelope: {:?}", envelope);
 
-        let candidates: Vec<_> = tree.locate_in_envelope_intersecting(&envelope).collect();
+        let candidates: Vec<_> = tree.locate_in_envelope_intersecting(envelope).collect();
         let num_candidates = candidates.len();
         println!("  {} candidats trouvés dans l'enveloppe", num_candidates);
 
@@ -429,7 +429,9 @@ impl Lcz {
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
-            let outpath = temp_dir.path().join(file.name());
+            let Some(outpath) = file.enclosed_name().map(|n| temp_dir.path().join(n)) else {
+                continue;
+            };
 
             if file.is_dir() {
                 fs::create_dir_all(&outpath)?;
@@ -472,7 +474,7 @@ impl Lcz {
 
     fn create_bbox(&self, xmin: f64, ymin: f64, xmax: f64, ymax: f64) -> GResult<GeosGeometry> {
         // 5 points (fermeture du polygone), 2 dimensions (x, y)
-        let mut coords = CoordSeq::new(5, CoordDimensions::TwoD)?;
+        let mut coords = CoordSeq::new(5, CoordType::XY)?;
 
         coords.set_x(0, xmin)?;
         coords.set_y(0, ymin)?;

@@ -13,7 +13,7 @@ use geojson::{Feature as GeoJsonFeature, GeoJson, Geometry};
 // TODO: Use GeoDataFrame when GeoPolars API is stable
 // use geopolars::geodataframe::GeoDataFrame;
 #[cfg(not(feature = "wasm"))]
-use polars::prelude::*;
+use polars::prelude::df;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

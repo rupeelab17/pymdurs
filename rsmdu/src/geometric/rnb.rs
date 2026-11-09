@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use geojson::{Feature, FeatureCollection, GeoJson, Geometry, Value};
+use geojson::{Feature, FeatureCollection, GeoJson, Geometry, GeometryValue};
 use serde_json::Map;
 use std::path::{Path, PathBuf};
 
@@ -164,7 +164,7 @@ impl Rnb {
 
             // Create Point geometry
             // Python: geometry = [Point(coordinates)]
-            let geometry = Geometry::new(Value::Point(vec![lon, lat]));
+            let geometry = Geometry::new(GeometryValue::new_point([lon, lat]));
 
             // Create properties
             let mut properties = Map::new();

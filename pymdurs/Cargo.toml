@@ -25,14 +25,14 @@ required-features = []
 
 [dependencies]
 # PyO3 for Python bindings (extension-module enabled via maturin / default features)
-pyo3 = { version = "0.27.2", features = ["abi3-py312"] }
-pyo3-stub-gen = "0.22.4"
+pyo3 = { version = "0.30.1", features = ["abi3-py312"] }
+pyo3-stub-gen = "0.23.2"
 
 # Core rsmdu library
 rsmdu = { path = "../rsmdu", default-features = true, features = ["rayon", "lidar-copc"] }
 
 # GeoJSON for bindings
-geojson = "0.24"
+geojson = "1.0"
 
 # Note: Polars DataFrame conversion will be handled via Python polars package
 # We don't need polars with python feature here

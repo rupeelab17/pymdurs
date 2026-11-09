@@ -20,49 +20,50 @@ lidar-copc = []
 
 [dependencies]
 # GeoRust ecosystem
-geo = { version = "0.28", features = ["serde"] }
-geojson = "0.24"
-geos = { version = "10.0", features = ["geo"], optional = true }
+geo = { version = "0.33", features = ["serde"] }
+geojson = "1.0"
+geos = { version = "11.3", features = ["geo"], optional = true }
 geotiff = { version = "0.1", optional = true }
 # 0.31 required for proj-sys 0.27 compatibility with gdal/gdal-src
 proj = { version = "0.31", optional = true }
 # gdal = { version = "0.19", features = ["bindgen"], optional = true }
 gdal = { version = "0.19", git = "https://github.com/AlexanderWillner/gdal.git", branch = "fix/gdal-3.13-compat", features = ["bindgen"], optional = true }
 
-rstar = "0.12"
+rstar = "0.14"
 
 # Data processing
-polars = { version = "0.51", features = ["lazy", "temporal", "strings"], optional = true }
+polars = { version = "0.55", features = ["lazy", "temporal", "strings"], optional = true }
 # polars-arrow pulls this; 1.5.2 transmutes () into TryFromIntError (E0512 on rustc 1.97+)
 ethnum = "1.5.3"
 
 # HTTP and serialization
-# Use rustls instead of default-tls (OpenSSL) for manylinux CI compatibility
+# rustls (not OpenSSL) for manylinux CI.
+# Pin 0.12: reqwest 0.13+rustls → Connection reset by peer on data.geopf.fr (WFS/LiDAR).
 reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false, optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"], optional = true }
 url = "2.5"
-csv = { version = "1.3", optional = true }
-quick-xml = { version = "0.31", features = ["serialize"], optional = true }
+csv = { version = "1.4", optional = true }
+quick-xml = { version = "0.42", features = ["serialize"], optional = true }
 encoding_rs = { version = "0.8", optional = true }
 urlencoding = "2.1"
-zip = { version = "0.6", optional = true }
-tempfile = { version = "3.8", optional = true }
-indicatif = { version = "0.17", optional = true }
-rayon = { version = "1.10", optional = true }
-ndarray = { version = "0.16", optional = true }
+zip = { version = "9.5", optional = true }
+tempfile = { version = "3.27", optional = true }
+indicatif = { version = "0.18", optional = true }
+rayon = { version = "1.12", optional = true }
+ndarray = { version = "0.17", optional = true }
 
 # LiDAR processing
-las = { version = "0.9", features = ["laz-parallel"], optional = true }
+las = { version = "0.11", features = ["laz-parallel"], optional = true }
 # "copc" feature enabled via lidar-copc for CopcEntryReader
-laz = { version = "0.12", optional = true }
+laz = { version = "0.13", optional = true }
 memmap2 = { version = "0.9", optional = true }
 
 
