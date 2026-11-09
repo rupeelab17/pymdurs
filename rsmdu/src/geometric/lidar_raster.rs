@@ -1,32 +1,57 @@
+//! MNT / MNS / MNH — rasters d'élévation LiDAR HD IGN (WMS-R).
+
 use anyhow::{Context, Result};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use crate::collect::ign::ign_collect::IgnCollect;
 use crate::geo_core::{BoundingBox, GeoCore};
 
-/// MNT (Modèle Numérique de Terrain) issu du LiDAR HD IGN.
-pub struct Mnt {
+/// Identifiant du produit IGN (`mnt` / `mns` / `mnh`).
+pub trait RasterKind {
+    const KEY: &'static str;
+    const LABEL: &'static str;
+}
+
+pub struct MntKind;
+pub struct MnsKind;
+pub struct MnhKind;
+
+impl RasterKind for MntKind {
+    const KEY: &'static str = "mnt";
+    const LABEL: &'static str = "MNT";
+}
+impl RasterKind for MnsKind {
+    const KEY: &'static str = "mns";
+    const LABEL: &'static str = "MNS";
+}
+impl RasterKind for MnhKind {
+    const KEY: &'static str = "mnh";
+    const LABEL: &'static str = "MNH";
+}
+
+/// Raster d'élévation LiDAR HD IGN.
+pub struct LidarRaster<K: RasterKind> {
     ign_collect: IgnCollect,
     output_path: PathBuf,
     path_save_tiff: PathBuf,
     path_temp_tiff: PathBuf,
     pub geo_core: GeoCore,
     bbox: Option<BoundingBox>,
+    _kind: PhantomData<K>,
 }
 
-impl Mnt {
+pub type Mnt = LidarRaster<MntKind>;
+pub type Mns = LidarRaster<MnsKind>;
+pub type Mnh = LidarRaster<MnhKind>;
+
+impl<K: RasterKind> LidarRaster<K> {
     pub fn new(output_path: Option<String>) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
-
-        let path_save_tiff = output_path_buf.join("mnt_lidar_hd.tif");
-        let path_temp_tiff = PathBuf::from(TEMP_PATH).join("mnt.tiff");
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
+        let path_save_tiff = output_path_buf.join(format!("{}_lidar_hd.tif", K::KEY));
+        let path_temp_tiff = get_temp_path().join(format!("{}.tiff", K::KEY));
 
         if path_temp_tiff.exists() {
             std::fs::remove_file(&path_temp_tiff).context(format!(
@@ -41,13 +66,14 @@ impl Mnt {
             ))?;
         }
 
-        Ok(Mnt {
+        Ok(Self {
             ign_collect: IgnCollect::new()?,
             output_path: output_path_buf,
             path_save_tiff,
             path_temp_tiff,
             geo_core: GeoCore::default(),
             bbox: None,
+            _kind: PhantomData,
         })
     }
 
@@ -67,12 +93,14 @@ impl Mnt {
     }
 
     pub fn run_internal(&mut self) -> Result<()> {
-        self.ign_collect.execute_ign("mnt")?;
+        self.ign_collect.execute_ign(K::KEY)?;
 
         if !self.path_temp_tiff.exists() {
             anyhow::bail!(
-                "MNT file not found at {:?}. Make sure execute_ign('mnt') was called successfully.",
-                self.path_temp_tiff
+                "{} file not found at {:?}. Make sure execute_ign('{}') was called successfully.",
+                K::LABEL,
+                self.path_temp_tiff,
+                K::KEY
             );
         }
 
@@ -87,11 +115,13 @@ impl Mnt {
         }
 
         std::fs::copy(&self.path_temp_tiff, &self.path_save_tiff).context(format!(
-            "Failed to copy MNT from {:?} to {:?}",
-            self.path_temp_tiff, self.path_save_tiff
+            "Failed to copy {} from {:?} to {:?}",
+            K::LABEL,
+            self.path_temp_tiff,
+            self.path_save_tiff
         ))?;
 
-        println!("MNT saved to: {:?}", self.path_save_tiff);
+        println!("{} saved to: {:?}", K::LABEL, self.path_save_tiff);
         Ok(())
     }
 
@@ -113,23 +143,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mnt_new() {
-        let mnt = Mnt::new(None).unwrap();
-        assert!(mnt
+    fn test_new_paths() {
+        assert!(Mnt::new(None)
+            .unwrap()
             .path_save_tiff
             .to_string_lossy()
             .contains("mnt_lidar_hd.tif"));
+        assert!(Mns::new(None)
+            .unwrap()
+            .path_save_tiff
+            .to_string_lossy()
+            .contains("mns_lidar_hd.tif"));
+        assert!(Mnh::new(None)
+            .unwrap()
+            .path_save_tiff
+            .to_string_lossy()
+            .contains("mnh_lidar_hd.tif"));
     }
 
     #[test]
-    fn test_mnt_set_bbox() {
+    fn test_set_bbox() {
         let mut mnt = Mnt::new(None).unwrap();
         mnt.set_bbox(-1.152704, 46.181627, -1.139893, 46.18699);
         assert!(mnt.bbox.is_some());
     }
 
     #[test]
-    fn test_mnt_set_crs() {
+    fn test_set_crs() {
         let mut mnt = Mnt::new(None).unwrap();
         mnt.set_crs(2154);
         assert_eq!(mnt.geo_core.get_epsg(), 2154);

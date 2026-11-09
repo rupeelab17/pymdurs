@@ -16,13 +16,8 @@ impl Lidar {
         classification: Option<u8>,
         bbox: Option<(f64, f64, f64, f64)>,
     ) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        use crate::collect::global_variables::get_temp_path;
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
         let mut lidar = Lidar {
             geo_core: GeoCore::default(),
             output_path: output_path_buf,

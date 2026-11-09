@@ -66,7 +66,7 @@ impl BuildingCollection {
         //         gdf = gdf.set_crs(crs=self.set_crs, inplace=True, allow_override=True)
         // else:
         //     gdf = gdf.to_crs(self._epsg)
-        // CRS is already handled in from_geojson() or would be handled in from_shapefile()
+        // CRS is already handled in from_geojson()
 
         // Process heights (following Python logic)
         // Python: gdf["noHauteur"] = gdf["hauteur"].isnull()

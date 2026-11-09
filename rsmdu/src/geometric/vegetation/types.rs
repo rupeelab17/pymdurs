@@ -48,14 +48,9 @@ impl Vegetation {
         write_file: bool,
         min_area: f64,
     ) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
 
         let mut geo_core = if let Some(epsg) = set_crs {
             GeoCore::new(epsg)
@@ -66,11 +61,11 @@ impl Vegetation {
         // Set output_path in GeoCore
         geo_core.set_output_path(Some(output_path_buf.to_string_lossy().to_string()));
 
-        // Initialize temporary file paths
-        // Note: IgnCollect saves IRC image as {TEMP_PATH}/irc.tiff
-        let img_tiff_path = PathBuf::from(TEMP_PATH).join("irc.tiff");
-        let ndvi_shp_path = PathBuf::from(TEMP_PATH).join("ndvi.shp");
-        let ndvi_tif_path = PathBuf::from(TEMP_PATH).join("ndvi.tif");
+        // IgnCollect saves IRC image as {get_temp_path()}/irc.tiff
+        let scratch = get_temp_path();
+        let img_tiff_path = scratch.join("irc.tiff");
+        let ndvi_shp_path = scratch.join("ndvi.shp");
+        let ndvi_tif_path = scratch.join("ndvi.tif");
 
         let mut vegetation = Vegetation {
             filepath_shp,

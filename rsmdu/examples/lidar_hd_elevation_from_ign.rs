@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rsmdu::geometric::{mnh::Mnh, mns::Mns, mnt::Mnt};
+use rsmdu::geometric::lidar_raster::{Mnh, Mns, Mnt};
 
 /// Example: Download LiDAR HD elevation models (MNT, MNS, MNH) from IGN WMS-R API.
 fn main() -> Result<()> {

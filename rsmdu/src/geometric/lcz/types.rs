@@ -58,14 +58,9 @@ impl Lcz {
         output_path: Option<String>,
         set_crs: Option<i32>,
     ) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
 
         let mut geo_core = if let Some(epsg) = set_crs {
             GeoCore::new(epsg)

@@ -8,13 +8,17 @@ Port of pymdu ``geometric.DetectionUrbanTypes``, adapted to pymdurs APIs
 from __future__ import annotations
 
 import os
+import tempfile
 from typing import Self
 
 import geopandas as gpd
 import pandas as pd
 from shapely import box
 
-DEFAULT_TEMP_PATH = "./temp"
+DEFAULT_TEMP_PATH = os.environ.get(
+    "PYMDURS_TEMP",
+    os.path.join(tempfile.gettempdir(), f"pymdurs-{os.getpid()}"),
+)
 DEFAULT_EPSG = 2154
 
 

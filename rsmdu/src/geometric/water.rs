@@ -34,14 +34,9 @@ impl Water {
         output_path: Option<String>,
         set_crs: Option<i32>,
     ) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
 
         let mut geo_core = if let Some(epsg) = set_crs {
             GeoCore::new(epsg)
@@ -182,17 +177,19 @@ impl Water {
         // which have complex API requirements for vector dataset creation
         // Following the approach from lcz.rs
         use std::process::Command;
-        use std::time::{SystemTime, UNIX_EPOCH};
 
-        // Create a temporary file path for GeoJSON output
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let temp_geojson = std::env::temp_dir().join(format!("water_{}.geojson", timestamp));
+        let tmp = tempfile::Builder::new()
+            .prefix("water_")
+            .suffix(".geojson")
+            .tempfile()
+            .context("Failed to create temporary GeoJSON file")?;
+        let (_file, temp_geojson) = tmp
+            .keep()
+            .context("Failed to persist temporary GeoJSON path")?;
 
         // Use ogr2ogr to convert shapefile to GeoJSON
         let status = Command::new("ogr2ogr")
+            .arg("-overwrite")
             .arg("-f")
             .arg("GeoJSON")
             .arg(&temp_geojson)
@@ -203,14 +200,13 @@ impl Water {
             )?;
 
         if !status.success() {
+            let _ = std::fs::remove_file(&temp_geojson);
             anyhow::bail!("ogr2ogr failed to convert shapefile to GeoJSON");
         }
 
         // Read the GeoJSON file we just created
         let geojson_bytes =
             std::fs::read(&temp_geojson).context("Failed to read temporary GeoJSON file")?;
-
-        // Clean up temporary file
         let _ = std::fs::remove_file(&temp_geojson);
 
         // Parse GeoJSON

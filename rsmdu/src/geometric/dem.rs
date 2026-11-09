@@ -30,19 +30,14 @@ impl Dem {
     /// Create a new Dem instance
     /// Following Python: def __init__(self, output_path: str | None = None)
     pub fn new(output_path: Option<String>) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
 
         let path_save_tiff = output_path_buf.join("DEM.tif");
         // let path_save_tiff_clip = output_path_buf.join("DEM_clip.tif");
         let path_save_mask = output_path_buf.join("mask.shp");
-        let path_temp_tiff = PathBuf::from(TEMP_PATH).join("dem.tiff");
+        let path_temp_tiff = get_temp_path().join("dem.tiff");
 
         // Remove existing files if they exist (following Python)
         // Python: if os.path.exists(self.path_temp_tiff): os.remove(self.path_temp_tiff)
@@ -258,8 +253,8 @@ impl Dem {
     /// Uses ogr2ogr command-line tool for reliable shapefile creation
     #[cfg(not(feature = "wasm"))]
     fn export_mask_to_shapefile(&self, polygon: &geo::Polygon<f64>) -> Result<()> {
+        use std::io::Write;
         use std::process::Command;
-        use std::time::{SystemTime, UNIX_EPOCH};
 
         // Remove existing shapefile if it exists
         if self.path_save_mask.exists() {
@@ -279,12 +274,11 @@ impl Dem {
                 .context(format!("Failed to create output directory: {:?}", parent))?;
         }
 
-        // Create temporary GeoJSON file
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let temp_geojson = std::env::temp_dir().join(format!("mask_{}.geojson", timestamp));
+        let mut tmp = tempfile::Builder::new()
+            .prefix("mask_")
+            .suffix(".geojson")
+            .tempfile()
+            .context("Failed to create temporary GeoJSON file")?;
 
         // Convert polygon to GeoJSON
         use geojson::{Feature, GeoJson};
@@ -306,9 +300,10 @@ impl Dem {
             foreign_members: None,
         });
 
-        // Write temporary GeoJSON
-        std::fs::write(&temp_geojson, geojson.to_string())
+        tmp.write_all(geojson.to_string().as_bytes())
             .context("Failed to write temporary GeoJSON file")?;
+        tmp.flush()
+            .context("Failed to flush temporary GeoJSON file")?;
 
         // Use ogr2ogr to convert GeoJSON to Shapefile
         // The polygon is already in EPSG:2154, so we specify the source CRS
@@ -321,14 +316,11 @@ impl Dem {
             .arg("-t_srs")
             .arg("EPSG:2154") // Target CRS: keep EPSG:2154
             .arg(&self.path_save_mask)
-            .arg(&temp_geojson)
+            .arg(tmp.path())
             .status()
             .context(
                 "Failed to execute ogr2ogr. Make sure GDAL is installed and ogr2ogr is in PATH",
             )?;
-
-        // Clean up temporary GeoJSON
-        let _ = std::fs::remove_file(&temp_geojson);
 
         if !status.success() {
             anyhow::bail!("ogr2ogr failed to convert GeoJSON to shapefile");

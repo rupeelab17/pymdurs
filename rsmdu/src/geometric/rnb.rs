@@ -59,14 +59,9 @@ impl Rnb {
     /// Create a new Rnb instance
     /// Following Python: def __init__(self, output_path: str | None = None)
     pub fn new(output_path: Option<String>) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
 
         Ok(Rnb {
             output_path: output_path_buf,

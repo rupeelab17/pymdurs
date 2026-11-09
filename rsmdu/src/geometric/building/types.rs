@@ -128,9 +128,10 @@ impl BuildingCollection {
         default_storey_height: f64,
         set_crs: Option<i32>,
     ) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_str = output_path.unwrap_or_else(|| TEMP_PATH.to_string());
+        let output_path_str = output_path
+            .unwrap_or_else(|| get_temp_path().to_string_lossy().into_owned());
 
         let mut geo_core = if let Some(epsg) = set_crs {
             GeoCore::new(epsg)
@@ -162,9 +163,10 @@ impl BuildingCollection {
     /// Create a new BuildingCollection with default parameters
     /// Convenience method for backward compatibility
     pub fn new_simple(output_path: Option<String>) -> Self {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_str = output_path.unwrap_or_else(|| TEMP_PATH.to_string());
+        let output_path_str = output_path
+            .unwrap_or_else(|| get_temp_path().to_string_lossy().into_owned());
         let mut geo_core = GeoCore::default();
         geo_core.set_output_path(Some(output_path_str));
 

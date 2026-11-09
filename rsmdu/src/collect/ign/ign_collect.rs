@@ -9,7 +9,7 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::collect::global_variables::TEMP_PATH;
+use crate::collect::global_variables::get_temp_path;
 use crate::geo_core::{BoundingBox, GeoCore};
 
 const CSV_NAME: &str = "Tableau-suivi-services-web-06-02-2026.csv";
@@ -151,7 +151,7 @@ impl IgnCollect {
             ign_keys,
             geo_core: GeoCore::default(),
             df_csv_file,
-            collect_path: PathBuf::from(TEMP_PATH),
+            collect_path: get_temp_path(),
         })
     }
 
@@ -592,7 +592,7 @@ impl IgnCollect {
 
         // For some keys, save to file and validate as GeoTIFF
         if matches!(key, "irc" | "dem" | "cosia" | "mnt" | "mns" | "mnh") {
-            let output_path = PathBuf::from(TEMP_PATH).join(format!("{}.tiff", key));
+            let output_path = self.collect_path.join(format!("{}.tiff", key));
 
             // Create directory if it doesn't exist
             if let Some(parent) = output_path.parent() {

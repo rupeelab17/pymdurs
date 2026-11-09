@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use ndarray::{Array2, Array3};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::mass_consistent_solver::solve_mass_consistent;
 use super::vegetation::{vegetation_wind_factor, VegetationCollection};
@@ -955,8 +955,13 @@ pub struct WindField {
 
 impl WindField {
     pub fn new(output_path: Option<String>) -> Result<Self> {
-        let out =
-            output_path.or_else(|| Some(crate::collect::global_variables::TEMP_PATH.to_string()));
+        let out = output_path.or_else(|| {
+            Some(
+                crate::collect::global_variables::get_temp_path()
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        });
         Ok(WindField {
             geo_core: GeoCore::default(),
             output_path: out,
@@ -1056,10 +1061,11 @@ impl WindField {
 
         let out_dir = self
             .output_path
-            .as_deref()
-            .unwrap_or(crate::collect::global_variables::TEMP_PATH);
-        let speed_path = Path::new(out_dir).join("wind_speed.tif");
-        let dir_path = Path::new(out_dir).join("wind_direction.tif");
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(crate::collect::global_variables::get_temp_path);
+        let speed_path = out_dir.join("wind_speed.tif");
+        let dir_path = out_dir.join("wind_direction.tif");
 
         let speed_desc = format!(
             "Röckle wind speed (m/s), wind_direction_deg={}",
@@ -1075,7 +1081,7 @@ impl WindField {
         write_geotiff_f32(&dir_path, &direction, &gt, self.geo_core.get_epsg(), None)?;
 
         if let Some((u_slice, v_slice)) = &uv_opt {
-            let dat_path = Path::new(out_dir).join("wind_uv.dat");
+            let dat_path = out_dir.join("wind_uv.dat");
             write_wind_uv_dat(&dat_path, &u_slice, &v_slice, &gt, config.output_height)?;
         }
 
@@ -1090,7 +1096,7 @@ impl WindField {
                 &wind_tf,
                 Some(config.output_height),
             );
-            let zone_path = Path::new(out_dir).join("rockle_zone.tif");
+            let zone_path = out_dir.join("rockle_zone.tif");
             let zone_desc = format!(
                 "Röckle zone at {:.1} m AGL: 0=Freestream, 1=Inside, 2=Upwind, 3=UpwindVortex, 4=Cavity, 5=Wake, 6=RooftopPerp, 7=RooftopCorner, 8=StreetCanyon",
                 config.output_height

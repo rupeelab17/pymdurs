@@ -29,17 +29,12 @@ impl Cosia {
     /// Create a new Cosia instance
     /// Following Python: def __init__(self, output_path: str | None = None, template_raster_path: str | None = None)
     pub fn new(output_path: Option<String>, template_raster_path: Option<String>) -> Result<Self> {
-        use crate::collect::global_variables::TEMP_PATH;
+        use crate::collect::global_variables::get_temp_path;
 
-        let output_path_buf = PathBuf::from(
-            output_path
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(TEMP_PATH),
-        );
+        let output_path_buf = output_path.map(PathBuf::from).unwrap_or_else(get_temp_path);
 
         let path_save_tiff = output_path_buf.join("cosia.tif");
-        let path_temp_tiff = PathBuf::from(TEMP_PATH).join("cosia.tiff");
+        let path_temp_tiff = get_temp_path().join("cosia.tiff");
 
         // Remove existing files if they exist (following Python)
         // Python: if os.path.exists(self.path_temp_tiff): os.remove(self.path_temp_tiff)
