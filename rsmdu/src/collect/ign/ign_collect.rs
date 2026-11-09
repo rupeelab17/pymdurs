@@ -263,7 +263,7 @@ impl IgnCollect {
 
         let bbox = self
             .bbox
-            .context("Bounding box must be set cdbefore executing IGN request")?;
+            .context("Bounding box must be set before executing IGN request")?;
 
         tracing::info!("Bbox: {:?}", bbox);
 
