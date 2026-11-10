@@ -4,7 +4,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::*;
-use std::path::Path;
+use std::path::PathBuf;
 
 use rsmdu::thermal::{VegetationCollection, WindConfig, WindField, WindProfileType};
 
@@ -159,6 +159,7 @@ impl PyWindField {
     #[gen_stub(override_return_type(type_repr = "tuple[str, str, str | None]"))]
     fn run(
         &self,
+        py: Python<'_>,
         config: &PyWindConfig,
         dem_path: &str,
         dsm_path: &str,
@@ -182,16 +183,20 @@ impl PyWindField {
         cfg.solver_dy = config.solver_dy;
         cfg.solver_dz = config.solver_dz;
         cfg.save_rockle_zone = config.save_rockle_zone;
-        let result = self
-            .inner
-            .run(
-                cfg,
-                Path::new(dem_path),
-                Path::new(dsm_path),
-                &buildings.inner,
-                None::<&VegetationCollection>,
-            )
-            .map_err(|e| PyValueError::new_err(format!("WindField run failed: {}", e)))?;
+        let dem = PathBuf::from(dem_path);
+        let dsm = PathBuf::from(dsm_path);
+        let buildings = &buildings.inner;
+        let result = py
+            .detach(|| {
+                self.inner.run(
+                    cfg,
+                    &dem,
+                    &dsm,
+                    buildings,
+                    None::<&VegetationCollection>,
+                )
+            })
+            .map_err(|e| PyValueError::new_err(format!("WindField run failed: {e}")))?;
         let rockle_zone_path = result
             .rockle_zone_path
             .as_ref()

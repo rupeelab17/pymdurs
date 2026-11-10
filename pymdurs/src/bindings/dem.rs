@@ -41,10 +41,10 @@ impl PyDem {
     #[pyo3(signature = (shape = None))]
     #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>, shape: Option<(u32, u32)>) -> PyResult<PyRefMut<Self>> {
-        // Use run_internal which works on &mut self
-        slf.inner
-            .run_internal(shape)
-            .map_err(|e| PyValueError::new_err(format!("Failed to run DEM: {}", e)))?;
+        let py = slf.py();
+        let this = &mut *slf;
+        py.detach(|| this.inner.run_internal(shape))
+            .map_err(|e| PyValueError::new_err(format!("Failed to run DEM: {e}")))?;
         Ok(slf)
     }
 

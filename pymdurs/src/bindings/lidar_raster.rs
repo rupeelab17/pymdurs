@@ -41,7 +41,9 @@ macro_rules! py_lidar_raster {
 
             #[gen_stub(override_return_type(type_repr = "Self"))]
             fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
-                slf.inner.run_internal().map_err(|e| {
+                let py = slf.py();
+                let this = &mut *slf;
+                py.detach(|| this.inner.run_internal()).map_err(|e| {
                     PyValueError::new_err(format!("Failed to run {}: {}", $run_label, e))
                 })?;
                 Ok(slf)

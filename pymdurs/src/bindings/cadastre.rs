@@ -40,10 +40,10 @@ impl PyCadastre {
     /// Run cadastre processing: download from IGN API, parse GeoJSON
     #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
-        // Use run_internal which works on &mut self
-        slf.inner
-            .run_internal()
-            .map_err(|e| PyValueError::new_err(format!("Failed to run Cadastre: {}", e)))?;
+        let py = slf.py();
+        let this = &mut *slf;
+        py.detach(|| this.inner.run_internal())
+            .map_err(|e| PyValueError::new_err(format!("Failed to run Cadastre: {e}")))?;
         Ok(slf)
     }
 

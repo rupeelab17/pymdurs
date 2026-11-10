@@ -2,7 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::*;
 use rsmdu::geometric::lidar::{DtmFill, Lidar};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::bindings::geo_core::PyGeoCore;
 
@@ -44,11 +44,17 @@ impl PyLidar {
     /// Set bounding box (WGS84) and fetch LAZ/COPC URLs from IGN WFS (no download).
     /// Point data is downloaded on the first run() or save().
     #[pyo3(text_signature = "(self, min_x, min_y, max_x, max_y)")]
-    fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> PyResult<()> {
-        self.inner
-            .set_bbox(min_x, min_y, max_x, max_y)
+    fn set_bbox(
+        &mut self,
+        py: Python<'_>,
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
+    ) -> PyResult<()> {
+        py.detach(|| self.inner.set_bbox(min_x, min_y, max_x, max_y))
             .map_err(|e| {
-                PyValueError::new_err(format!("Failed to set bbox and get LiDAR URLs: {}", e))
+                PyValueError::new_err(format!("Failed to set bbox and get LiDAR URLs: {e}"))
             })
     }
 
@@ -93,17 +99,19 @@ impl PyLidar {
         text_signature = "(self, file_name=None, classification_list=None, resolution=None, write_out_file=True)"
     )]
     fn run(
-        mut slf: PyRefMut<Self>,
+        &mut self,
+        py: Python<'_>,
         file_name: Option<String>,
         classification_list: Option<Vec<u8>>,
         resolution: Option<f64>,
         write_out_file: bool,
     ) -> PyResult<String> {
-        (*slf)
-            .inner
-            .run(file_name, classification_list, resolution, write_out_file)
-            .map(|path| path.to_string_lossy().to_string())
-            .map_err(|e| PyValueError::new_err(format!("Failed to run Lidar: {}", e)))
+        py.detach(|| {
+            self.inner
+                .run(file_name, classification_list, resolution, write_out_file)
+                .map(|path| path.to_string_lossy().to_string())
+        })
+        .map_err(|e| PyValueError::new_err(format!("Failed to run Lidar: {e}")))
     }
 
     /// Return the output directory path (string).
@@ -138,11 +146,14 @@ impl PyLidar {
     /// Returns:
     ///     Absolute path to the written file.
     #[pyo3(text_signature = "(self, filename)")]
-    fn save(&mut self, filename: &str) -> PyResult<String> {
-        self.inner
-            .save_las(Path::new(filename))
-            .map(|p: PathBuf| p.to_string_lossy().to_string())
-            .map_err(|e| PyValueError::new_err(format!("Failed to save LAS: {}", e)))
+    fn save(&mut self, py: Python<'_>, filename: &str) -> PyResult<String> {
+        let path = PathBuf::from(filename);
+        py.detach(|| {
+            self.inner
+                .save_las(&path)
+                .map(|p: PathBuf| p.to_string_lossy().to_string())
+        })
+        .map_err(|e| PyValueError::new_err(format!("Failed to save LAS: {e}")))
     }
 
     /// GeoCore instance (bbox, epsg, output_path).

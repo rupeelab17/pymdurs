@@ -66,10 +66,16 @@ impl PyBuilding {
     }
 
     /// Set bounding box
-    fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> PyResult<()> {
-        self.inner
-            .set_bbox(min_x, min_y, max_x, max_y)
-            .map_err(|e| PyValueError::new_err(format!("Failed to set bbox: {}", e)))
+    fn set_bbox(
+        &mut self,
+        py: Python<'_>,
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
+    ) -> PyResult<()> {
+        py.detach(|| self.inner.set_bbox(min_x, min_y, max_x, max_y))
+            .map_err(|e| PyValueError::new_err(format!("Failed to set bbox: {e}")))
     }
 
     /// Set CRS
@@ -80,10 +86,10 @@ impl PyBuilding {
     /// Run processing: load data, process heights, return self
     #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>) -> PyResult<PyRefMut<Self>> {
-        // Use run_internal which works on &mut self
-        slf.inner
-            .run_internal()
-            .map_err(|e| PyValueError::new_err(format!("Failed to run: {}", e)))?;
+        let py = slf.py();
+        let this = &mut *slf;
+        py.detach(|| this.inner.run_internal())
+            .map_err(|e| PyValueError::new_err(format!("Failed to run: {e}")))?;
         Ok(slf)
     }
 

@@ -44,9 +44,10 @@ impl PyLcz {
     #[pyo3(signature = (zipfile_url = None))]
     #[gen_stub(override_return_type(type_repr = "Self"))]
     fn run(mut slf: PyRefMut<Self>, zipfile_url: Option<String>) -> PyResult<PyRefMut<Self>> {
-        slf.inner
-            .run(zipfile_url.as_deref())
-            .map_err(|e| PyValueError::new_err(format!("Failed to run Lcz: {}", e)))?;
+        let py = slf.py();
+        let this = &mut *slf;
+        py.detach(|| this.inner.run(zipfile_url.as_deref()))
+            .map_err(|e| PyValueError::new_err(format!("Failed to run Lcz: {e}")))?;
         Ok(slf)
     }
 

@@ -205,11 +205,13 @@ impl GpuContext {
 }
 
 fn gpu_context() -> Result<&'static GpuContext, String> {
-    static CTX: OnceLock<Result<GpuContext, String>> = OnceLock::new();
-    match CTX.get_or_init(|| pollster::block_on(GpuContext::new())) {
-        Ok(ctx) => Ok(ctx),
-        Err(e) => Err(e.clone()),
+    // Only cache Ok — a failed init must be retryable (adapter may appear later).
+    static CTX: OnceLock<GpuContext> = OnceLock::new();
+    if let Some(ctx) = CTX.get() {
+        return Ok(ctx);
     }
+    let ctx = pollster::block_on(GpuContext::new())?;
+    Ok(CTX.get_or_init(|| ctx))
 }
 
 fn dispatch(
@@ -483,7 +485,7 @@ pub(super) fn rasterize_fill_chm_gpu_batched(
     ctx.device
         .poll(wgpu::PollType::Wait {
             submission_index: Some(submission_index),
-            timeout: None,
+            timeout: Some(std::time::Duration::from_secs(120)),
         })
         .map_err(|e| anyhow::anyhow!("GPU poll failed: {e:?}"))?;
     for _ in 0..staging.len() {

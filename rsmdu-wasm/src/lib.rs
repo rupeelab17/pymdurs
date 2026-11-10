@@ -4,11 +4,83 @@ use geotiff::GeoTiff;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Request, RequestInit, RequestMode, Response};
+
+/// Browser fetch deadline for IGN WFS/WMS calls.
+const FETCH_TIMEOUT_MS: u32 = 120_000;
 
 /// Initialize the WASM module with panic hook
 #[wasm_bindgen(start)]
 pub fn init() {
     console_error_panic_hook::set_once();
+}
+
+fn validate_bbox(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<(), JsValue> {
+    if min_x >= max_x || min_y >= max_y {
+        return Err(JsValue::from_str(
+            "Invalid bounding box: min values must be less than max values",
+        ));
+    }
+    Ok(())
+}
+
+async fn fetch_response(url: &str) -> Result<Response, JsValue> {
+    let window =
+        web_sys::window().ok_or_else(|| JsValue::from_str("No window object available"))?;
+
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+    opts.set_signal(Some(&web_sys::AbortSignal::timeout_with_u32(FETCH_TIMEOUT_MS)));
+
+    let request = Request::new_with_str_and_init(url, &opts)
+        .map_err(|e| JsValue::from_str(&format!("Failed to create request: {e:?}")))?;
+
+    let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| JsValue::from_str(&format!("Network request failed (or timed out): {e:?}")))?;
+
+    let resp: Response = resp_value
+        .dyn_into()
+        .map_err(|_| JsValue::from_str("Invalid response type"))?;
+
+    if !resp.ok() {
+        return Err(JsValue::from_str(&format!(
+            "IGN API error {}: {}",
+            resp.status(),
+            resp.status_text()
+        )));
+    }
+    Ok(resp)
+}
+
+async fn fetch_text(url: &str) -> Result<String, JsValue> {
+    let resp = fetch_response(url).await?;
+    let text = JsFuture::from(
+        resp.text()
+            .map_err(|e| JsValue::from_str(&format!("Failed to get response text: {e:?}")))?,
+    )
+    .await
+    .map_err(|e| JsValue::from_str(&format!("Failed to read response: {e:?}")))?;
+
+    text.as_string()
+        .ok_or_else(|| JsValue::from_str("Response is not a valid string"))
+}
+
+async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
+    let resp = fetch_response(url).await?;
+    let buf = JsFuture::from(
+        resp.array_buffer()
+            .map_err(|e| JsValue::from_str(&format!("Failed to get array buffer: {e:?}")))?,
+    )
+    .await
+    .map_err(|e| JsValue::from_str(&format!("Failed to read array buffer: {e:?}")))?;
+
+    let buf: js_sys::ArrayBuffer = buf
+        .dyn_into()
+        .map_err(|_| JsValue::from_str("Invalid array buffer type"))?;
+    Ok(js_sys::Uint8Array::new(&buf).to_vec())
 }
 
 /// Building structure for WASM
@@ -113,72 +185,12 @@ impl WasmBuildingCollection {
         max_y: f64,
         default_storey_height: f64,
     ) -> Result<WasmBuildingCollection, JsValue> {
-        use wasm_bindgen_futures::JsFuture;
-        use web_sys::{Request, RequestInit, RequestMode};
-
-        // Validate coordinates
-        if min_x >= max_x || min_y >= max_y {
-            return Err(JsValue::from_str(
-                "Invalid bounding box: min values must be less than max values",
-            ));
-        }
-
-        // Build WFS request URL for IGN API (WFS 2.0.0 standard)
-        let typename = "BDTOPO_V3:batiment";
-        let base_url = "https://data.geopf.fr/wfs/ows";
-
-        // Format bbox as: min_y,min_x,max_y,max_x (lat,lon format for EPSG:4326)
-        let bbox_str = format!("{},{},{},{}", min_y, min_x, max_y, max_x);
-
-        let request_url = format!(
-            "{}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES={}&CRS=EPSG:4326&BBOX={}&OUTPUTFORMAT=application/json&STARTINDEX=0&COUNT=10000",
-            base_url, typename, bbox_str
+        validate_bbox(min_x, min_y, max_x, max_y)?;
+        let bbox_str = format!("{min_y},{min_x},{max_y},{max_x}");
+        let url = format!(
+            "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=BDTOPO_V3:batiment&CRS=EPSG:4326&BBOX={bbox_str}&OUTPUTFORMAT=application/json&STARTINDEX=0&COUNT=10000"
         );
-
-        // Create and configure fetch request
-        let mut opts = RequestInit::new();
-        opts.set_method("GET");
-        opts.set_mode(RequestMode::Cors);
-
-        let request = Request::new_with_str_and_init(&request_url, &opts)
-            .map_err(|e| JsValue::from_str(&format!("Failed to create request: {:?}", e)))?;
-
-        // Execute request
-        let window =
-            web_sys::window().ok_or_else(|| JsValue::from_str("No window object available"))?;
-
-        let resp_value = JsFuture::from(window.fetch_with_request(&request))
-            .await
-            .map_err(|e| JsValue::from_str(&format!("Network request failed: {:?}", e)))?;
-
-        let resp: web_sys::Response = resp_value
-            .dyn_into()
-            .map_err(|_| JsValue::from_str("Invalid response type"))?;
-
-        // Check response status
-        if !resp.ok() {
-            return Err(JsValue::from_str(&format!(
-                "IGN API error {}: {}",
-                resp.status(),
-                resp.status_text()
-            )));
-        }
-
-        // Get response text
-        let text_promise = resp
-            .text()
-            .map_err(|e| JsValue::from_str(&format!("Failed to get response text: {:?}", e)))?;
-
-        let text = JsFuture::from(text_promise)
-            .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to read response: {:?}", e)))?;
-
-        let geojson_str = text
-            .as_string()
-            .ok_or_else(|| JsValue::from_str("Response is not a valid string"))?;
-
-        // Parse and return collection
-        Self::from_geojson(&geojson_str, default_storey_height)
+        Self::from_geojson(&fetch_text(&url).await?, default_storey_height)
     }
 
     /// Load buildings from GeoJSON string
@@ -442,63 +454,12 @@ impl WasmCadastre {
         max_x: f64,
         max_y: f64,
     ) -> Result<WasmCadastre, JsValue> {
-        use wasm_bindgen_futures::JsFuture;
-        use web_sys::{Request, RequestInit, RequestMode};
-
-        if min_x >= max_x || min_y >= max_y {
-            return Err(JsValue::from_str(
-                "Invalid bounding box: min values must be less than max values",
-            ));
-        }
-
-        let typename = "CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle";
-        let base_url = "https://data.geopf.fr/wfs/ows";
-        let bbox_str = format!("{},{},{},{}", min_y, min_x, max_y, max_x);
-
-        let request_url = format!(
-            "{}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES={}&OUTPUTFORMAT=application/json&Bbox={}&CRS=EPSG:4326&STARTINDEX=0&MAXFEATURES=10000",
-            base_url, typename, bbox_str
+        validate_bbox(min_x, min_y, max_x, max_y)?;
+        let bbox_str = format!("{min_y},{min_x},{max_y},{max_x}");
+        let url = format!(
+            "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle&OUTPUTFORMAT=application/json&Bbox={bbox_str}&CRS=EPSG:4326&STARTINDEX=0&MAXFEATURES=10000"
         );
-
-        let mut opts = RequestInit::new();
-        opts.set_method("GET");
-        opts.set_mode(RequestMode::Cors);
-
-        let request = Request::new_with_str_and_init(&request_url, &opts)
-            .map_err(|e| JsValue::from_str(&format!("Failed to create request: {:?}", e)))?;
-
-        let window =
-            web_sys::window().ok_or_else(|| JsValue::from_str("No window object available"))?;
-
-        let resp_value = JsFuture::from(window.fetch_with_request(&request))
-            .await
-            .map_err(|e| JsValue::from_str(&format!("Network request failed: {:?}", e)))?;
-
-        let resp: web_sys::Response = resp_value
-            .dyn_into()
-            .map_err(|_| JsValue::from_str("Invalid response type"))?;
-
-        if !resp.ok() {
-            return Err(JsValue::from_str(&format!(
-                "IGN API error {}: {}",
-                resp.status(),
-                resp.status_text()
-            )));
-        }
-
-        let text_promise = resp
-            .text()
-            .map_err(|e| JsValue::from_str(&format!("Failed to get response text: {:?}", e)))?;
-
-        let text = JsFuture::from(text_promise)
-            .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to read response: {:?}", e)))?;
-
-        let geojson_str = text
-            .as_string()
-            .ok_or_else(|| JsValue::from_str("Response is not a valid string"))?;
-
-        Self::from_geojson(&geojson_str)
+        Self::from_geojson(&fetch_text(&url).await?)
     }
 
     #[wasm_bindgen]
@@ -617,85 +578,13 @@ impl WasmDem {
         max_x: f64,
         max_y: f64,
     ) -> Result<WasmDem, JsValue> {
-        use wasm_bindgen_futures::JsFuture;
-        use web_sys::{Request, RequestInit, RequestMode};
-
-        // Validate coordinates
-        if min_x >= max_x || min_y >= max_y {
-            return Err(JsValue::from_str(
-                "Invalid bounding box: min values must be less than max values",
-            ));
-        }
-
-        // Build WMS request URL for IGN API (DEM layer)
-        // Following the pattern from ign_collect.rs execute_wms
-        let layer = "ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES";
-        let base_url = "https://data.geopf.fr/wms-r";
-
-        // Calculate width and height (e.g., 512x512 for reasonable resolution)
-        let width = 512;
-        let height = 512;
-
-        // Format bbox for WMS 1.3.0 with EPSG:4326
-        // IMPORTANT: For WMS 1.3.0 with EPSG:4326, the bbox order is inverted for DEM
-        // Python: if key == "ortho" and version == "1.3.0" and crs == "EPSG:4326": Bbox_str = [ymin, xmin, ymax, xmax]
-        // Format: ymin, xmin, ymax, xmax (latitude, longitude order)
-        let bbox_str = format!("{},{},{},{}", min_x, min_y, max_x, max_y);
-
-        let request_url = format!(
-            "{}?LAYERS={}&FORMAT=image/geotiff&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:4326&Bbox={}&WIDTH={}&HEIGHT={}",
-            base_url, layer, bbox_str, width, height
+        validate_bbox(min_x, min_y, max_x, max_y)?;
+        // WMS 1.3.0 EPSG:4326 bbox order kept as in ign_collect (see historical note).
+        let bbox_str = format!("{min_x},{min_y},{max_x},{max_y}");
+        let url = format!(
+            "https://data.geopf.fr/wms-r?LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&FORMAT=image/geotiff&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:4326&Bbox={bbox_str}&WIDTH=512&HEIGHT=512"
         );
-
-        // Create and configure fetch request
-        let opts = {
-            let mut init = RequestInit::new();
-            init.set_method("GET");
-            init.set_mode(RequestMode::Cors);
-            init
-        };
-
-        let request = Request::new_with_str_and_init(&request_url, &opts)
-            .map_err(|e| JsValue::from_str(&format!("Failed to create request: {:?}", e)))?;
-
-        // Execute request
-        let window =
-            web_sys::window().ok_or_else(|| JsValue::from_str("No window object available"))?;
-
-        let resp_value = JsFuture::from(window.fetch_with_request(&request))
-            .await
-            .map_err(|e| JsValue::from_str(&format!("Network request failed: {:?}", e)))?;
-
-        let resp: web_sys::Response = resp_value
-            .dyn_into()
-            .map_err(|_| JsValue::from_str("Invalid response type"))?;
-
-        // Check response status
-        if !resp.ok() {
-            return Err(JsValue::from_str(&format!(
-                "IGN API error {}: {}",
-                resp.status(),
-                resp.status_text()
-            )));
-        }
-
-        // Get response as ArrayBuffer
-        let array_buffer_promise = resp
-            .array_buffer()
-            .map_err(|e| JsValue::from_str(&format!("Failed to get array buffer: {:?}", e)))?;
-
-        let array_buffer = JsFuture::from(array_buffer_promise)
-            .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to read array buffer: {:?}", e)))?;
-
-        let array_buffer: js_sys::ArrayBuffer = array_buffer
-            .dyn_into()
-            .map_err(|_| JsValue::from_str("Invalid array buffer type"))?;
-
-        let bytes = js_sys::Uint8Array::new(&array_buffer).to_vec();
-
-        // Load from bytes
-        Self::from_bytes(&bytes)
+        Self::from_bytes(&fetch_bytes(&url).await?)
     }
 
     /// Load DEM from TIFF file bytes
