@@ -178,18 +178,16 @@ impl Water {
         // Following the approach from lcz.rs
         use std::process::Command;
 
+        // GeoJSON driver refuses overwrite: reserve a path then delete the empty tempfile.
         let tmp = tempfile::Builder::new()
             .prefix("water_")
             .suffix(".geojson")
             .tempfile()
             .context("Failed to create temporary GeoJSON file")?;
-        let (_file, temp_geojson) = tmp
-            .keep()
-            .context("Failed to persist temporary GeoJSON path")?;
+        let temp_geojson = tmp.path().to_path_buf();
+        drop(tmp);
 
-        // Use ogr2ogr to convert shapefile to GeoJSON
         let status = Command::new("ogr2ogr")
-            .arg("-overwrite")
             .arg("-f")
             .arg("GeoJSON")
             .arg(&temp_geojson)

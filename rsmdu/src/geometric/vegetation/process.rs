@@ -179,17 +179,16 @@ impl Vegetation {
     /// vegetation = vegetation.loc[(vegetation["NDVI"] == 0)]
     /// mes_polygons = [x for x in vegetation["geometry"] if x.area > self.min_area]
     fn filter_vegetation_polygons(&mut self) -> Result<()> {
+        // GeoJSON driver refuses overwrite: reserve a path then delete the empty tempfile.
         let tmp = tempfile::Builder::new()
             .prefix("vegetation_")
             .suffix(".geojson")
             .tempfile()
             .context("Failed to create temporary GeoJSON file")?;
-        let (_file, temp_geojson) = tmp
-            .keep()
-            .context("Failed to persist temporary GeoJSON path")?;
+        let temp_geojson = tmp.path().to_path_buf();
+        drop(tmp);
 
         let status = Command::new("ogr2ogr")
-            .arg("-overwrite")
             .arg("-f")
             .arg("GeoJSON")
             .arg(&temp_geojson)
@@ -302,12 +301,10 @@ impl Vegetation {
             .suffix(".geojson")
             .tempfile()
             .context("Failed to create temporary GeoJSON file")?;
-        let (_file, temp_geojson) = tmp
-            .keep()
-            .context("Failed to persist temporary GeoJSON path")?;
+        let temp_geojson = tmp.path().to_path_buf();
+        drop(tmp);
 
         let status = Command::new("ogr2ogr")
-            .arg("-overwrite")
             .arg("-f")
             .arg("GeoJSON")
             .arg(&temp_geojson)
