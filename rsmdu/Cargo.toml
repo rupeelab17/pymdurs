@@ -105,3 +105,8 @@ required-features = ["polars"]
 [[example]]
 name = "building_manual"
 required-features = ["polars"]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

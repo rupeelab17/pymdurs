@@ -4,8 +4,7 @@ use encoding_rs;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufReader, Read};
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -23,6 +22,7 @@ const EMBEDDED_CSV: &[u8] = include_bytes!("data/Tableau-suivi-services-web-06-0
 
 /// Géoplateforme WMS-R max WIDTH/HEIGHT per GetMap request.
 const WMS_MAX_DIMENSION: u32 = 5010;
+const WMS_RASTER: &str = "WMS Raster";
 
 fn is_lidar_hd_elevation_key(key: &str) -> bool {
     matches!(key, "mnt" | "mns" | "mnh")
@@ -68,7 +68,7 @@ pub struct IgnCollect {
 
 impl IgnCollect {
     pub fn new() -> Result<Self> {
-        let mut ign_keys = HashMap::new();
+        let mut ign_keys = HashMap::with_capacity(16);
         ign_keys.insert("buildings".to_string(), "BDTOPO_V3:batiment".to_string());
         ign_keys.insert("cosia".to_string(), "IGNF_COSIA_2024-2026".to_string());
         ign_keys.insert("water".to_string(), "BDTOPO_V3:plan_d_eau".to_string());
@@ -155,21 +155,16 @@ impl IgnCollect {
             return Some(exact);
         }
 
-        let mut candidates = Vec::new();
-        let entries = std::fs::read_dir(dir).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let is_ign_csv = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| name.starts_with(CSV_PREFIX) && name.ends_with(".csv"))
-                .unwrap_or(false);
-            if is_ign_csv {
-                candidates.push(path);
-            }
-        }
-        candidates.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-        candidates.into_iter().next()
+        std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(CSV_PREFIX) && name.ends_with(".csv"))
+            })
+            .max_by(|a, b| a.file_name().cmp(&b.file_name()))
     }
 
     /// Charge la table des services IGN.
@@ -184,13 +179,8 @@ impl IgnCollect {
         // 1. Tentative disque (dev uniquement)
         for dir in Self::csv_data_dirs() {
             if let Some(path) = Self::find_csv_in_dir(&dir) {
-                let mut buffer = Vec::new();
-                BufReader::new(
-                    File::open(&path)
-                        .with_context(|| format!("Failed to open CSV file: {:?}", path))?,
-                )
-                .read_to_end(&mut buffer)
-                .with_context(|| format!("Failed to read CSV file: {:?}", path))?;
+                let buffer = std::fs::read(&path)
+                    .with_context(|| format!("Failed to read CSV file: {:?}", path))?;
                 return Self::parse_csv_bytes(&buffer);
             }
         }
@@ -203,44 +193,49 @@ impl IgnCollect {
     /// Parse IGN CSV bytes (semicolon delimiter, ISO-8859-1 encoding) into a map
     /// indexed by `nom_technique`.
     fn parse_csv_bytes(buffer: &[u8]) -> Result<HashMap<String, IgnServiceRow>> {
-        let encoding =
-            encoding_rs::Encoding::for_label(b"ISO-8859-1").unwrap_or(encoding_rs::WINDOWS_1252);
-        let (decoded, _, _) = encoding.decode(buffer);
-        let decoded_str: &str = decoded.as_ref();
-
+        let (decoded, _, _) = encoding_rs::WINDOWS_1252.decode(buffer);
         let mut rdr = ReaderBuilder::new()
             .delimiter(b';')
             .has_headers(true)
-            .from_reader(decoded_str.as_bytes());
-
-        let mut df_csv_file = HashMap::new();
-
+            .from_reader(decoded.as_ref().as_bytes());
+        let mut map = HashMap::with_capacity(1024);
         for result in rdr.deserialize() {
-            let record: IgnCsvRecord = result.context("Failed to deserialize CSV record")?;
-            if record.nom_technique.is_empty() {
+            let record: IgnCsvRecord = result.context("failed to deserialize CSV record")?;
+            let nom = record.nom_technique.trim().trim_end_matches('\u{a0}').to_string();
+            if nom.is_empty() {
                 continue;
             }
-            let is_wms_raster = record.service == "WMS Raster";
-            let row = IgnServiceRow {
-                service: record.service,
-                nom_technique: record.nom_technique.clone(),
-                url_geoplateforme: record.url_geoplateforme,
-            };
-            // Prefer WMS-Raster rows when several services share the same nom_technique.
-            if is_wms_raster || !df_csv_file.contains_key(&record.nom_technique) {
-                df_csv_file.insert(record.nom_technique.clone(), row);
+            let is_wms_raster = record.service == WMS_RASTER;
+            match map.entry(nom) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let nom = e.key().clone();
+                    e.insert(IgnServiceRow {
+                        service: record.service,
+                        nom_technique: nom,
+                        url_geoplateforme: record.url_geoplateforme,
+                    });
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) if is_wms_raster => {
+                    let nom = e.key().clone();
+                    e.insert(IgnServiceRow {
+                        service: record.service,
+                        nom_technique: nom,
+                        url_geoplateforme: record.url_geoplateforme,
+                    });
+                }
+                _ => {}
             }
         }
-
-        Ok(df_csv_file)
+        Ok(map)
     }
 
     /// Get row from CSV by key
     pub fn get_row_ressource(&self, key: &str) -> Option<&IgnServiceRow> {
         let typename = self.ign_keys.get(key)?;
-        self.df_csv_file
-            .get(typename)
-            .or_else(|| self.df_csv_file.get(&lidar_hd_csv_typename(typename)))
+        if let Some(row) = self.df_csv_file.get(typename) {
+            return Some(row);
+        }
+        self.df_csv_file.get(&lidar_hd_csv_typename(typename))
     }
 
     /// Execute IGN API request following Python implementation
@@ -349,30 +344,39 @@ impl IgnCollect {
         // - WFS service: https://data.geopf.fr/wfs/ows (Service Géoplateforme de sélection WFS)
         // - Uses OGC WFS 2.0.0 standard
         // URL base from CSV should already have ?SERVICE=WFS&VERSION=2.0.0
-        let mut request_url = if url.contains('?') {
-            format!(
-                "{}&REQUEST=GetFeature&TYPENAMES={}&OUTPUTFORMAT=application/json",
-                url, typename
-            )
+        let mut request_url = String::with_capacity(url.len() + typename.len() + 160);
+        if url.contains('?') {
+            let _ = write!(
+                request_url,
+                "{url}&REQUEST=GetFeature&TYPENAMES={typename}&OUTPUTFORMAT=application/json"
+            );
         } else {
-            format!("{}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES={}&OUTPUTFORMAT=application/json", url, typename)
-        };
+            let _ = write!(
+                request_url,
+                "{url}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES={typename}&OUTPUTFORMAT=application/json"
+            );
+        }
 
         // Add Bbox if not in filter (following Python: Bbox=self._Bbox)
         if use_bbox_in_url {
-            request_url.push_str(&format!(
+            let _ = write!(
+                request_url,
                 "&Bbox={},{},{},{}&CRS=EPSG:4326",
                 bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x,
-            ));
+            );
         }
 
         // Add filter if present (Python: filter=self.filter_xml)
         if let Some(ref filter_xml) = filter_xml {
-            request_url.push_str(&format!("&FILTER={}", urlencoding::encode(filter_xml)));
+            let _ = write!(
+                request_url,
+                "&FILTER={}",
+                urlencoding::encode(filter_xml)
+            );
         }
 
         // Store filter for potential future use
-        self.filter_xml = filter_xml.clone();
+        self.filter_xml = filter_xml;
 
         // Add maxfeatures and startindex (following Python: startindex=0, maxfeatures=10000)
         request_url.push_str("&STARTINDEX=0&MAXFEATURES=10000");
@@ -521,14 +525,9 @@ impl IgnCollect {
             )
         } else {
             // For other services, use URL from CSV with original format
-            let base_url = if url.contains('?') {
-                format!("{}&", url)
-            } else {
-                format!("{}?", url)
-            };
+            let sep = if url.contains('?') { '&' } else { '?' };
             format!(
-                "{}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={}&CRS=EPSG:4326&Bbox={}&WIDTH={}&HEIGHT={}&FORMAT=image/geotiff&TRANSPARENT=true&STYLES=normal&EXCEPTIONS=text/xml",
-                base_url, typename, bbox_str, width_px, height_px
+                "{url}{sep}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={typename}&CRS=EPSG:4326&Bbox={bbox_str}&WIDTH={width_px}&HEIGHT={height_px}&FORMAT=image/geotiff&TRANSPARENT=true&STYLES=normal&EXCEPTIONS=text/xml"
             )
         };
 
