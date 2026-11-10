@@ -175,6 +175,7 @@ fn test_gpu_matches_cpu_fill_chm() {
 #[test]
 fn test_raster_gpu_vs_cpu_perf() {
     use super::gpu::GPU_BATCH_POINTS;
+    use std::hint::black_box;
     use std::time::Instant;
 
     const N_POINTS: usize = 1_000_000;
@@ -183,7 +184,7 @@ fn test_raster_gpu_vs_cpu_perf() {
 
     let (w, h, res) = (1000usize, 1000usize, 1.0);
     let bbox = (0.0, 0.0, 1000.0, 1000.0);
-    let points = synthetic_points(N_POINTS, w, h, res);
+    let points = black_box(synthetic_points(N_POINTS, w, h, res));
     let mask = ClassMask::all();
     let run_gpu = || {
         rasterize_fill_chm_gpu_batched(&points, bbox, &mask, res, w, h, DtmFill::Nearest, GPU_BATCH_POINTS)
@@ -201,10 +202,10 @@ fn test_raster_gpu_vs_cpu_perf() {
         let t = Instant::now();
         let (dsm, dtm) = rasterize_max_z_cpu(&points, &mask, bbox.0, bbox.3, res, w, h);
         let dtm = fill_dtm_cpu(&dtm, w, h, DtmFill::Nearest);
-        let _ = chm_cpu(&dsm, &dtm);
+        black_box(chm_cpu(&dsm, &dtm));
         cpu.push(t.elapsed().as_secs_f64());
         let t = Instant::now();
-        run_gpu().expect("GPU raster failed after successful warm-up");
+        black_box(run_gpu().expect("GPU raster failed after successful warm-up"));
         gpu.push(t.elapsed().as_secs_f64());
     }
     let (c, g) = (median(&mut cpu), median(&mut gpu));

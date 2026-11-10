@@ -264,6 +264,7 @@ pub fn solve_mass_consistent(
     let mut v = v0.clone();
     let mut w = w0.clone();
 
+    // ponytail: row collect+scatter doubles peak RAM; write into shared Array3 if flamegraph shows this hot
     let uvww_updates: Vec<(usize, Vec<f64>, Vec<f64>, Vec<f64>)> = (0..ny)
         .into_par_iter()
         .map(|j| {

@@ -6,6 +6,25 @@ use super::types::{Lidar, LidarPoint};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
+/// Exact bbox re-check on index candidates (cells/quads over-include).
+fn collect_bbox_hits(
+    points: &[LidarPoint],
+    candidates: &[usize],
+    x_min: f64,
+    y_min: f64,
+    x_max: f64,
+    y_max: f64,
+) -> Vec<LidarPoint> {
+    let mut out = Vec::with_capacity(candidates.len());
+    for &i in candidates {
+        let p = points[i];
+        if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
+            out.push(p);
+        }
+    }
+    out
+}
+
 impl Lidar {
 
     pub(super) fn filter_points_with_spatial_index(
@@ -57,17 +76,7 @@ impl Lidar {
                 "  🔍 Grid query returned {} candidates",
                 candidate_indices.len()
             );
-            candidate_indices
-                .into_iter()
-                .filter_map(|i| {
-                    let p = points[i];
-                    if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
-                        Some(p)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+            collect_bbox_hits(points, &candidate_indices, x_min, y_min, x_max, y_max)
         } else {
             let quadtree = QuadtreeSpatialIndex::build(points);
             tracing::info!("  {}", quadtree.stats());
@@ -76,17 +85,7 @@ impl Lidar {
                 "  🔍 Quadtree query returned {} candidates",
                 candidate_indices.len()
             );
-            candidate_indices
-                .into_iter()
-                .filter_map(|i| {
-                    let p = points[i];
-                    if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
-                        Some(p)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+            collect_bbox_hits(points, &candidate_indices, x_min, y_min, x_max, y_max)
         };
         tracing::info!(
             "  Spatial indexing and query took {:.2}s",

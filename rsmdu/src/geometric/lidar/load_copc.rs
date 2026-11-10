@@ -286,8 +286,7 @@ impl Lidar {
                 let point_size = hdr.point_record_len as usize;
                 let n = entry.point_count as usize;
                 let mut points = Vec::with_capacity(n);
-                for i in 0..n {
-                    let raw = &raw_points[i * point_size..(i + 1) * point_size];
+                for (i, raw) in raw_points.chunks_exact(point_size).enumerate() {
                     let pt = match decode_las14_point(raw, &hdr.scale, &hdr.coord_offset) {
                         Ok(pt) => pt,
                         Err(e) => {
@@ -334,6 +333,7 @@ impl Lidar {
     ) -> CopcReadStats {
         #[cfg(feature = "rayon")]
         {
+            // ponytail: collect-then-extend spikes peak RAM; fold/mutex merge if flamegraph shows alloc pressure
             let results: Vec<(Vec<LidarPoint>, bool)> = entries
                 .par_iter()
                 .enumerate()

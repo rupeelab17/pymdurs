@@ -61,21 +61,19 @@ impl Vegetation {
             .context("Failed to read Red band")?;
 
         // Step 3: Calculate NDVI = (NIR - Red) / (NIR + Red)
-        // Python: ndvi = (bandNIR.astype(float) - bandRed.astype(float)) / (bandNIR.astype(float) + bandRed.astype(float))
-        let mut ndvi_data = Vec::with_capacity(width * height);
-        for i in 0..(width * height) {
-            let nir = nir_buffer.data()[i];
-            let red = red_buffer.data()[i];
-            let ndvi = if (nir + red) != 0.0 {
-                (nir - red) / (nir + red)
-            } else {
-                -999.0 // No data
-            };
-            // Filter: set to -999 if NDVI < 0.2
-            // Python: filter_raster.append([-999 if y < 0.2 else y for y in x])
-            let filtered_ndvi = if ndvi < 0.2 { -999.0 } else { ndvi };
-            ndvi_data.push(filtered_ndvi);
-        }
+        let ndvi_data: Vec<f64> = nir_buffer
+            .data()
+            .iter()
+            .zip(red_buffer.data().iter())
+            .map(|(&nir, &red)| {
+                let ndvi = if (nir + red) != 0.0 {
+                    (nir - red) / (nir + red)
+                } else {
+                    -999.0
+                };
+                if ndvi < 0.2 { -999.0 } else { ndvi }
+            })
+            .collect();
 
         // Step 4: Write NDVI raster to file
         self.write_ndvi_raster(&ndvi_data, width, height, &dataset)?;

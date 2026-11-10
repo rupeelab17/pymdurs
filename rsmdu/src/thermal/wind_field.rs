@@ -691,6 +691,7 @@ pub fn compute_initial_3d(
     let mut w0 = Array3::zeros((cols, rows, nz));
     let mut solid = Array3::from_elem((cols, rows, nz), false);
 
+    // ponytail: materialize indices+column vecs then scatter; in-place Array3 fill if profile shows alloc cost
     let indices: Vec<(usize, usize)> = (0..rows)
         .flat_map(|row| (0..cols).map(move |col| (row, col)))
         .collect();
@@ -771,10 +772,17 @@ fn extract_slice_at_height(
             (speed, direction, u_val as f32, v_val as f32)
         })
         .collect();
-    let speed_data: Vec<f32> = results.iter().map(|r| r.0).collect();
-    let dir_data: Vec<f32> = results.iter().map(|r| r.1).collect();
-    let u_data: Vec<f32> = results.iter().map(|r| r.2).collect();
-    let v_data: Vec<f32> = results.iter().map(|r| r.3).collect();
+    let n = results.len();
+    let mut speed_data = Vec::with_capacity(n);
+    let mut dir_data = Vec::with_capacity(n);
+    let mut u_data = Vec::with_capacity(n);
+    let mut v_data = Vec::with_capacity(n);
+    for (speed, direction, u_val, v_val) in results {
+        speed_data.push(speed);
+        dir_data.push(direction);
+        u_data.push(u_val);
+        v_data.push(v_val);
+    }
     let speed = Array2::from_shape_vec((ny, nx), speed_data).unwrap();
     let direction = Array2::from_shape_vec((ny, nx), dir_data).unwrap();
     let u_slice = Array2::from_shape_vec((ny, nx), u_data).unwrap();
