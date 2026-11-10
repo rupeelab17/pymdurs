@@ -160,3 +160,24 @@ impl Road {
         &self.output_path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn road_new() {
+        let r = Road::new(None).unwrap();
+        assert!(!r.get_output_path().as_os_str().is_empty());
+        assert_eq!(r.geo_core.get_epsg(), 2154);
+    }
+
+    #[test]
+    fn road_set_bbox_crs() {
+        let mut r = Road::new(None).unwrap();
+        r.set_bbox(-1.15, 46.18, -1.14, 46.19);
+        r.set_crs(2154);
+        assert!(r.bbox.is_some());
+        assert_eq!(r.geo_core.get_epsg(), 2154);
+    }
+}

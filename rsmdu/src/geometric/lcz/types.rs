@@ -198,3 +198,24 @@ impl Lcz {
         &self.output_path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lcz_new_default_crs() {
+        let l = Lcz::new(None, None, None).unwrap();
+        assert_eq!(l.geo_core.get_epsg(), 2154);
+        assert!(!l.table_color.is_empty());
+        assert!(l.table_color.contains_key(&1));
+        assert!(!l.get_output_path().as_os_str().is_empty());
+    }
+
+    #[test]
+    fn lcz_set_bbox() {
+        let mut l = Lcz::new(None, None, Some(4326)).unwrap();
+        l.set_bbox(-1.15, 46.18, -1.14, 46.19);
+        assert!(l.bbox.is_some());
+    }
+}

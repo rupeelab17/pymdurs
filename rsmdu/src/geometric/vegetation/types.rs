@@ -186,3 +186,25 @@ impl Vegetation {
         self.min_area
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vegetation_new_min_area() {
+        let v = Vegetation::new(None, None, None, false, 12.5).unwrap();
+        assert_eq!(v.get_min_area(), 12.5);
+        assert!(!v.get_output_path().as_os_str().is_empty());
+        assert_eq!(v.geo_core.get_epsg(), 2154);
+    }
+
+    #[test]
+    fn vegetation_set_bbox_crs() {
+        let mut v = Vegetation::new(None, None, Some(4326), false, 0.0).unwrap();
+        v.set_bbox(-1.15, 46.18, -1.14, 46.19);
+        v.set_crs(2154);
+        assert!(v.bbox.is_some());
+        assert_eq!(v.geo_core.get_epsg(), 2154);
+    }
+}

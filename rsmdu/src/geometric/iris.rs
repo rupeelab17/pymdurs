@@ -160,3 +160,24 @@ impl Iris {
         &self.output_path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iris_new() {
+        let i = Iris::new(None).unwrap();
+        assert!(!i.get_output_path().as_os_str().is_empty());
+        assert_eq!(i.geo_core.get_epsg(), 2154);
+    }
+
+    #[test]
+    fn iris_set_bbox_crs() {
+        let mut i = Iris::new(None).unwrap();
+        i.set_bbox(-1.15, 46.18, -1.14, 46.19);
+        i.set_crs(2154);
+        assert!(i.bbox.is_some());
+        assert_eq!(i.geo_core.get_epsg(), 2154);
+    }
+}

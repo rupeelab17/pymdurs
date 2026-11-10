@@ -329,3 +329,47 @@ pub fn solve_mass_consistent(
     }
     (u, v, w)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array3;
+
+    #[test]
+    fn mass_consistent_uniform_field_unchanged() {
+        let n = 5;
+        let u0 = Array3::from_elem((n, n, n), 1.0);
+        let v0 = Array3::zeros((n, n, n));
+        let w0 = Array3::zeros((n, n, n));
+        let solid = Array3::from_elem((n, n, n), false);
+        let (u, v, w) = solve_mass_consistent(
+            &u0, &v0, &w0, &solid, 1.0, 1.0, 1.0, 1.0, 1.0, 1e-8, 50,
+        );
+        // Uniform horizontal field: divergence ~0 → correction stays near zero in interior.
+        for i in 1..n - 1 {
+            for j in 1..n - 1 {
+                for k in 1..n - 1 {
+                    assert!((u[[i, j, k]] - 1.0).abs() < 1e-3, "u={}", u[[i, j, k]]);
+                    assert!(v[[i, j, k]].abs() < 1e-3, "v={}", v[[i, j, k]]);
+                    assert!(w[[i, j, k]].abs() < 1e-3, "w={}", w[[i, j, k]]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mass_consistent_solid_cells_untouched() {
+        let n = 5;
+        let u0 = Array3::from_elem((n, n, n), 2.0);
+        let v0 = Array3::from_elem((n, n, n), 3.0);
+        let w0 = Array3::from_elem((n, n, n), 4.0);
+        let mut solid = Array3::from_elem((n, n, n), false);
+        solid[[2, 2, 2]] = true;
+        let (u, v, w) = solve_mass_consistent(
+            &u0, &v0, &w0, &solid, 1.0, 1.0, 1.0, 1.0, 1.0, 1e-6, 20,
+        );
+        assert_eq!(u[[2, 2, 2]], 0.0);
+        assert_eq!(v[[2, 2, 2]], 0.0);
+        assert_eq!(w[[2, 2, 2]], 0.0);
+    }
+}

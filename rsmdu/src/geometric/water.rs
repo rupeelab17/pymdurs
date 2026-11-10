@@ -264,3 +264,24 @@ impl Water {
         &self.output_path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn water_new() {
+        let w = Water::new(None, None, None).unwrap();
+        assert!(!w.get_output_path().as_os_str().is_empty());
+        assert_eq!(w.geo_core.get_epsg(), 2154);
+    }
+
+    #[test]
+    fn water_set_bbox_crs() {
+        let mut w = Water::new(None, None, Some(4326)).unwrap();
+        w.set_bbox(-1.15, 46.18, -1.14, 46.19);
+        w.set_crs(2154);
+        assert!(w.bbox.is_some());
+        assert_eq!(w.geo_core.get_epsg(), 2154);
+    }
+}

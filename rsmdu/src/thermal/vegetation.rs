@@ -129,3 +129,57 @@ pub fn vegetation_wind_factor(
         vegetation_factor_open_above(z, z0, d)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use geo::{Coord, LineString, Polygon};
+
+    fn unit_square() -> Polygon<f64> {
+        Polygon::new(
+            LineString::from(vec![
+                Coord { x: 0.0, y: 0.0 },
+                Coord { x: 10.0, y: 0.0 },
+                Coord { x: 10.0, y: 10.0 },
+                Coord { x: 0.0, y: 10.0 },
+                Coord { x: 0.0, y: 0.0 },
+            ]),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn vegetation_factor_built_below_canopy() {
+        let f = vegetation_factor_built(5.0, 10.0, 0.1, 2.0);
+        assert!(f > 0.0 && f < 1.0);
+        assert_eq!(vegetation_factor_built(10.0, 10.0, 0.1, 2.0), 1.0);
+        assert_eq!(vegetation_factor_built(5.0, 0.0, 0.1, 2.0), 1.0);
+    }
+
+    #[test]
+    fn patch_at_finds_containing() {
+        let patch = VegetationPatch::new(unit_square(), 8.0)
+            .with_z0(0.2)
+            .with_alpha_i(1.5);
+        assert!(patch.contains_point(5.0, 5.0));
+        assert!(!patch.contains_point(20.0, 20.0));
+
+        let mut col = VegetationCollection::new();
+        col.add(patch);
+        assert!(col.patch_at(5.0, 5.0).is_some());
+        assert!(col.patch_at(20.0, 20.0).is_none());
+        assert!((col.patch_at(5.0, 5.0).unwrap().z0 - 0.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn vegetation_wind_factor_routes_built_vs_open() {
+        let built = vegetation_wind_factor(5.0, 10.0, 0.1, 2.0, 2.0, true);
+        let open_below = vegetation_wind_factor(5.0, 10.0, 0.1, 2.0, 2.0, false);
+        let open_above = vegetation_wind_factor(12.0, 10.0, 0.1, 2.0, 2.0, false);
+        assert!((built - vegetation_factor_built(5.0, 10.0, 0.1, 2.0)).abs() < 1e-12);
+        assert!(
+            (open_below - vegetation_factor_open_below(5.0, 10.0, 0.1, 2.0, 2.0)).abs() < 1e-12
+        );
+        assert!((open_above - vegetation_factor_open_above(12.0, 0.1, 2.0)).abs() < 1e-12);
+    }
+}

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use super::copc::*;
 use super::io::*;
 use super::raster::{
-    chm_cpu, fill_dtm_cpu, nearest_ground_seeds, rasterize_max_z_cpu, ClassMask, NO_SEED,
+    chm_cpu, fill_dtm_cpu, jfa_steps, nearest_ground_seeds, rasterize_max_z_cpu, ClassMask, NO_SEED,
 };
 use super::spatial::*;
 use super::types::{classification_to_u8, DtmFill, Lidar, LidarPoint};
@@ -686,4 +686,54 @@ fn test_save_las_ign_extended_classification() {
         .map(|p| classification_to_u8(&p.unwrap().classification))
         .collect();
     assert_eq!(classes, vec![67, 64, 6]);
+}
+
+#[test]
+fn parse_las_header_rejects_bad_sig() {
+    let mut buf = vec![0u8; LAS_HEADER_MIN_BYTES];
+    buf[0..4].copy_from_slice(b"XXXX");
+    let err = parse_las_header_from_slice(&buf).unwrap_err();
+    assert!(err.to_string().contains("Invalid LAS signature"));
+}
+
+#[test]
+fn truncate_for_error_ellipsis() {
+    assert_eq!(truncate_for_error("  short  ", 10), "short");
+    assert_eq!(truncate_for_error("abcdefghij", 5), "abcde…");
+}
+
+#[test]
+fn validate_tile_coverage_ok_half() {
+    let urls = vec!["a".into(), "b".into()];
+    let counts = vec![("a".into(), 10usize), ("b".into(), 0)];
+    assert!(Lidar::validate_tile_coverage(&urls, &counts).is_ok());
+}
+
+#[test]
+fn validate_tile_coverage_fails_majority_empty() {
+    let urls = vec!["a".into(), "b".into(), "c".into()];
+    let counts = vec![
+        ("a".into(), 0usize),
+        ("b".into(), 0),
+        ("c".into(), 5),
+    ];
+    assert!(Lidar::validate_tile_coverage(&urls, &counts).is_err());
+}
+
+#[test]
+fn jfa_steps_powers_of_two() {
+    assert_eq!(jfa_steps(1, 1), vec![1]);
+    assert_eq!(jfa_steps(8, 4), vec![4, 2, 1, 1]);
+    assert_eq!(jfa_steps(5, 5), vec![4, 2, 1, 1]);
+}
+
+#[test]
+fn lidar_new_setters() {
+    let mut lidar = Lidar::new(Some("/tmp/lidar_test".into()), Some(2), None).unwrap();
+    assert!(lidar.get_output_path().ends_with("lidar_test"));
+    lidar.set_classification(Some(6));
+    lidar.set_dtm_fill(DtmFill::Nearest);
+    assert_eq!(lidar.classification, Some(6));
+    assert!(matches!(lidar.dtm_fill, DtmFill::Nearest));
+    assert!(lidar.list_laz_urls().is_err());
 }

@@ -160,3 +160,24 @@ impl Cadastre {
         &self.output_path
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cadastre_new() {
+        let c = Cadastre::new(None).unwrap();
+        assert!(!c.get_output_path().as_os_str().is_empty());
+        assert_eq!(c.geo_core.get_epsg(), 2154);
+    }
+
+    #[test]
+    fn cadastre_set_bbox_crs() {
+        let mut c = Cadastre::new(None).unwrap();
+        c.set_bbox(-1.15, 46.18, -1.14, 46.19);
+        c.set_crs(2154);
+        assert!(c.bbox.is_some());
+        assert_eq!(c.geo_core.get_epsg(), 2154);
+    }
+}

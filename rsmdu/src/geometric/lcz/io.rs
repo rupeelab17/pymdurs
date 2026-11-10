@@ -129,3 +129,40 @@ impl Lcz {
         bbox.intersects(geom)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use geo::{Coord, LineString, Polygon};
+
+    fn square(xmin: f64, ymin: f64, xmax: f64, ymax: f64) -> Polygon<f64> {
+        Polygon::new(
+            LineString::from(vec![
+                Coord { x: xmin, y: ymin },
+                Coord { x: xmax, y: ymin },
+                Coord { x: xmax, y: ymax },
+                Coord { x: xmin, y: ymax },
+                Coord { x: xmin, y: ymin },
+            ]),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn lcz_create_bbox_ok() {
+        use geos::Geom;
+        let lcz = Lcz::new(None, None, None).unwrap();
+        let geom = lcz.create_bbox(0.0, 0.0, 10.0, 5.0).unwrap();
+        assert!(geom.is_valid().unwrap());
+    }
+
+    #[test]
+    fn geometry_intersects_bbox_true_false() {
+        let lcz = Lcz::new(None, None, None).unwrap();
+        let bbox = square(0.0, 0.0, 10.0, 10.0);
+        let inside = GeoGeometry::Polygon(square(2.0, 2.0, 4.0, 4.0));
+        let outside = GeoGeometry::Polygon(square(20.0, 20.0, 30.0, 30.0));
+        assert!(lcz.geometry_intersects_bbox(&inside, &bbox));
+        assert!(!lcz.geometry_intersects_bbox(&outside, &bbox));
+    }
+}
