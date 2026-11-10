@@ -168,3 +168,6 @@ apptainer/*.sif
 .cursor/
 .claude/
 actions-runner/
+
+# Local / accidental caches
+/cache/

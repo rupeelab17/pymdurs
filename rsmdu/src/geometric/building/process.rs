@@ -1,6 +1,9 @@
 //! Building collection processing (run, bbox, heights pipeline).
 
 use anyhow::{Context, Result};
+use geo::algorithm::map_coords::MapCoordsInPlace;
+use geo::{Area, Centroid, Coord};
+use proj::Proj;
 
 use crate::collect::ign::ign_collect::IgnCollect;
 use crate::geo_core::BoundingBox;
@@ -19,13 +22,6 @@ impl BuildingCollection {
     /// Internal run method that can be called mutably
     /// Used by Python bindings to avoid ownership issues
     pub fn run_internal(&mut self) -> Result<()> {
-        // Python: if not self.filepath_shp:
-        //         self.execute_ign(key="buildings")
-        //         file = self.content if isinstance(self.content, io.BytesIO) else io.BytesIO(self.content)
-        //         gdf = gpd.read_file(file, driver="GeoJSON")
-        // else:
-        //     gdf = gpd.read_file(self.filepath_shp, driver="ESRI Shapefile")
-
         if self.filepath_shp.is_none() {
             // Load from IGN API
             let mut ign_collect = self
@@ -42,8 +38,7 @@ impl BuildingCollection {
                 .as_ref()
                 .context("No content available from IGN API")?;
 
-            // Load from GeoJSON
-            // Get output_path from GeoCore (Python: self.output_path)
+            // Load from GeoJSON (coords stay EPSG:4326 until reproject_from_wgs84)
             let output_path = self.geo_core.get_output_path().cloned();
             let mut new_collection = Self::from_geojson(
                 geojson_bytes,
@@ -56,24 +51,44 @@ impl BuildingCollection {
             new_collection.geo_core = self.geo_core.clone();
             *self = new_collection;
         } else {
-            // Load from shapefile
-            // Python: gdf = gpd.read_file(self.filepath_shp, driver="ESRI Shapefile")
             // NOTE: Shapefile loading is temporarily disabled due to GDAL issues
             anyhow::bail!("Shapefile loading is temporarily disabled. Use from_geojson() or from_ign_api() instead.");
         }
 
-        // Python: if self.set_crs:
-        //         gdf = gdf.set_crs(crs=self.set_crs, inplace=True, allow_override=True)
-        // else:
-        //     gdf = gdf.to_crs(self._epsg)
-        // CRS is already handled in from_geojson()
-
-        // Process heights (following Python logic)
-        // Python: gdf["noHauteur"] = gdf["hauteur"].isnull()
-        //         ... (calculations) ...
-        //         gdf.dropna(subset=["hauteur"], inplace=True)
+        // IGN WFS returns WGS84; match Python gdf.to_crs(self._epsg)
+        self.reproject_from_wgs84()?;
         self.process_heights();
 
+        Ok(())
+    }
+
+    /// Reproject footprints from EPSG:4326 to `geo_core.epsg`, then refresh area/centroid.
+    /// No-op when target CRS is already 4326.
+    pub fn reproject_from_wgs84(&mut self) -> Result<()> {
+        let to_epsg = self.geo_core.get_epsg();
+        if to_epsg == 4326 {
+            return Ok(());
+        }
+
+        let to_crs = format!("EPSG:{to_epsg}");
+        let proj = Proj::new_known_crs("EPSG:4326", &to_crs, None)
+            .context("Failed to create Proj 4326 → target CRS")?;
+
+        for building in &mut self.buildings {
+            building
+                .footprint
+                .try_map_coords_in_place(|Coord { x, y }| -> Result<Coord> {
+                    let (nx, ny) = proj
+                        .convert((x, y))
+                        .with_context(|| format!("reproject building vertex ({x}, {y})"))?;
+                    Ok(Coord { x: nx, y: ny })
+                })?;
+            building.area = building.footprint.unsigned_area();
+            building.centroid = building
+                .footprint
+                .centroid()
+                .unwrap_or_else(|| geo::Point::new(0.0, 0.0));
+        }
         Ok(())
     }
 

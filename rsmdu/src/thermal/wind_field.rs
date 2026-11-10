@@ -317,15 +317,30 @@ pub fn power_law_profile(z: f64, z_ref: f64, z0: f64) -> f64 {
 }
 
 /// Urban profile (URock Eq 3): exponential below Hr, logarithmic above.
+/// Returns U(z)/U(z_ref). Below Hr the canopy factor is matched to the log profile at Hr
+/// (or, when z_ref is also below Hr, to the canopy value at z_ref).
 pub fn urban_profile(z: f64, z_ref: f64, z0: f64, d: f64, hr: f64, lambda_f: f64) -> f64 {
     let z = z.max(0.01);
     let z_ref = z_ref.max(0.01);
+    let z0 = z0.max(0.01);
     let a = 9.6 * lambda_f;
-    if z < hr {
-        (a * (z / hr - 1.0)).exp()
+    let log_ratio = |zz: f64| {
+        let num = ((zz - d).max(z0) / z0).ln();
+        let den = ((z_ref - d).max(z0) / z0).ln();
+        if den.abs() < 1e-12 {
+            1.0
+        } else {
+            num / den
+        }
+    };
+    if z_ref < hr && z < hr {
+        // Both in canopy: U(z)/U(z_ref) = exp(a*(z−z_ref)/Hr)
+        (a * (z - z_ref) / hr).exp()
+    } else if z < hr {
+        // Canopy × log at roof: U(z)/U(Hr) * U(Hr)/U(z_ref)
+        (a * (z / hr - 1.0)).exp() * log_ratio(hr)
     } else {
-        let z0 = z0.max(0.01);
-        ((z - d) / z0).ln() / ((z_ref - d) / z0).ln()
+        log_ratio(z)
     }
 }
 
@@ -741,11 +756,16 @@ pub fn compute_initial_3d(
     (u0, v0, w0, solid)
 }
 
+/// Sentinel written for solid / inside-building cells (and set as GeoTIFF NoData).
+const WIND_NODATA: f32 = -9999.0;
+
 /// Extract 2D (speed, direction, u, v) from 3D (u, v, w) at height `output_height` above ground per pixel.
+/// Cells where DSM−DEM > output_height (inside obstacle) get [`WIND_NODATA`] so QGIS stretch is not crushed by zeros.
 fn extract_slice_at_height(
     u: &Array3<f64>,
     v: &Array3<f64>,
-    _dem: &Array2<f32>,
+    dem: &Array2<f32>,
+    dsm: &Array2<f32>,
     dz: f64,
     output_height: f64,
     wind_direction_deg: f64,
@@ -757,6 +777,10 @@ fn extract_slice_at_height(
     let results: Vec<(f32, f32, f32, f32)> = indices
         .par_iter()
         .map(|&(row, col)| {
+            let bh = (dsm[[row, col]] - dem[[row, col]]) as f64;
+            if bh > output_height {
+                return (WIND_NODATA, WIND_NODATA, WIND_NODATA, WIND_NODATA);
+            }
             // Grid is "height above ground" per pixel: level k is at (k+0.5)*dz above local DEM.
             let k_float = (output_height / dz) - 0.5;
             let k0 = k_float.floor().max(0.0).min((nz as f64) - 1.0) as usize;
@@ -1056,6 +1080,7 @@ impl WindField {
                 &u,
                 &v,
                 &dem,
+                &dsm,
                 dz,
                 config.output_height,
                 config.wind_direction,
@@ -1181,6 +1206,8 @@ fn write_geotiff_f32(
     if let Some(desc) = band_description {
         band.set_description(desc).context("Set band description")?;
     }
+    band.set_no_data_value(Some(WIND_NODATA as f64))
+        .context("Set NoData")?;
     let data: Vec<f32> = arr.iter().copied().collect();
     let mut buf = Buffer::new((width, height), data);
     band.write((0, 0), (width, height), &mut buf)
@@ -1232,6 +1259,20 @@ mod tests {
         let (x2, y2) = tf.from_wind_frame(along, cross);
         assert!((x - x2).abs() < 1e-10);
         assert!((y - y2).abs() < 1e-10);
+    }
+
+    #[test]
+    fn urban_profile_is_ratio_to_z_ref() {
+        let z0 = 1.0;
+        let d = 5.0;
+        let hr = 12.0;
+        let lf = 0.2;
+        // At z_ref below Hr: ratio must be 1
+        let r = urban_profile(10.0, 10.0, z0, d, hr, lf);
+        assert!((r - 1.0).abs() < 1e-9, "U(z_ref)/U(z_ref)={r}");
+        // Pedestrian height below z_ref in canopy → ratio < 1
+        let r15 = urban_profile(1.5, 10.0, z0, d, hr, lf);
+        assert!(r15 > 0.0 && r15 < 1.0, "U(1.5)/U(10)={r15}");
     }
 
     #[test]

@@ -857,8 +857,7 @@ The version is synchronized across `pyproject.toml`, `pymdurs/Cargo.toml`, and `
 - **Set a version**: `./scripts/set-version.sh 0.1.2`
 - **Bump (patch/minor/major)**: `./scripts/bump-version.sh patch`
 - **Release (bump + commit + tag)**: `./scripts/bump-version.sh patch --tag` then `git push && git push origin py-X.Y.Z`
-
-See [docs/VERSIONING.md](docs/VERSIONING.md) for details.
+- **Publish to PyPI**: GitHub Actions → *Release Python (Windows)* (dry-run) then *Release Python* with that `windows-run-id`
 
 ---
 
@@ -867,5 +866,4 @@ See [docs/VERSIONING.md](docs/VERSIONING.md) for details.
 - [**PyPI – pymdurs**](https://pypi.org/project/pymdurs/) — project page and release history
 - [**GitHub – pymdurs**](https://github.com/rupeelab17/pymdurs) — source repository (Rust crate `rsmdu` + Python bindings)
 - [Examples README](examples/README.md) — detailed examples
-- [Versioning](docs/VERSIONING.md)
 - [IGN Documentation](https://geoservices.ign.fr/documentation/services)

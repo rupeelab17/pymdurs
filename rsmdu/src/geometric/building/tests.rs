@@ -237,3 +237,28 @@ fn building_collection_set_bbox() {
         .unwrap();
     assert!(collection.geo_core.get_bbox().is_some());
 }
+
+#[test]
+fn reproject_from_wgs84_la_rochelle_to_2154() {
+    // ~10 m square near La Rochelle (WGS84)
+    let poly = polygon![
+        (x: -1.15095, y: 46.18430),
+        (x: -1.15085, y: 46.18430),
+        (x: -1.15085, y: 46.18438),
+        (x: -1.15095, y: 46.18438),
+        (x: -1.15095, y: 46.18430),
+    ];
+    let mut collection = BuildingCollection::new_simple(None);
+    collection.set_crs(2154);
+    collection.add_building(Building::with_height(poly, 10.0));
+
+    assert!(collection.buildings[0].centroid.x().abs() < 2.0); // still lon
+    assert!(collection.buildings[0].area < 1e-4); // deg²
+
+    collection.reproject_from_wgs84().unwrap();
+
+    let c = &collection.buildings[0];
+    assert!(c.centroid.x() > 300_000.0 && c.centroid.x() < 500_000.0);
+    assert!(c.centroid.y() > 6_000_000.0 && c.centroid.y() < 7_000_000.0);
+    assert!(c.area > 1.0, "area should be m², got {}", c.area);
+}

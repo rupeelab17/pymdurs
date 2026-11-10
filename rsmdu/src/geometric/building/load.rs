@@ -91,7 +91,11 @@ impl BuildingCollection {
             .as_ref()
             .context("No content available from IGN API")?;
 
-        Self::from_geojson(geojson_bytes, output_path, default_storey_height, None)
+        let mut collection =
+            Self::from_geojson(geojson_bytes, output_path, default_storey_height, None)?;
+        // IGN WFS is EPSG:4326; default GeoCore target is 2154
+        collection.reproject_from_wgs84()?;
+        Ok(collection)
     }
 
     /// Convert GeoJSON feature to Building
