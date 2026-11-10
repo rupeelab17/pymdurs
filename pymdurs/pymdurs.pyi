@@ -16,11 +16,6 @@ __all__ = [
     "thermal",
 ]
 
-def init_logging(level: builtins.str = "info") -> None:
-    r"""
-    Install Rust tracing on stderr. Idempotent. Silent until called.
-    """
-
 BoundingBox: TypeAlias = PyBoundingBox
 GeoCore: TypeAlias = PyGeoCore
 @typing.final
@@ -60,4 +55,12 @@ class PyGeoCore:
     @output_path.setter
     def output_path(self, value: typing.Optional[builtins.str]) -> None: ...
     def __new__(cls, epsg: builtins.int = 2154) -> PyGeoCore: ...
+
+def init_logging(level: builtins.str = 'info') -> None:
+    r"""
+    Install Rust tracing on stderr. Idempotent. Default silent until called.
+    
+    `level` is a filter directive (`"info"`, `"rsmdu=debug"`, `"rsmdu::lidar_timing=info"`).
+    `RUST_LOG` wins when set.
+    """
 

@@ -36,4 +36,33 @@ for stub in "$ROOT/pymdurs/geometric/__init__.pyi" "$ROOT/pymdurs/thermal/__init
   fi
 done
 
+# Pure-Python helpers injected at runtime onto pymdurs.geometric.
+GEOM_STUB="$ROOT/pymdurs/geometric/__init__.pyi"
+HELPERS_FRAG="$ROOT/pymdurs/geometric/_helpers.pyi.frag"
+sed -i '' \
+  -e '1a\
+# Python helpers from pymdurs.geometric_helpers appended via _helpers.pyi.frag — keep on regen.
+' \
+  -e '/^import typing$/a\
+import geopandas
+' \
+  -e '/^    "Dem",$/a\
+    "DetectionUrbanTypes",
+' \
+  -e '/^    "Iris",$/a\
+    "LAYER_PROPERTIES",
+' \
+  -e '/^    "Road",$/a\
+    "TABLE_COLOR_COSIA",
+' \
+  -e '/^    "Water",$/a\
+    "calculate_centroid",\
+    "calculate_circumscribed_circle_radius",\
+    "create_circle",\
+    "dxf_to_cosia_and_weighted_layers",\
+    "dxf_to_polygon_shp",
+' \
+  "$GEOM_STUB"
+cat "$HELPERS_FRAG" >> "$GEOM_STUB"
+
 echo "Stubs written to pymdurs/pymdurs.pyi, pymdurs/geometric/, pymdurs/thermal/"

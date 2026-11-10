@@ -15,6 +15,9 @@ extension-module = ["pyo3/extension-module"]
 lidar-copc = ["rsmdu/lidar-copc"]
 # Headless wgpu compute for LiDAR DSM/DTM max-Z binning
 gpu = ["rsmdu/gpu"]
+# Building → Polars (rsmdu to_polars_df / to_gdf). Not selected by pip extras —
+# enable at build: maturin develop --features polars
+polars = ["rsmdu/polars"]
 
 [lib]
 name = "pymdurs"
@@ -35,10 +38,6 @@ rsmdu = { path = "../rsmdu", default-features = true, features = ["rayon", "lida
 
 # GeoJSON for bindings
 geojson = "1.0"
-
-# Note: Polars DataFrame conversion will be handled via Python polars package
-# We don't need polars with python feature here
-
 
 # À COPIER dans Cargo.toml (nécessite Rust >= 1.74).
 #

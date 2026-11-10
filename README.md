@@ -70,6 +70,22 @@ Optional morphometrics stack (DetectionUrbanTypes):
 uv pip install "pymdurs[urban]"
 ```
 
+Optional Polars (Python package only — pip extras cannot toggle Rust features on a wheel):
+
+```bash
+uv pip install "pymdurs[polars]"
+```
+
+Rust `polars` feature (Building `to_polars_df` / `to_gdf`) — build from source:
+
+```bash
+# local develop
+uv run maturin develop --features polars
+
+# or source install
+MATURIN_PEP517_ARGS="--features polars" uv pip install -e ".[polars]"
+```
+
 On **Windows**, the PyPI wheel bundles GDAL, GEOS, and PROJ via `auditwheel repair` — no system GDAL installation is required.
 
 For a specific version (see the [PyPI release history](https://pypi.org/project/pymdurs/#history)):
