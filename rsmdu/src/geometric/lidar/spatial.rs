@@ -232,12 +232,13 @@ impl OctreeNode {
             let quadrant = self.quadrant_for_point(point.x, point.y);
             let child_bounds = self.child_bounds(quadrant);
             let depth = self.depth;
-            let children = self.children.as_mut().unwrap();
-            if children[quadrant].is_none() {
-                children[quadrant] = Some(OctreeNode::new_leaf(child_bounds, depth + 1));
-            }
-            if let Some(ref mut child) = children[quadrant] {
-                child.insert(point_idx, points);
+            if let Some(children) = self.children.as_mut() {
+                if children[quadrant].is_none() {
+                    children[quadrant] = Some(OctreeNode::new_leaf(child_bounds, depth + 1));
+                }
+                if let Some(ref mut child) = children[quadrant] {
+                    child.insert(point_idx, points);
+                }
             }
             return;
         }

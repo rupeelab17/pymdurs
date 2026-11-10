@@ -390,10 +390,10 @@ fn zone_wind_factor_and_ref(
             }
             let hdv = 0.5 * h * (1.0 - (dy / dodv).powi(2)).max(0.0).sqrt();
             let wf = if z_pixel < hdv {
-                let v_ratio = -(0.6 * (std::f64::consts::PI * z_pixel / (0.5 * h)).cos() + 0.05)
+                
+                -(0.6 * (std::f64::consts::PI * z_pixel / (0.5 * h)).cos() + 0.05)
                     * 0.6
-                    * (std::f64::consts::PI * dy / dodv).sin();
-                v_ratio
+                    * (std::f64::consts::PI * dy / dodv).sin()
             } else {
                 0.0
             };
@@ -525,8 +525,9 @@ fn read_raster_band_as_f32(path: &Path) -> Result<(Array2<f32>, [f64; 6], usize,
 /// Configuration for Röckle wind field and optional mass-consistent solver.
 ///
 /// **Grid spacing (3D solver):**
-/// - Horizontal: `solver_dx` / `solver_dy` override the raster pixel size (from geotransform) when set.
-/// - Vertical: `solver_dz` overrides the vertical step when set; otherwise `resolution_m` is used as dz.
+///   - Horizontal: `solver_dx` / `solver_dy` override the raster pixel size (from geotransform) when set.
+///   - Vertical: `solver_dz` overrides the vertical step when set; otherwise `resolution_m` is used as dz.
+///
 /// So `resolution_m` is both a general resolution parameter and the default vertical spacing for the solver.
 pub struct WindConfig {
     pub wind_speed_ref: f64,
@@ -760,7 +761,7 @@ fn extract_slice_at_height(
             let k_float = (output_height / dz) - 0.5;
             let k0 = k_float.floor().max(0.0).min((nz as f64) - 1.0) as usize;
             let k1 = (k0 + 1).min(nz - 1);
-            let t = (k_float - k0 as f64).max(0.0).min(1.0);
+            let t = (k_float - k0 as f64).clamp(0.0, 1.0);
             let u_val = u[[col, row, k0]] * (1.0 - t) + u[[col, row, k1]] * t;
             let v_val = v[[col, row, k0]] * (1.0 - t) + v[[col, row, k1]] * t;
             let speed = (u_val * u_val + v_val * v_val).sqrt() as f32;
@@ -1090,7 +1091,7 @@ impl WindField {
 
         if let Some((u_slice, v_slice)) = &uv_opt {
             let dat_path = out_dir.join("wind_uv.dat");
-            write_wind_uv_dat(&dat_path, &u_slice, &v_slice, &gt, config.output_height)?;
+            write_wind_uv_dat(&dat_path, u_slice, v_slice, &gt, config.output_height)?;
         }
 
         let rockle_zone_path = if config.save_rockle_zone {

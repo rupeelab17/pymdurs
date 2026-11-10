@@ -82,7 +82,7 @@ pub fn vegetation_factor_built(z: f64, h_vtm: f64, z0: f64, alpha_i: f64) -> f64
     }
     let ln_ratio = (h_vtm / z0).ln() / (z / z0).ln();
     let exp_term = (alpha_i * (z / h_vtm - 1.0)).exp();
-    (ln_ratio * exp_term).max(0.0).min(1.0)
+    (ln_ratio * exp_term).clamp(0.0, 1.0)
 }
 
 /// Vegetation in open area, below canopy (B9): V0/Vp(z) = ln((Hvtm−d)/z0)/ln(z/z0) · exp(αi·(z/Hvtm − 1)).
@@ -98,7 +98,7 @@ pub fn vegetation_factor_open_below(z: f64, h_vtm: f64, z0: f64, d: f64, alpha_i
     let h_minus_d = (h_vtm - d).max(z0 + 0.01);
     let ln_ratio = (h_minus_d / z0).ln() / (z / z0).ln();
     let exp_term = (alpha_i * (z / h_vtm - 1.0)).exp();
-    (ln_ratio * exp_term).max(0.0).min(1.0)
+    (ln_ratio * exp_term).clamp(0.0, 1.0)
 }
 
 /// Vegetation in open area, above canopy (B10): V0/Vp(z) = ln((z−d)/z0)/ln(z/z0).
@@ -109,7 +109,7 @@ pub fn vegetation_factor_open_above(z: f64, z0: f64, d: f64) -> f64 {
     let z = z.max(0.01);
     let z0 = z0.max(0.01);
     let z_minus_d = (z - d).max(z0 + 0.01);
-    ((z_minus_d / z0).ln() / (z / z0).ln()).max(0.0).min(1.0)
+    ((z_minus_d / z0).ln() / (z / z0).ln()).clamp(0.0, 1.0)
 }
 
 /// Combined vegetation factor: built-up (B8) or open (B9 below canopy, B10 above).

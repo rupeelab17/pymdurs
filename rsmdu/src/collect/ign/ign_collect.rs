@@ -302,13 +302,13 @@ impl IgnCollect {
             "buildings" | "road" | "water" | "cadastre" | "iris" | "vegetation" | "hydrographique"
         ) {
             // WFS request
-            self.execute_wfs(&client, &url, &typename, &bbox, key)?;
+            self.execute_wfs(client, &url, &typename, &bbox, key)?;
         } else if key == "isochrone" {
             // Isochrone request (POST with JSON)
             anyhow::bail!("Isochrone requests require additional parameters (resource, costValue, point) - not yet implemented");
         } else {
             // WMS request (for ortho, dem, cosia, etc.)
-            self.execute_wms(&client, &url, &typename, &bbox, key)?;
+            self.execute_wms(client, &url, &typename, &bbox, key)?;
         }
 
         Ok(())
@@ -675,15 +675,15 @@ mod tests {
     }
 
     #[test]
-    fn test_set_Bbox() {
+    fn test_set_bbox() {
         let mut ign = IgnCollect::new().unwrap();
         ign.set_bbox(-1.0, 46.0, -0.9, 46.1);
         assert!(ign.bbox.is_some());
-        let Bbox = ign.bbox.unwrap();
-        assert_eq!(Bbox.min_x, -1.0);
-        assert_eq!(Bbox.min_y, 46.0);
-        assert_eq!(Bbox.max_x, -0.9);
-        assert_eq!(Bbox.max_y, 46.1);
+        let bbox = ign.bbox.unwrap();
+        assert_eq!(bbox.min_x, -1.0);
+        assert_eq!(bbox.min_y, 46.0);
+        assert_eq!(bbox.max_x, -0.9);
+        assert_eq!(bbox.max_y, 46.1);
     }
 
     #[test]

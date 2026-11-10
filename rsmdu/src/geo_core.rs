@@ -19,6 +19,13 @@ pub struct GeoCore {
     pub filename_shp: Option<String>,
 }
 
+impl Default for GeoCore {
+    /// EPSG:2154 (Lambert-93).
+    fn default() -> Self {
+        Self::new(2154)
+    }
+}
+
 impl GeoCore {
     /// Create a new GeoCore with EPSG
     /// Following Python: _epsg: int = 2154
@@ -30,13 +37,6 @@ impl GeoCore {
             output_path_shp: None,
             filename_shp: None,
         }
-    }
-
-    /// Create default GeoCore
-    /// Following Python: _epsg: int = 2154
-    pub fn default() -> Self {
-        // Default to EPSG:2154 (Lambert-93, used in France)
-        GeoCore::new(2154)
     }
 
     /// Get EPSG code
@@ -176,10 +176,7 @@ mod tests {
     fn test_transform_coords() {
         // Test coordinate transformation (if proj data is available)
         // This test may fail if proj data is not installed
-        let result = GeoCore::transform_coords(4326, 2154, 2.0, 48.0);
-        if result.is_ok() {
-            let (x, y) = result.unwrap();
-            // Just check that coordinates are reasonable (not NaN or infinite)
+        if let Ok((x, y)) = GeoCore::transform_coords(4326, 2154, 2.0, 48.0) {
             assert!(x.is_finite());
             assert!(y.is_finite());
         }

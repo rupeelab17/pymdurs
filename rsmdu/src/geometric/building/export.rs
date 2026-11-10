@@ -1,6 +1,8 @@
 //! Export buildings to Polars / GeoJSON.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(feature = "polars")]
+use anyhow::Context;
 use geojson::{GeoJson, Geometry};
 use std::path::Path;
 
@@ -192,9 +194,7 @@ impl BuildingCollection {
             // Convert geo::Polygon to geojson::Geometry
             // First convert to geo::Geometry, then to geojson::Geometry using reference
             let geo_geom: geo::Geometry<f64> = building.footprint.clone().into();
-            let geometry: Geometry = (&geo_geom)
-                .try_into()
-                .context("Failed to convert polygon to GeoJSON geometry")?;
+            let geometry: Geometry = (&geo_geom).into();
 
             // Create feature with geometry
             let mut feature = Feature::from(geometry);

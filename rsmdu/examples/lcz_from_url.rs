@@ -31,10 +31,9 @@ fn main() -> Result<()> {
     // Python: lcz = lcz.run()
     println!("Downloading and processing LCZ from URL...");
     println!("  Note: Full implementation requires GDAL shapefile reading and spatial overlay");
-    let lcz_result = lcz.run(None)?;
+    lcz.run(None)?;
 
     println!("\n✅ Processing complete!");
-    println!("  - TODO: Implement full shapefile reading and overlay operations");
 
     Ok(())
 }

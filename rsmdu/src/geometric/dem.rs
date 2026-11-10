@@ -282,9 +282,7 @@ impl Dem {
 
         // Convert polygon to GeoJSON
         use geojson::{Feature, GeoJson};
-        let geometry: geojson::Geometry = polygon
-            .try_into()
-            .context("Failed to convert polygon to GeoJSON geometry")?;
+        let geometry: geojson::Geometry = polygon.into();
 
         let feature = Feature {
             bbox: None,

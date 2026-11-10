@@ -14,7 +14,7 @@ impl Lidar {
     pub(super) fn cache_path_for_url(cache_dir: &Path, url: &str) -> PathBuf {
         let segment = url::Url::parse(url)
             .ok()
-            .and_then(|u| u.path_segments().and_then(|s| s.last().map(String::from)));
+            .and_then(|u| u.path_segments().and_then(|mut s| s.next_back().map(String::from)));
         let sanitized: String = segment
             .as_deref()
             .unwrap_or("")

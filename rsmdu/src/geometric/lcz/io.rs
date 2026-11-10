@@ -117,10 +117,7 @@ impl Lcz {
     /// Convert geo::Geometry to geojson::Geometry
     pub(crate) fn geo_to_geojson_geometry(&self, geom: &GeoGeometry<f64>) -> Result<Geometry> {
         // Use geojson's From trait
-        let geojson_geom: Geometry = geom
-            .try_into()
-            .context("Failed to convert geo geometry to GeoJSON geometry")?;
-        Ok(geojson_geom)
+        Ok(geom.into())
     }
 
     /// Check if geometry intersects with bbox

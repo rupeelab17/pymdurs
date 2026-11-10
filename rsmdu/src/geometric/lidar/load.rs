@@ -303,7 +303,7 @@ impl Lidar {
                 anyhow::bail!("No LiDAR points were loaded from any file");
             }
             tracing::info!("Total points loaded: {}", all_points.len());
-            return Ok(all_points);
+            Ok(all_points)
         }
 
         #[cfg(not(feature = "rayon"))]

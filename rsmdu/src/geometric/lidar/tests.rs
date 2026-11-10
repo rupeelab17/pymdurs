@@ -12,7 +12,9 @@ use super::types::{classification_to_u8, DtmFill, Lidar, LidarPoint};
 use super::gpu::rasterize_fill_chm_gpu_batched;
 
 /// Deterministic pseudo-random generator (no `rand` dependency in tests).
+#[cfg(feature = "gpu")]
 struct Lcg(u64);
+#[cfg(feature = "gpu")]
 impl Lcg {
     fn next_f64(&mut self) -> f64 {
         self.0 = self
@@ -28,6 +30,7 @@ impl Lcg {
 
 /// Points near cell centres (no rounding ambiguity at cell edges), with a central
 /// "building" where no ground point exists.
+#[cfg(feature = "gpu")]
 fn synthetic_points(n: usize, width: usize, height: usize, res: f64) -> Vec<LidarPoint> {
     let classes = [1u8, 2, 3, 5, 6, 7, 66];
     let mut rng = Lcg(42);
@@ -123,10 +126,10 @@ fn test_jfa_nearest_distance_exact_on_reference_grids() {
             let (ax, ay, bx, by) = ((a % w) as i64, (a / w) as i64, (b % w) as i64, (b / w) as i64);
             (ax - bx).pow(2) + (ay - by).pow(2)
         };
-        for i in 0..w * h {
+        for (i, &seed) in seeds.iter().enumerate() {
             let truth = (0..w * h).filter(|&j| ground[j]).map(|j| d2(i, j)).min().unwrap();
-            assert_ne!(seeds[i], NO_SEED);
-            assert_eq!(d2(i, seeds[i] as usize), truth, "grid {w}x{h}, cell {i}");
+            assert_ne!(seed, NO_SEED);
+            assert_eq!(d2(i, seed as usize), truth, "grid {w}x{h}, cell {i}");
         }
     }
 }

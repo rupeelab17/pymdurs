@@ -39,3 +39,85 @@ geojson = "1.0"
 # Note: Polars DataFrame conversion will be handled via Python polars package
 # We don't need polars with python feature here
 
+
+# À COPIER dans Cargo.toml (nécessite Rust >= 1.74).
+#
+# Cas workspace : coller ces tables dans le Cargo.toml racine, puis dans
+# chaque crate membre ajouter :
+#
+#   [lints]
+#   workspace = true
+#
+# Cas crate unique : remplacer "workspace.lints" par "lints" ci-dessous.
+ 
+[workspace.lints.rust]
+# --- Unsafe Code ---
+unsafe_op_in_unsafe_fn = "deny"          # SAFETY explicite même dans une fn unsafe (édition 2024)
+# unsafe_code = "forbid"                 # à activer si la crate ne contient AUCUN unsafe
+# --- Docs / API Design ---
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+# --- Linting ---
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+unused_must_use = "deny"
+unreachable_pub = "warn"
+ 
+[workspace.lints.clippy]
+# Groupes de base (priorité -1 pour que les lints individuels les surchargent)
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+ 
+# --- Error Handling ---
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+let_underscore_must_use = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+ 
+# --- Observability (tracing plutôt que println!) ---
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+ 
+# --- Unsafe Code ---
+undocumented_unsafe_blocks = "deny"      # impose un commentaire // SAFETY:
+missing_safety_doc = "deny"
+multiple_unsafe_ops_per_block = "warn"
+ 
+# --- Numeric & Arithmetic ---
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+cast_precision_loss = "warn"
+float_cmp = "warn"
+lossy_float_literal = "warn"
+ 
+# --- Memory / Ownership / Performance ---
+clone_on_ref_ptr = "warn"                # Arc::clone(&x) plutôt que x.clone()
+rc_buffer = "warn"
+mem_forget = "warn"
+large_stack_arrays = "warn"
+redundant_clone = "warn"
+needless_pass_by_value = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+ 
+# --- Pattern Matching / Anti-patterns ---
+manual_let_else = "warn"
+match_wildcard_for_single_variants = "warn"
+wildcard_enum_match_arm = "warn"
+string_to_string = "warn"
+str_to_string = "warn"
+ 
+# --- Async ---
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+ 
+# --- Exceptions pedantic trop bruyantes ---
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+similar_names = "allow"
+too_many_lines = "allow"   

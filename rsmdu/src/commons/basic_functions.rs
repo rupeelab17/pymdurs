@@ -13,9 +13,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_process_datetime() {
-        // Placeholder test
-        assert!(true);
+    fn test_process_datetime_roundtrip() {
+        assert_eq!(process_datetime(42u32), 42);
     }
 }
 

@@ -357,12 +357,12 @@ impl Lidar {
                     entries_failed += 1;
                 }
             }
-            return CopcReadStats {
+            CopcReadStats {
                 points: result_points,
                 entries_processed,
                 entries_success,
                 entries_failed,
-            };
+            }
         }
 
         #[cfg(not(feature = "rayon"))]

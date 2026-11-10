@@ -1,0 +1,28 @@
+# clippy.toml — à placer à la racine du dépôt (ou du workspace)
+
+# Version minimale de Rust supportée (MSRV) : adapter à votre crate.
+# Clippy n'émettra pas de suggestions nécessitant une version plus récente.
+msrv = "1.80"
+
+# Tests : on tolère unwrap/expect/panic/dbg/print (règles Error Handling, Testing).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+
+# Ne pas suggérer de changements qui casseraient l'API publique (règles API Design).
+avoid-breaking-exported-api = true
+
+# Seuils de complexité (Anti-patterns).
+cognitive-complexity-threshold = 25
+# wind_field / mass_consistent : grilles thermo à beaucoup de params
+too-many-arguments-threshold = 11
+too-many-lines-threshold = 120
+# rayon collect de tuples (wind_field / mass_consistent)
+type-complexity-threshold = 500
+
+# Sync I/O (IGN/LiDAR retries) : sleep + std Mutex OK — pas de runtime async / parking_lot.
+disallowed-methods = [
+    { path = "std::process::exit", reason = "Retourner une erreur depuis main plutôt que quitter brutalement" },
+]
