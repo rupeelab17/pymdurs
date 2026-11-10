@@ -1,6 +1,6 @@
 //! Spatial indexes for LiDAR point queries.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use super::types::LidarPoint;
 
@@ -18,12 +18,16 @@ pub(super) struct SpatialGridIndex {
     cell_size: f64,
     origin_x: f64,
     origin_y: f64,
-    cells: HashMap<GridCellKey, Vec<usize>>,
+    cells: FxHashMap<GridCellKey, Vec<usize>>,
     point_count: usize,
 }
 
 impl SpatialGridIndex {
-    pub(super) fn new(cell_size: f64, bounds: Option<(f64, f64, f64, f64)>) -> Self {
+    pub(super) fn new(
+        cell_size: f64,
+        bounds: Option<(f64, f64, f64, f64)>,
+        capacity: usize,
+    ) -> Self {
         let (origin_x, origin_y) = bounds
             .map(|(min_x, min_y, _, _)| (min_x, min_y))
             .unwrap_or((0.0, 0.0));
@@ -31,7 +35,7 @@ impl SpatialGridIndex {
             cell_size,
             origin_x,
             origin_y,
-            cells: HashMap::new(),
+            cells: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
             point_count: 0,
         }
     }
@@ -55,10 +59,13 @@ impl SpatialGridIndex {
             max_x = max_x.max(p.x);
             max_y = max_y.max(p.y);
         }
-        let mut index = SpatialGridIndex::new(cell_size, Some((min_x, min_y, max_x, max_y)));
+        // ~100×100 cells in filter path; clamp for tiny clouds.
+        let est_cells = ((points.len() / 100).max(16)).min(points.len().max(1));
+        let mut index =
+            SpatialGridIndex::new(cell_size, Some((min_x, min_y, max_x, max_y)), est_cells);
         for (i, p) in points.iter().enumerate() {
             let key = index.cell_key(p.x, p.y);
-            index.cells.entry(key).or_insert_with(Vec::new).push(i);
+            index.cells.entry(key).or_default().push(i);
         }
         index.point_count = points.len();
         index
@@ -69,12 +76,20 @@ impl SpatialGridIndex {
         let max_col = ((max_x - self.origin_x) / self.cell_size).floor() as i64;
         let min_row = ((min_y - self.origin_y) / self.cell_size).floor() as i64;
         let max_row = ((max_y - self.origin_y) / self.cell_size).floor() as i64;
-        let mut result = Vec::new();
+        let mut est = 0usize;
+        for col in min_col..=max_col {
+            for row in min_row..=max_row {
+                if let Some(indices) = self.cells.get(&GridCellKey { col, row }) {
+                    est += indices.len();
+                }
+            }
+        }
+        let mut result = Vec::with_capacity(est);
         for col in min_col..=max_col {
             for row in min_row..=max_row {
                 let key = GridCellKey { col, row };
                 if let Some(indices) = self.cells.get(&key) {
-                    result.extend(indices);
+                    result.extend_from_slice(indices);
                 }
             }
         }

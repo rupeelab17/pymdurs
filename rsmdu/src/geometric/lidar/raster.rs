@@ -220,10 +220,3 @@ pub(super) fn chm_cpu(dsm: &[f64], dtm_filled: &[f64]) -> Vec<f64> {
         .collect()
 }
 
-/// Flat row-major raster → `Vec<Vec<f64>>` (layout of `ProcessedRasters`).
-pub(super) fn to_rows(flat: Vec<f64>, width: usize, height: usize) -> Vec<Vec<f64>> {
-    if width == 0 {
-        return vec![Vec::new(); height];
-    }
-    flat.chunks(width).map(|r| r.to_vec()).collect()
-}

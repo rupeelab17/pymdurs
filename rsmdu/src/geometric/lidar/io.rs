@@ -118,9 +118,10 @@ where
             status
         ));
     }
-    let mut data = Vec::new();
+    let expected_len = end.saturating_sub(start).saturating_add(1) as usize;
+    let mut data = Vec::with_capacity(expected_len);
     let mut response = response;
-    let mut buffer = [0u8; 8192];
+    let mut buffer = [0u8; 65536];
     let mut total = 0u64;
     loop {
         let n = response.read(&mut buffer).context("Read Range body")?;

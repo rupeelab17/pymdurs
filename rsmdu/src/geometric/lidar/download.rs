@@ -96,7 +96,10 @@ impl Lidar {
                     );
                 }
             }
-            let mut data = Vec::new();
+            let mut data = match expected_size {
+                Some(n) => Vec::with_capacity(n as usize),
+                None => Vec::new(),
+            };
             let mut buffer = [0u8; 65536];
             let mut response = response;
             let mut bytes_read = 0u64;
@@ -204,8 +207,12 @@ impl Lidar {
                     url
                 ));
             }
-            let mut data = Vec::new();
-            let mut buffer = [0u8; 8192];
+            let expected = response.content_length().filter(|&n| n > 0);
+            let mut data = match expected {
+                Some(n) => Vec::with_capacity(n as usize),
+                None => Vec::new(),
+            };
+            let mut buffer = [0u8; 65536];
             let mut response = response;
             loop {
                 match response.read(&mut buffer) {

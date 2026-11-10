@@ -303,12 +303,12 @@ class PyLidar:
         r"""
         All LAZ tile URLs (COPC and non-COPC) for the current bbox (after `set_bbox`, no download).
         """
-    def save(self, filename: builtins.str = 'bbox.las') -> builtins.str:
+    def save(self, filename: builtins.str) -> builtins.str:
         r"""
         Export LiDAR points (ROI) to a LAS file. Downloads points on first call if not yet loaded.
         
         Args:
-            filename: Output path (e.g. "bbox.las"). If relative, saved under the Lidar output directory.
+            filename: Output path (e.g. "roi.las"). If relative, saved under the Lidar output directory.
         
         Returns:
             Absolute path to the written file.

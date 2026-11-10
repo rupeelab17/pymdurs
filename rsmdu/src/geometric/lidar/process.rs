@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use super::raster::{chm_cpu, fill_dtm_cpu, rasterize_max_z_cpu, to_rows, ClassMask};
+use super::raster::{chm_cpu, fill_dtm_cpu, rasterize_max_z_cpu, ClassMask};
 use super::types::{DtmFill, Lidar, LidarPoint, ProcessedRasters, TimingSpan};
 
 #[cfg(feature = "gpu")]
@@ -84,9 +84,9 @@ impl Lidar {
         t.set_backend(backend);
 
         Ok(ProcessedRasters {
-            dsm: to_rows(dsm, width, height),
-            dtm: to_rows(dtm, width, height),
-            chm: to_rows(chm, width, height),
+            dsm,
+            dtm,
+            chm,
             width,
             height,
             transform: [x_min, resolution, 0.0, y_max, 0.0, -resolution],
@@ -132,14 +132,12 @@ impl Lidar {
                     .context(format!("Failed to get band {}", band_idx + 1))?;
                 let data: Vec<f64> = grid
                     .iter()
-                    .flat_map(|row| {
-                        row.iter().map(|&val| {
-                            if val == f64::NEG_INFINITY {
-                                *nodata
-                            } else {
-                                val
-                            }
-                        })
+                    .map(|&val| {
+                        if val == f64::NEG_INFINITY {
+                            *nodata
+                        } else {
+                            val
+                        }
                     })
                     .collect();
                 let mut buffer = Buffer::new((rasters.width, rasters.height), data);

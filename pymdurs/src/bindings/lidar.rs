@@ -133,12 +133,11 @@ impl PyLidar {
     /// Export LiDAR points (ROI) to a LAS file. Downloads points on first call if not yet loaded.
     ///
     /// Args:
-    ///     filename: Output path (e.g. "bbox.las"). If relative, saved under the Lidar output directory.
+    ///     filename: Output path (e.g. "roi.las"). If relative, saved under the Lidar output directory.
     ///
     /// Returns:
     ///     Absolute path to the written file.
-    #[pyo3(signature = (filename = "bbox.las"))]
-    #[pyo3(text_signature = "(self, filename='bbox.las')")]
+    #[pyo3(text_signature = "(self, filename)")]
     fn save(&mut self, filename: &str) -> PyResult<String> {
         self.inner
             .save_las(Path::new(filename))

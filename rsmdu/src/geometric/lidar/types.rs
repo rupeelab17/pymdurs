@@ -102,7 +102,7 @@ pub struct Lidar {
     pub(super) dtm_fill: DtmFill,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct LidarPoint {
     pub(crate) x: f64,
     pub(crate) y: f64,
@@ -110,11 +110,12 @@ pub(crate) struct LidarPoint {
     pub(crate) classification: u8,
 }
 
+/// DSM / DTM / CHM as flat row-major `width * height` buffers.
 #[derive(Debug)]
 pub(super) struct ProcessedRasters {
-    pub(super) dsm: Vec<Vec<f64>>,
-    pub(super) dtm: Vec<Vec<f64>>,
-    pub(super) chm: Vec<Vec<f64>>,
+    pub(super) dsm: Vec<f64>,
+    pub(super) dtm: Vec<f64>,
+    pub(super) chm: Vec<f64>,
     pub(super) width: usize,
     pub(super) height: usize,
     pub(super) transform: [f64; 6],

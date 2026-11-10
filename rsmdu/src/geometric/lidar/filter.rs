@@ -19,8 +19,8 @@ impl Lidar {
         if point_count < 10_000 {
             return points
                 .iter()
+                .copied()
                 .filter(|p| p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max)
-                .cloned()
                 .collect();
         }
         tracing::info!("  Building spatial index for {} points...", point_count);
@@ -60,9 +60,9 @@ impl Lidar {
             candidate_indices
                 .into_iter()
                 .filter_map(|i| {
-                    let p = &points[i];
+                    let p = points[i];
                     if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
-                        Some(p.clone())
+                        Some(p)
                     } else {
                         None
                     }
@@ -79,9 +79,9 @@ impl Lidar {
             candidate_indices
                 .into_iter()
                 .filter_map(|i| {
-                    let p = &points[i];
+                    let p = points[i];
                     if p.x >= x_min && p.x <= x_max && p.y >= y_min && p.y <= y_max {
-                        Some(p.clone())
+                        Some(p)
                     } else {
                         None
                     }
@@ -113,12 +113,17 @@ impl Lidar {
         );
         let start = std::time::Instant::now();
         let chunk_size = 500_000;
-        let chunks: Vec<_> = points.chunks(chunk_size).collect();
-        let results: Vec<Vec<LidarPoint>> = chunks
-            .par_iter()
+        let result: Vec<LidarPoint> = points
+            .par_chunks(chunk_size)
             .map(|chunk| Self::filter_points_with_spatial_index(chunk, x_min, y_min, x_max, y_max))
-            .collect();
-        let result: Vec<LidarPoint> = results.into_iter().flatten().collect();
+            .reduce(Vec::new, |mut acc, mut part| {
+                if acc.is_empty() {
+                    return part;
+                }
+                acc.reserve(part.len());
+                acc.append(&mut part);
+                acc
+            });
         tracing::info!(
             "  Parallel spatial filtering took {:.2}s",
             start.elapsed().as_secs_f64()

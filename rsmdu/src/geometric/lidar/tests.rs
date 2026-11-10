@@ -543,7 +543,7 @@ fn test_quadtree_spatial_index() {
 
 #[test]
 fn test_grid_cell_key() {
-    let index = SpatialGridIndex::new(10.0, Some((0.0, 0.0, 100.0, 100.0)));
+    let index = SpatialGridIndex::new(10.0, Some((0.0, 0.0, 100.0, 100.0)), 16);
     let key1 = index.cell_key(5.0, 5.0);
     assert_eq!(key1.col, 0);
     assert_eq!(key1.row, 0);

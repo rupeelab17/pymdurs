@@ -128,35 +128,16 @@ impl Lidar {
         let point_data = reader
             .read_all()
             .map_err(|e| anyhow::anyhow!("Failed to read LAZ points: {}", e))?;
-        let mut raw_points: Vec<las::Point> = Vec::with_capacity(point_count);
-        for point_result in point_data.points() {
-            if let Ok(p) = point_result {
-                raw_points.push(p);
-            }
+        let mut all_points = Vec::with_capacity(point_count);
+        for p in point_data.points().flatten() {
+            all_points.push(LidarPoint {
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                classification: classification_to_u8(&p.classification),
+            });
         }
-        tracing::info!("  Read {} points", raw_points.len());
-
-        #[cfg(feature = "rayon")]
-        let all_points: Vec<LidarPoint> = raw_points
-            .par_iter()
-            .map(|p| LidarPoint {
-                x: p.x,
-                y: p.y,
-                z: p.z,
-                classification: classification_to_u8(&p.classification),
-            })
-            .collect();
-
-        #[cfg(not(feature = "rayon"))]
-        let all_points: Vec<LidarPoint> = raw_points
-            .iter()
-            .map(|p| LidarPoint {
-                x: p.x,
-                y: p.y,
-                z: p.z,
-                classification: classification_to_u8(&p.classification),
-            })
-            .collect();
+        tracing::info!("  Read {} points", all_points.len());
         t_decomp.set_points(all_points.len());
         drop(t_decomp);
 
@@ -239,7 +220,8 @@ impl Lidar {
                 laz_urls.iter().partition(|u| Self::is_copc_url(u));
 
             let mut all_points: Vec<LidarPoint> = Vec::new();
-            let mut tile_point_counts: Vec<(String, usize)> = Vec::new();
+            let mut tile_point_counts: Vec<(String, usize)> =
+                Vec::with_capacity(laz_urls.len());
 
             // --- COPC séquentiel avec retry/backoff ---
             for (idx, url) in copc_urls.iter().enumerate() {
@@ -252,6 +234,7 @@ impl Lidar {
                         Ok(pts) => {
                             tile_points = pts.len();
                             tracing::info!("  ✅ {} points chargés", tile_points);
+                            all_points.reserve(pts.len());
                             all_points.extend(pts);
                             break;
                         }
@@ -302,6 +285,7 @@ impl Lidar {
                 for (url, res) in results {
                     let pts = res?;
                     tile_point_counts.push((url, pts.len()));
+                    all_points.reserve(pts.len());
                     all_points.extend(pts);
                 }
             }
@@ -325,7 +309,8 @@ impl Lidar {
         #[cfg(not(feature = "rayon"))]
         {
             let mut all_points = Vec::new();
-            let mut tile_point_counts: Vec<(String, usize)> = Vec::new();
+            let mut tile_point_counts: Vec<(String, usize)> =
+                Vec::with_capacity(laz_urls.len());
 
             #[cfg(feature = "progressbar")]
             let overall_pb = if laz_urls.len() > 1 {
@@ -348,6 +333,7 @@ impl Lidar {
                         Ok(points) => {
                             tile_points = points.len();
                             tracing::info!("  Loaded {} points", tile_points);
+                            all_points.reserve(points.len());
                             all_points.extend(points);
                             break;
                         }
