@@ -4,6 +4,10 @@ import sys
 from . import pymdurs as _native
 from .pymdurs import *
 
+# Native aliases assigned with setattr are not included in the extension's __all__.
+BoundingBox = _native.BoundingBox
+GeoCore = _native.GeoCore
+
 # `from .pymdurs import *` does not re-export extension submodules, so
 # `import pymdurs.geometric` / `from pymdurs.geometric import …` would fail.
 for _name in ("geometric", "thermal"):

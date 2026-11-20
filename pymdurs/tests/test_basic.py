@@ -3,6 +3,16 @@
 import pytest
 
 
+@pytest.mark.parametrize("name", ["BoundingBox", "GeoCore"])
+def test_core_aliases_are_reexported(name: str) -> None:
+    """The public package exposes the native aliases, not replacement classes."""
+    import pymdurs
+    from pymdurs import pymdurs as native
+
+    assert getattr(native, name) is getattr(native, f"Py{name}")
+    assert getattr(pymdurs, name) is getattr(native, name)
+
+
 def test_bounding_box():
     """Test BoundingBox creation and properties"""
     import pymdurs
@@ -21,10 +31,10 @@ def test_geo_core():
     geo = pymdurs.GeoCore(epsg=2154)
     assert geo.epsg == 2154
 
-    geo.set_epsg(4326)
+    geo.epsg = 4326
     assert geo.epsg == 4326
 
-    geo.set_output_path("./output")
+    geo.output_path = "./output"
     assert geo.output_path == "./output"
 
 
