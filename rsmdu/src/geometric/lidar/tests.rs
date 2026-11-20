@@ -38,7 +38,8 @@ fn synthetic_points(n: usize, width: usize, height: usize, res: f64) -> Vec<Lida
         .map(|_| {
             let (cx, cy) = (rng.below(width), rng.below(height));
             let mut classification = classes[rng.below(classes.len())];
-            let in_building = cx > width / 4 && cx < width / 2 && cy > height / 4 && cy < 3 * height / 4;
+            let in_building =
+                cx > width / 4 && cx < width / 2 && cy > height / 4 && cy < 3 * height / 4;
             if in_building && classification == 2 {
                 classification = 6;
             }
@@ -67,11 +68,36 @@ fn test_class_mask() {
 #[test]
 fn test_rasterize_cpu_class_filter_and_bounds() {
     let pts = vec![
-        LidarPoint { x: 0.5, y: 1.5, z: 10.0, classification: 2 },
-        LidarPoint { x: 0.5, y: 1.5, z: 12.0, classification: 1 },
-        LidarPoint { x: 1.5, y: 1.5, z: 8.0, classification: 2 },
-        LidarPoint { x: 0.5, y: 0.5, z: 5.0, classification: 6 },
-        LidarPoint { x: -0.2, y: 1.5, z: 99.0, classification: 1 }, // outside: must not land in col 0
+        LidarPoint {
+            x: 0.5,
+            y: 1.5,
+            z: 10.0,
+            classification: 2,
+        },
+        LidarPoint {
+            x: 0.5,
+            y: 1.5,
+            z: 12.0,
+            classification: 1,
+        },
+        LidarPoint {
+            x: 1.5,
+            y: 1.5,
+            z: 8.0,
+            classification: 2,
+        },
+        LidarPoint {
+            x: 0.5,
+            y: 0.5,
+            z: 5.0,
+            classification: 6,
+        },
+        LidarPoint {
+            x: -0.2,
+            y: 1.5,
+            z: 99.0,
+            classification: 1,
+        }, // outside: must not land in col 0
     ];
     let (dsm, dtm) = rasterize_max_z_cpu(&pts, &ClassMask::all(), 0.0, 2.0, 1.0, 2, 2);
     assert_eq!(dsm, vec![12.0, 8.0, 5.0, f64::NEG_INFINITY]);
@@ -97,10 +123,17 @@ fn test_fill_legacy_leaves_zero_holes_nearest_does_not() {
         })
         .collect();
     let legacy = fill_dtm_cpu(&dtm, w, h, DtmFill::Neighbor3x3);
-    assert_eq!(legacy[2 * w + 3], 0.0, "centre cell has no ground neighbour in 3x3");
+    assert_eq!(
+        legacy[2 * w + 3],
+        0.0,
+        "centre cell has no ground neighbour in 3x3"
+    );
 
     let nearest = fill_dtm_cpu(&dtm, w, h, DtmFill::Nearest);
-    assert!(nearest.iter().all(|&v| v >= 100.0), "no 0.0 hole with nearest fill");
+    assert!(
+        nearest.iter().all(|&v| v >= 100.0),
+        "no 0.0 hole with nearest fill"
+    );
 
     let chm = chm_cpu(&vec![120.0; w * h], &nearest);
     assert!(chm.iter().all(|&v| v < 20.0 + 1e-9));
@@ -123,11 +156,20 @@ fn test_jfa_nearest_distance_exact_on_reference_grids() {
             .collect();
         let seeds = nearest_ground_seeds(&dtm, w, h);
         let d2 = |a: usize, b: usize| {
-            let (ax, ay, bx, by) = ((a % w) as i64, (a / w) as i64, (b % w) as i64, (b / w) as i64);
+            let (ax, ay, bx, by) = (
+                (a % w) as i64,
+                (a / w) as i64,
+                (b % w) as i64,
+                (b / w) as i64,
+            );
             (ax - bx).pow(2) + (ay - by).pow(2)
         };
         for (i, &seed) in seeds.iter().enumerate() {
-            let truth = (0..w * h).filter(|&j| ground[j]).map(|j| d2(i, j)).min().unwrap();
+            let truth = (0..w * h)
+                .filter(|&j| ground[j])
+                .map(|j| d2(i, j))
+                .min()
+                .unwrap();
             assert_ne!(seed, NO_SEED);
             assert_eq!(d2(i, seed as usize), truth, "grid {w}x{h}, cell {i}");
         }
@@ -144,12 +186,16 @@ fn test_gpu_matches_cpu_fill_chm() {
 
     for (mask, fill) in [
         (ClassMask::all(), DtmFill::Neighbor3x3),
-        (ClassMask::from_list(Some(&[1, 2, 6, 66])), DtmFill::Neighbor3x3),
+        (
+            ClassMask::from_list(Some(&[1, 2, 6, 66])),
+            DtmFill::Neighbor3x3,
+        ),
         (ClassMask::all(), DtmFill::Nearest),
         (ClassMask::from_list(Some(&[2, 6])), DtmFill::Nearest),
     ] {
         // 7 000 points per batch → 9 batches: exercises the batched upload.
-        let gpu = match rasterize_fill_chm_gpu_batched(&points, bbox, &mask, res, w, h, fill, 7_000) {
+        let gpu = match rasterize_fill_chm_gpu_batched(&points, bbox, &mask, res, w, h, fill, 7_000)
+        {
             Ok(g) => g,
             Err(e) => {
                 eprintln!("skip GPU parity test (no adapter / init failed): {e}");
@@ -159,14 +205,21 @@ fn test_gpu_matches_cpu_fill_chm() {
         let (dsm, dtm) = rasterize_max_z_cpu(&points, &mask, bbox.0, bbox.3, res, w, h);
         let dtm = fill_dtm_cpu(&dtm, w, h, fill);
         let chm = chm_cpu(&dsm, &dtm);
-        for (name, g, c) in [("dsm", &gpu.dsm, &dsm), ("dtm", &gpu.dtm, &dtm), ("chm", &gpu.chm, &chm)] {
+        for (name, g, c) in [
+            ("dsm", &gpu.dsm, &dsm),
+            ("dtm", &gpu.dtm, &dtm),
+            ("chm", &gpu.chm, &chm),
+        ] {
             assert_eq!(g.len(), c.len());
             for i in 0..c.len() {
                 let (gv, cv) = (g[i] as f64, c[i]);
                 if cv.is_infinite() || gv.is_infinite() {
                     assert_eq!(gv, cv, "{name}[{i}] {fill:?}");
                 } else {
-                    assert!((gv - cv).abs() < 1e-3, "{name}[{i}] {fill:?}: gpu={gv} cpu={cv}");
+                    assert!(
+                        (gv - cv).abs() < 1e-3,
+                        "{name}[{i}] {fill:?}: gpu={gv} cpu={cv}"
+                    );
                 }
             }
         }
@@ -190,7 +243,16 @@ fn test_raster_gpu_vs_cpu_perf() {
     let points = black_box(synthetic_points(N_POINTS, w, h, res));
     let mask = ClassMask::all();
     let run_gpu = || {
-        rasterize_fill_chm_gpu_batched(&points, bbox, &mask, res, w, h, DtmFill::Nearest, GPU_BATCH_POINTS)
+        rasterize_fill_chm_gpu_batched(
+            &points,
+            bbox,
+            &mask,
+            res,
+            w,
+            h,
+            DtmFill::Nearest,
+            GPU_BATCH_POINTS,
+        )
     };
     if let Err(e) = run_gpu() {
         eprintln!("skip GPU perf gate (no adapter / init failed): {e}");
@@ -213,8 +275,13 @@ fn test_raster_gpu_vs_cpu_perf() {
     }
     let (c, g) = (median(&mut cpu), median(&mut gpu));
     let ratio = if g > 0.0 { c / g } else { f64::INFINITY };
-    println!("lidar raster perf (bin+JFA+CHM): gpu={g:.4}s cpu={c:.4}s ratio={ratio:.2} (n={N_POINTS})");
-    assert!(ratio >= MIN_RATIO_FAIL, "GPU significantly slower than CPU: ratio={ratio:.2}");
+    println!(
+        "lidar raster perf (bin+JFA+CHM): gpu={g:.4}s cpu={c:.4}s ratio={ratio:.2} (n={N_POINTS})"
+    );
+    assert!(
+        ratio >= MIN_RATIO_FAIL,
+        "GPU significantly slower than CPU: ratio={ratio:.2}"
+    );
 }
 
 /// Real-tile scale: > 16.7 M points (old dispatch limit) and > 128 MiB of points
@@ -227,7 +294,15 @@ fn test_gpu_raster_large_point_count() {
     let (w, h, res) = (2000usize, 2000usize, 0.5);
     let bbox = (0.0, 0.0, w as f64 * res, h as f64 * res);
     let points = synthetic_points(20_000_000, w, h, res);
-    match rasterize_fill_chm_gpu(&points, bbox, &ClassMask::all(), res, w, h, DtmFill::Nearest) {
+    match rasterize_fill_chm_gpu(
+        &points,
+        bbox,
+        &ClassMask::all(),
+        res,
+        w,
+        h,
+        DtmFill::Nearest,
+    ) {
         Ok(r) => assert_eq!(r.dsm.len(), w * h),
         Err(e) => eprintln!("GPU path refused (would fall back to CPU): {e}"),
     }
@@ -348,7 +423,11 @@ fn test_copc_entry_bounds_xy() {
     let (min_x, min_y, max_x, max_y) = copc_entry_bounds_xy(&entry_root, &info);
     assert!((min_x - (-1000.0)).abs() < 1e-9);
     assert!((min_y - (-1000.0)).abs() < 1e-9);
-    assert!((max_x - 1000.0).abs() < 1e-9, "max_x should be 1000, got {}", max_x);
+    assert!(
+        (max_x - 1000.0).abs() < 1e-9,
+        "max_x should be 1000, got {}",
+        max_x
+    );
     assert!((max_y - 1000.0).abs() < 1e-9);
 
     // Level 1, vx=1, vy=1 : side=1000, min=(0,0), max=(1000,1000)
@@ -393,8 +472,18 @@ fn test_copc_entry_bounds_xy_ign_regression() {
         point_count: 1,
     };
     let (_nx_min, ny_min, _nx_max, ny_max) = copc_entry_bounds_xy(&entry, &info);
-    assert!(ny_max > bbox.1, "node max_y {} should exceed bbox min_y {}", ny_max, bbox.1);
-    assert!(ny_min < bbox.3, "node min_y {} should be below bbox max_y {}", ny_min, bbox.3);
+    assert!(
+        ny_max > bbox.1,
+        "node max_y {} should exceed bbox min_y {}",
+        ny_max,
+        bbox.1
+    );
+    assert!(
+        ny_min < bbox.3,
+        "node min_y {} should be below bbox max_y {}",
+        ny_min,
+        bbox.3
+    );
     assert!(copc_entry_intersects(
         &entry, &info, bbox.0, bbox.1, bbox.2, bbox.3
     ));
@@ -614,11 +703,7 @@ fn test_lidar_run_stage_timings() {
     let _ = std::fs::create_dir_all(&output);
 
     let bbox = (-1.153414, 46.180217, -1.141098, 46.186531);
-    let mut lidar = match Lidar::new(
-        Some(output.to_string_lossy().into_owned()),
-        None,
-        None,
-    ) {
+    let mut lidar = match Lidar::new(Some(output.to_string_lossy().into_owned()), None, None) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("skip lidar E2E timings (Lidar::new failed): {e}");
@@ -653,12 +738,8 @@ fn test_lidar_run_stage_timings() {
 #[test]
 fn test_save_las_ign_extended_classification() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut lidar = Lidar::new(
-        Some(tmp.path().to_string_lossy().into_owned()),
-        None,
-        None,
-    )
-    .unwrap();
+    let mut lidar =
+        Lidar::new(Some(tmp.path().to_string_lossy().into_owned()), None, None).unwrap();
     lidar.loaded_points = Some(vec![
         LidarPoint {
             x: 100.0,
@@ -715,11 +796,7 @@ fn validate_tile_coverage_ok_half() {
 #[test]
 fn validate_tile_coverage_fails_majority_empty() {
     let urls = vec!["a".into(), "b".into(), "c".into()];
-    let counts = vec![
-        ("a".into(), 0usize),
-        ("b".into(), 0),
-        ("c".into(), 5),
-    ];
+    let counts = vec![("a".into(), 0usize), ("b".into(), 0), ("c".into(), 5)];
     assert!(Lidar::validate_tile_coverage(&urls, &counts).is_err());
 }
 

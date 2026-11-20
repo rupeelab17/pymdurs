@@ -155,7 +155,13 @@ pub(super) fn nearest_ground_seeds(dtm: &[f64], width: usize, height: usize) -> 
     let mut src: Vec<u32> = dtm
         .iter()
         .enumerate()
-        .map(|(i, &v)| if v == f64::NEG_INFINITY { NO_SEED } else { i as u32 })
+        .map(|(i, &v)| {
+            if v == f64::NEG_INFINITY {
+                NO_SEED
+            } else {
+                i as u32
+            }
+        })
         .collect();
     if width == 0 || height == 0 {
         return src;
@@ -164,9 +170,8 @@ pub(super) fn nearest_ground_seeds(dtm: &[f64], width: usize, height: usize) -> 
     for k in jfa_steps(width, height) {
         {
             let src_ref = &src;
-            let step_row = |(y, out): (usize, &mut [u32])| {
-                jfa_row(src_ref, out, y, width, height, k as i64)
-            };
+            let step_row =
+                |(y, out): (usize, &mut [u32])| jfa_row(src_ref, out, y, width, height, k as i64);
             #[cfg(feature = "rayon")]
             dst.par_chunks_mut(width).enumerate().for_each(step_row);
             #[cfg(not(feature = "rayon"))]
@@ -219,4 +224,3 @@ pub(super) fn chm_cpu(dsm: &[f64], dtm_filled: &[f64]) -> Vec<f64> {
         })
         .collect()
 }
-

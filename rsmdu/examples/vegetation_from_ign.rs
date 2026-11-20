@@ -37,10 +37,7 @@ fn main() -> Result<()> {
     if let Some(geojson) = vegetation_result.get_geojson() {
         match geojson {
             geojson::GeoJson::FeatureCollection(fc) => {
-                println!(
-                    "  - Number of vegetation polygons: {}",
-                    fc.features.len()
-                );
+                println!("  - Number of vegetation polygons: {}", fc.features.len());
             }
             _ => {
                 println!("  - GeoJSON loaded (non-FeatureCollection format)");
@@ -54,10 +51,7 @@ fn main() -> Result<()> {
     vegetation_result.to_geojson(None)?;
 
     println!("\n✅ Processing complete!");
-    println!(
-        "  - Output file: {:?}",
-        vegetation_result.get_output_path()
-    );
+    println!("  - Output file: {:?}", vegetation_result.get_output_path());
 
     Ok(())
 }

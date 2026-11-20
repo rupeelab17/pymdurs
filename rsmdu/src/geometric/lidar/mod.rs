@@ -3,10 +3,10 @@
 mod api;
 mod copc;
 mod download;
+mod filter;
 mod io;
 mod load;
 mod load_copc;
-mod filter;
 mod process;
 mod raster;
 mod spatial;

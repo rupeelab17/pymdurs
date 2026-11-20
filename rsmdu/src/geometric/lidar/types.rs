@@ -50,7 +50,8 @@ impl TimingSpan {
             start: std::time::Instant::now(),
             points: None,
             backend: None,
-            _span: tracing::info_span!(target: "rsmdu::lidar_timing", "lidar_timing", stage).entered(),
+            _span: tracing::info_span!(target: "rsmdu::lidar_timing", "lidar_timing", stage)
+                .entered(),
         }
     }
 
@@ -79,7 +80,6 @@ pub(super) fn progress_style() -> ProgressStyle {
         .unwrap()
         .progress_chars("##-")
 }
-
 
 /// How DTM cells without ground points (under buildings, dense canopy…) are filled
 /// before computing the CHM.

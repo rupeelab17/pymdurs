@@ -77,7 +77,13 @@ impl Lcz {
         anyhow::bail!("Aucun fichier .shp trouvé dans l'archive")
     }
 
-    pub(crate) fn create_bbox(&self, xmin: f64, ymin: f64, xmax: f64, ymax: f64) -> GResult<GeosGeometry> {
+    pub(crate) fn create_bbox(
+        &self,
+        xmin: f64,
+        ymin: f64,
+        xmax: f64,
+        ymax: f64,
+    ) -> GResult<GeosGeometry> {
         // 5 points (fermeture du polygone), 2 dimensions (x, y)
         let mut coords = CoordSeq::new(5, CoordType::XY)?;
 
@@ -98,7 +104,10 @@ impl Lcz {
     }
 
     /// Convert GDAL geometry to geo::Geometry
-    pub(crate) fn gdal_to_geo_geometry(&self, geom: &gdal::vector::Geometry) -> Result<GeoGeometry<f64>> {
+    pub(crate) fn gdal_to_geo_geometry(
+        &self,
+        geom: &gdal::vector::Geometry,
+    ) -> Result<GeoGeometry<f64>> {
         // Get WKT representation
         let wkt = geom.wkt().context("Failed to get WKT from GDAL geometry")?;
 
@@ -122,7 +131,11 @@ impl Lcz {
 
     /// Check if geometry intersects with bbox
     #[allow(dead_code)]
-    pub(crate) fn geometry_intersects_bbox(&self, geom: &GeoGeometry<f64>, bbox: &Polygon<f64>) -> bool {
+    pub(crate) fn geometry_intersects_bbox(
+        &self,
+        geom: &GeoGeometry<f64>,
+        bbox: &Polygon<f64>,
+    ) -> bool {
         bbox.intersects(geom)
     }
 }

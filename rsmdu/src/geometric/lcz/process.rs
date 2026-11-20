@@ -1,7 +1,6 @@
 //! LCZ download, filter, and spatial query.
 
 use anyhow::{Context, Result};
-use geojson::{Feature, GeoJson};
 use gdal::spatial_ref::{AxisMappingStrategy, CoordTransform, SpatialRef};
 use gdal::vector::Geometry as OgrGeometry;
 use gdal::vector::LayerAccess;
@@ -9,6 +8,7 @@ use gdal::Dataset;
 use geo::algorithm::bounding_rect::BoundingRect;
 use geo::algorithm::intersects::Intersects;
 use geo::Geometry as GeoGeometry;
+use geojson::{Feature, GeoJson};
 use geos::Geom;
 use rstar::{RTree, AABB};
 

@@ -176,7 +176,10 @@ pub(super) fn parse_hierarchy_page(buf: &[u8]) -> Result<Vec<CopcEntry>> {
 
 /// Lit toutes les entrées de hiérarchie COPC en suivant les pages enfants.
 /// Les entrées avec point_count == -1 sont des pages enfants à lire récursivement.
-pub(super) fn read_all_hierarchy_entries(file_buf: &[u8], info: &CopcInfo) -> Result<Vec<CopcEntry>> {
+pub(super) fn read_all_hierarchy_entries(
+    file_buf: &[u8],
+    info: &CopcInfo,
+) -> Result<Vec<CopcEntry>> {
     let mut all_entries = Vec::new();
     let mut pages_to_read: Vec<(u64, u64)> = vec![(info.root_hier_offset, info.root_hier_size)];
 

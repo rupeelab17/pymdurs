@@ -82,17 +82,21 @@ fn main() -> Result<()> {
         println!("    - Height: {:?} m", building.height);
         println!("    - Number of storeys: {:?}", building.nombre_d_etages);
         println!("    - Area: {:.2} m²", building.area);
-        println!("    - Centroid: ({:.6}, {:.6})", 
-                 building.centroid.x(), 
-                 building.centroid.y());
+        println!(
+            "    - Centroid: ({:.6}, {:.6})",
+            building.centroid.x(),
+            building.centroid.y()
+        );
         if !building.metadata.is_empty() {
             println!("    - Metadata: {:?}", building.metadata);
         }
     }
 
     // Compute mean height before processing
-    println!("\nMean height (before processing): {:.2} m", 
-             collection.calculate_mean_height());
+    println!(
+        "\nMean height (before processing): {:.2} m",
+        collection.calculate_mean_height()
+    );
 
     // Process heights (fill missing heights)
     collection.process_heights();
@@ -105,12 +109,13 @@ fn main() -> Result<()> {
     // Convert to Polars DataFrame
     println!("\nConverting to Polars DataFrame...");
     let df = collection.to_polars_df()?;
-    println!("DataFrame created with {} rows and {} columns", 
-             df.height(), 
-             df.width());
+    println!(
+        "DataFrame created with {} rows and {} columns",
+        df.height(),
+        df.width()
+    );
     println!("\nDataFrame preview:");
     println!("{}", df);
 
     Ok(())
 }
-

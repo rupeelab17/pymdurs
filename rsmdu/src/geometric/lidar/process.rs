@@ -59,7 +59,10 @@ impl Lidar {
     ///
     /// The classification filter is applied inside the binning (CPU loop or GPU kernel),
     /// so the point cloud is never copied.
-    #[tracing::instrument(skip(self, points, classification_list), fields(stage = "raster_total"))]
+    #[tracing::instrument(
+        skip(self, points, classification_list),
+        fields(stage = "raster_total")
+    )]
     pub(super) fn process_lidar_points(
         &self,
         points: &[LidarPoint],
@@ -74,13 +77,23 @@ impl Lidar {
         let height = ((y_max - y_min) / resolution).ceil() as usize;
         tracing::info!(
             "Grid dimensions: {}x{} (resolution: {}m, DTM fill: {:?})",
-            width, height, resolution, self.dtm_fill
+            width,
+            height,
+            resolution,
+            self.dtm_fill
         );
 
         let mut t = TimingSpan::enter("raster_total");
         t.set_points(points.len());
-        let (dsm, dtm, chm, backend) =
-            compute_rasters(points, bbox, &mask, resolution, width, height, self.dtm_fill);
+        let (dsm, dtm, chm, backend) = compute_rasters(
+            points,
+            bbox,
+            &mask,
+            resolution,
+            width,
+            height,
+            self.dtm_fill,
+        );
         t.set_backend(backend);
 
         Ok(ProcessedRasters {

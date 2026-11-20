@@ -51,9 +51,7 @@ fn main() -> Result<()> {
 
             if collection.is_empty() {
                 println!("\n⚠ No buildings found in this area.");
-                println!(
-                    "  Try a different bounding box or check your internet connection."
-                );
+                println!("  Try a different bounding box or check your internet connection.");
                 return Ok(());
             }
 
@@ -83,10 +81,7 @@ fn main() -> Result<()> {
 
             // Display statistics after processing
             let mean_height_after = collection.calculate_mean_height();
-            println!(
-                "Mean height (after processing): {:.2} m",
-                mean_height_after
-            );
+            println!("Mean height (after processing): {:.2} m", mean_height_after);
 
             // Height statistics
             let buildings_with_height: usize = collection

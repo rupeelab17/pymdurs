@@ -12,6 +12,6 @@ pub mod wind_field;
 #[cfg(all(feature = "gdal", feature = "rayon", feature = "ndarray"))]
 pub use mass_consistent_solver::solve_mass_consistent;
 #[cfg(all(feature = "gdal", feature = "rayon", feature = "ndarray"))]
-pub use vegetation::{VegetationCollection, VegetationPatch, vegetation_wind_factor};
+pub use vegetation::{vegetation_wind_factor, VegetationCollection, VegetationPatch};
 #[cfg(all(feature = "gdal", feature = "rayon", feature = "ndarray"))]
 pub use wind_field::*;

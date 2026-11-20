@@ -232,9 +232,7 @@ fn get_geojson_feature_props() {
 #[test]
 fn building_collection_set_bbox() {
     let mut collection = BuildingCollection::new_simple(None);
-    collection
-        .set_bbox(-1.15, 46.18, -1.14, 46.19)
-        .unwrap();
+    collection.set_bbox(-1.15, 46.18, -1.14, 46.19).unwrap();
     assert!(collection.geo_core.get_bbox().is_some());
 }
 

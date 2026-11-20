@@ -53,7 +53,9 @@ pub struct VegetationCollection {
 
 impl VegetationCollection {
     pub fn new() -> Self {
-        Self { patches: Vec::new() }
+        Self {
+            patches: Vec::new(),
+        }
     }
 
     pub fn add(&mut self, patch: VegetationPatch) {
@@ -62,9 +64,7 @@ impl VegetationCollection {
 
     /// First patch containing (geo_x, geo_y), if any.
     pub fn patch_at(&self, geo_x: f64, geo_y: f64) -> Option<&VegetationPatch> {
-        self.patches
-            .iter()
-            .find(|p| p.contains_point(geo_x, geo_y))
+        self.patches.iter().find(|p| p.contains_point(geo_x, geo_y))
     }
 }
 

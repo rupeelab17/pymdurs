@@ -342,9 +342,8 @@ mod tests {
         let v0 = Array3::zeros((n, n, n));
         let w0 = Array3::zeros((n, n, n));
         let solid = Array3::from_elem((n, n, n), false);
-        let (u, v, w) = solve_mass_consistent(
-            &u0, &v0, &w0, &solid, 1.0, 1.0, 1.0, 1.0, 1.0, 1e-8, 50,
-        );
+        let (u, v, w) =
+            solve_mass_consistent(&u0, &v0, &w0, &solid, 1.0, 1.0, 1.0, 1.0, 1.0, 1e-8, 50);
         // Uniform horizontal field: divergence ~0 → correction stays near zero in interior.
         for i in 1..n - 1 {
             for j in 1..n - 1 {
@@ -365,9 +364,8 @@ mod tests {
         let w0 = Array3::from_elem((n, n, n), 4.0);
         let mut solid = Array3::from_elem((n, n, n), false);
         solid[[2, 2, 2]] = true;
-        let (u, v, w) = solve_mass_consistent(
-            &u0, &v0, &w0, &solid, 1.0, 1.0, 1.0, 1.0, 1.0, 1e-6, 20,
-        );
+        let (u, v, w) =
+            solve_mass_consistent(&u0, &v0, &w0, &solid, 1.0, 1.0, 1.0, 1.0, 1.0, 1e-6, 20);
         assert_eq!(u[[2, 2, 2]], 0.0);
         assert_eq!(v[[2, 2, 2]], 0.0);
         assert_eq!(w[[2, 2, 2]], 0.0);

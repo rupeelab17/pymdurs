@@ -413,14 +413,26 @@ pub(super) fn rasterize_fill_chm_gpu_batched(
             "lidar_jfa_init_bg",
             &[&ctx.grid_uniform(w32, h32, 0, mode), &dtm_bits, &src],
         );
-        dispatch(&mut encoder, "lidar_jfa_init", &ctx.jfa_init, &bg, (groups_x, groups_y));
+        dispatch(
+            &mut encoder,
+            "lidar_jfa_init",
+            &ctx.jfa_init,
+            &bg,
+            (groups_x, groups_y),
+        );
         for step in jfa_steps(width, height) {
             let bg = ctx.bind(
                 &ctx.jfa_step,
                 "lidar_jfa_step_bg",
                 &[&ctx.grid_uniform(w32, h32, step, mode), &src, &dst],
             );
-            dispatch(&mut encoder, "lidar_jfa_step", &ctx.jfa_step, &bg, (groups_x, groups_y));
+            dispatch(
+                &mut encoder,
+                "lidar_jfa_step",
+                &ctx.jfa_step,
+                &bg,
+                (groups_x, groups_y),
+            );
             std::mem::swap(&mut src, &mut dst);
         }
         Some(src)
@@ -451,7 +463,13 @@ pub(super) fn rasterize_fill_chm_gpu_batched(
             &outputs[2],
         ],
     );
-    dispatch(&mut encoder, "lidar_fill_chm", &ctx.fill_chm, &fill_bg, (groups_x, groups_y));
+    dispatch(
+        &mut encoder,
+        "lidar_fill_chm",
+        &ctx.fill_chm,
+        &fill_bg,
+        (groups_x, groups_y),
+    );
 
     let staging: [wgpu::Buffer; 3] = std::array::from_fn(|_| {
         ctx.device.create_buffer(&wgpu::BufferDescriptor {

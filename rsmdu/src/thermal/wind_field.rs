@@ -405,7 +405,6 @@ fn zone_wind_factor_and_ref(
             }
             let hdv = 0.5 * h * (1.0 - (dy / dodv).powi(2)).max(0.0).sqrt();
             let wf = if z_pixel < hdv {
-                
                 -(0.6 * (std::f64::consts::PI * z_pixel / (0.5 * h)).cos() + 0.05)
                     * 0.6
                     * (std::f64::consts::PI * dy / dodv).sin()

@@ -26,10 +26,7 @@ fn main() -> Result<()> {
 
     // Display information
     println!("Number of buildings: {}", collection.len());
-    println!(
-        "Mean height: {:.2} m",
-        collection.calculate_mean_height()
-    );
+    println!("Mean height: {:.2} m", collection.calculate_mean_height());
 
     // Convert to Polars DataFrame
     let df = collection.to_polars_df()?;

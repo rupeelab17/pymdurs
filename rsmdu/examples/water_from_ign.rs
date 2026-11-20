@@ -45,10 +45,7 @@ fn main() -> Result<()> {
     water_result.to_geojson(None)?;
 
     println!("\n✅ Processing complete!");
-    println!(
-        "  - Output file: {:?}",
-        water_result.get_output_path()
-    );
+    println!("  - Output file: {:?}", water_result.get_output_path());
 
     Ok(())
 }

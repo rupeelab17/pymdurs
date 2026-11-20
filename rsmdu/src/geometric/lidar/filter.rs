@@ -26,7 +26,6 @@ fn collect_bbox_hits(
 }
 
 impl Lidar {
-
     pub(super) fn filter_points_with_spatial_index(
         points: &[LidarPoint],
         x_min: f64,

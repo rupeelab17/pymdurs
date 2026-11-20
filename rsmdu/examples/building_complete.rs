@@ -54,7 +54,10 @@ fn example_manual_buildings() -> Result<()> {
     collection.add_building(building2);
 
     println!("  - Number of buildings: {}", collection.len());
-    println!("  - Mean neighbourhood height: {:.2} m", collection.calculate_mean_height());
+    println!(
+        "  - Mean neighbourhood height: {:.2} m",
+        collection.calculate_mean_height()
+    );
 
     Ok(())
 }
@@ -99,12 +102,14 @@ fn example_from_geojson() -> Result<()> {
     )?;
 
     println!("  - Number of buildings loaded: {}", collection.len());
-    
+
     for (idx, building) in collection.buildings().iter().enumerate() {
-        println!("  - Building {}: height={:?}, area={:.2} m²", 
-                 idx + 1, 
-                 building.height, 
-                 building.area);
+        println!(
+            "  - Building {}: height={:?}, area={:.2} m²",
+            idx + 1,
+            building.height,
+            building.area
+        );
     }
 
     Ok(())
@@ -153,12 +158,23 @@ fn example_process_heights() -> Result<()> {
     collection.add_building(building3);
 
     println!("  - Before processing:");
-    println!("    * Building 1: height={:?}", collection.buildings()[0].height);
-    println!("    * Building 2: height={:?}, storeys={:?}", 
-             collection.buildings()[1].height, 
-             collection.buildings()[1].nombre_d_etages);
-    println!("    * Building 3: height={:?}", collection.buildings()[2].height);
-    println!("    * Mean height: {:.2} m", collection.calculate_mean_height());
+    println!(
+        "    * Building 1: height={:?}",
+        collection.buildings()[0].height
+    );
+    println!(
+        "    * Building 2: height={:?}, storeys={:?}",
+        collection.buildings()[1].height,
+        collection.buildings()[1].nombre_d_etages
+    );
+    println!(
+        "    * Building 3: height={:?}",
+        collection.buildings()[2].height
+    );
+    println!(
+        "    * Mean height: {:.2} m",
+        collection.calculate_mean_height()
+    );
 
     // Process heights
     collection.process_heights();
@@ -197,7 +213,7 @@ fn example_to_polars() -> Result<()> {
 
     println!("  - DataFrame created with {} rows", df.height());
     println!("  - Columns: {:?}", df.get_column_names());
-    
+
     // Display some statistics
     if let Ok(hauteur_col) = df.column("hauteur") {
         println!("  - Column 'hauteur':");
@@ -211,4 +227,3 @@ fn example_to_polars() -> Result<()> {
 
     Ok(())
 }
-

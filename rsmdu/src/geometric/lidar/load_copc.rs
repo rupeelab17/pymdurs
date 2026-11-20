@@ -1,10 +1,10 @@
 //! Native COPC tile loading.
 
+use super::copc::*;
+use super::types::{classification_to_u8, Lidar, LidarPoint, TimingSpan};
 use anyhow::{Context, Result};
 use laz::laszip::LazVlr;
 use std::path::Path;
-use super::copc::*;
-use super::types::{classification_to_u8, Lidar, LidarPoint, TimingSpan};
 
 #[cfg(feature = "laz-memmap")]
 use super::io::LAZ_MMAP_THRESHOLD_BYTES;
@@ -53,7 +53,8 @@ impl Lidar {
                             return Ok(CopcBytes::Mapped(mmap));
                         }
                     }
-                    let data = std::fs::read(cache_path).context("Failed to read cached COPC file")?;
+                    let data =
+                        std::fs::read(cache_path).context("Failed to read cached COPC file")?;
                     return Ok(CopcBytes::Owned(data));
                 }
                 _ => {
@@ -103,7 +104,10 @@ impl Lidar {
 
         tracing::info!(
             "  LAS 1.4 | format={} record_len={} points={} vlrs={}",
-            hdr.point_format, hdr.point_record_len, hdr.point_count, hdr.vlr_count
+            hdr.point_format,
+            hdr.point_record_len,
+            hdr.point_count,
+            hdr.vlr_count
         );
 
         // Vérification : COPC supporte uniquement formats 6, 7, 8
@@ -157,11 +161,15 @@ impl Lidar {
 
         tracing::info!(
             "  COPC octree: centre=({:.1},{:.1},{:.1}) halfsize={:.1}",
-            copc_info.center_x, copc_info.center_y, copc_info.center_z, copc_info.halfsize
+            copc_info.center_x,
+            copc_info.center_y,
+            copc_info.center_z,
+            copc_info.halfsize
         );
         tracing::info!(
             "  Hiérarchie racine: offset={} size={}",
-            copc_info.root_hier_offset, copc_info.root_hier_size
+            copc_info.root_hier_offset,
+            copc_info.root_hier_size
         );
 
         // --- 4. Trouver le LazVlr ---
@@ -192,7 +200,10 @@ impl Lidar {
             if let Some((qx_min, qy_min, qx_max, qy_max)) = filter_bbox {
                 tracing::info!(
                     "  Spatial filter: [{:.2}, {:.2}] -> [{:.2}, {:.2}]",
-                    qx_min, qy_min, qx_max, qy_max
+                    qx_min,
+                    qy_min,
+                    qx_max,
+                    qy_max
                 );
                 all_entries
                     .iter()
@@ -315,7 +326,11 @@ impl Lidar {
                 if idx < 10 {
                     tracing::warn!(
                         "  ⚠️  Chunk {} (level={} vx={} vy={}): {}",
-                        idx, entry.level, entry.vx, entry.vy, e
+                        idx,
+                        entry.level,
+                        entry.vx,
+                        entry.vy,
+                        e
                     );
                 }
                 (Vec::new(), false)
@@ -338,9 +353,7 @@ impl Lidar {
                 .par_iter()
                 .enumerate()
                 .map(|(idx, entry)| {
-                    Self::decompress_one_copc_entry(
-                        file_buf, entry, laz_vlr, hdr, filter_bbox, idx,
-                    )
+                    Self::decompress_one_copc_entry(file_buf, entry, laz_vlr, hdr, filter_bbox, idx)
                 })
                 .collect();
 
@@ -376,7 +389,12 @@ impl Lidar {
             for (idx, entry) in entries.iter().enumerate() {
                 entries_processed += 1;
                 let (pts, ok) = Self::decompress_one_copc_entry(
-                    file_buf, entry, laz_vlr, hdr, filter_bbox, idx,
+                    file_buf,
+                    entry,
+                    laz_vlr,
+                    hdr,
+                    filter_bbox,
+                    idx,
                 );
                 if ok {
                     entries_success += 1;
@@ -448,5 +466,4 @@ impl Lidar {
         tracing::info!("  Loaded {} points after spatial filter", file_points.len());
         Ok(file_points)
     }
-
 }
