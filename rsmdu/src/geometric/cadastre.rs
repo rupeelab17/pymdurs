@@ -55,35 +55,7 @@ impl Cadastre {
     /// Run cadastre processing: download from IGN API, parse GeoJSON
     /// Following Python: def run(self) -> self
     pub fn run(mut self) -> Result<Self> {
-        // Execute IGN API request for cadastre
-        // Python: self.execute_ign(key="cadastre")
-        self.ign_collect
-            .execute_ign("cadastre")
-            .context("Failed to execute IGN request for cadastre")?;
-
-        // Get content from IgnCollect
-        let content = self
-            .ign_collect
-            .content
-            .as_ref()
-            .context("No content received from IGN API")?;
-
-        // Parse GeoJSON following Python: gpd.read_file(file, driver="GeoJSON")
-        // Python: file = self.content if isinstance(self.content, io.BytesIO) else io.BytesIO(self.content)
-        //         gdf = gpd.read_file(file, driver="GeoJSON")
-        let geojson_str = String::from_utf8_lossy(content);
-        let geojson: GeoJson = geojson_str
-            .parse()
-            .context("Failed to parse GeoJSON from IGN API response")?;
-
-        // Store the parsed GeoJSON
-        // Note: Reprojection to target CRS (Python: gdf = gdf.to_crs(self._epsg))
-        // would require converting GeoJSON to GDAL Dataset, reprojecting, and converting back
-        // This is complex and would require additional dependencies
-        // For now, we store the GeoJSON as-is
-        // TODO: Implement reprojection using GDAL or proj crate
-        self.geojson = Some(geojson);
-
+        self.run_internal()?;
         Ok(self)
     }
 
@@ -150,7 +122,6 @@ impl Cadastre {
             "Cadastre saved to: {:?} (as GeoJSON - GeoJSON export temporarily disabled)",
             output_file
         );
-
 
         Ok(())
     }

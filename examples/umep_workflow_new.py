@@ -67,15 +67,15 @@ def main():
     # bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
 
     # Atlantec
-    # bbox_wgs84 =  (-1.152704,46.181627,-1.139893,46.18699)
-    # working_crs = 2154  # Lambert 93
+    bbox_wgs84 =  (-1.152704,46.181627,-1.139893,46.18699)
+    working_crs = 2154  # Lambert 93
 
     # REUNION
     # Match the native tile CRS: RGR92 / UTM 40S for La Réunion.
     # For mainland France, use EPSG:2154 (Lambert-93) instead.
-    working_crs = 2975
+    #working_crs = 2975
     # WGS84 bbox: resolves COPC URLs via WFS only (no LAZ download yet).
-    bbox_wgs84 = (55.51, -21.285, 55.53, -21.265)
+    #bbox_wgs84 = (55.51, -21.285, 55.53, -21.265)
 
     print(f"Bounding box: {bbox_wgs84}")
     print(f"Working CRS: EPSG:{working_crs}")

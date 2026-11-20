@@ -1,42 +1,11 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyList};
+use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::*;
 use rsmdu::geometric::building::BuildingCollection;
 
 use crate::bindings::bounding_box::PyBoundingBox;
 use crate::bindings::geo_core::PyGeoCore;
-
-// Helper functions for converting Rust Vec to Python lists
-fn vec_f64_to_pylist<'a>(py: Python<'a>, vec: &[f64]) -> PyResult<pyo3::Bound<'a, PyList>> {
-    let list = PyList::empty(py);
-    for v in vec {
-        list.append(PyFloat::new(py, *v))?;
-    }
-    Ok(list)
-}
-
-fn vec_bool_to_pylist<'a>(py: Python<'a>, vec: &[bool]) -> PyResult<pyo3::Bound<'a, PyList>> {
-    let list = PyList::empty(py);
-    for v in vec {
-        list.append(PyBool::new(py, *v))?;
-    }
-    Ok(list)
-}
-
-fn option_vec_f64_to_pylist<'a>(
-    py: Python<'a>,
-    vec: &[Option<f64>],
-) -> PyResult<pyo3::Bound<'a, PyList>> {
-    let list = PyList::empty(py);
-    for v in vec {
-        match v {
-            Some(x) => list.append(PyFloat::new(py, *x))?,
-            None => list.append(py.None())?,
-        }
-    }
-    Ok(list)
-}
 
 /// BuildingCollection Python binding (exposed as Building to match Python API)
 #[gen_stub_pyclass(module = "pymdurs.geometric")]
@@ -130,13 +99,13 @@ impl PyBuilding {
         }
 
         let data = PyDict::new(py);
-        data.set_item("hauteur", option_vec_f64_to_pylist(py, &height_vec)?)?;
-        data.set_item("area", vec_f64_to_pylist(py, &area_vec)?)?;
-        data.set_item("centroid_x", vec_f64_to_pylist(py, &centroid_x_vec)?)?;
-        data.set_item("centroid_y", vec_f64_to_pylist(py, &centroid_y_vec)?)?;
-        data.set_item("nombre_d_etages", option_vec_f64_to_pylist(py, &nombre_d_etages_vec)?)?;
-        data.set_item("hauteur_2", option_vec_f64_to_pylist(py, &hauteur_2_vec)?)?;
-        data.set_item("noHauteur", vec_bool_to_pylist(py, &no_hauteur_vec)?)?;
+        data.set_item("hauteur", height_vec)?;
+        data.set_item("area", area_vec)?;
+        data.set_item("centroid_x", centroid_x_vec)?;
+        data.set_item("centroid_y", centroid_y_vec)?;
+        data.set_item("nombre_d_etages", nombre_d_etages_vec)?;
+        data.set_item("hauteur_2", hauteur_2_vec)?;
+        data.set_item("noHauteur", no_hauteur_vec)?;
 
         let df: pyo3::Bound<PyAny> = pandas.call_method1("DataFrame", (data,))?;
         Ok(df.unbind())
@@ -145,8 +114,7 @@ impl PyBuilding {
     /// Load from GeoJSON
     #[staticmethod]
     fn from_geojson(
-        #[gen_stub(override_type(type_repr = "bytes"))]
-        geojson_data: &[u8],
+        #[gen_stub(override_type(type_repr = "bytes"))] geojson_data: &[u8],
         output_path: Option<String>,
         default_storey_height: f64,
         set_crs: Option<i32>,

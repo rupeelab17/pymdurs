@@ -79,9 +79,11 @@ impl PyLidar {
         Ok(())
     }
 
-    /// Set CRS (e.g. 2154 for Lambert-93). Default is 2154.
+    /// Set the native tile CRS (2154 for mainland France, 2975 for La Réunion).
+    /// Used for spatial filtering and output metadata; points are not reprojected.
+    /// Defaults to 2154. Changing CRS invalidates the in-memory point cache.
     fn set_crs(&mut self, epsg: i32) {
-        self.inner.geo_core.set_epsg(epsg);
+        self.inner.set_crs(epsg);
     }
 
     /// Run LiDAR processing: download points if needed, build DSM/DTM/CHM, save GeoTIFF.

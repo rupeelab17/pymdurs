@@ -1775,18 +1775,34 @@ dependencies = [
     { name = "geopandas" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pythermalcomfort" },
     { name = "rasterio" },
     { name = "scikit-image" },
     { name = "shapely" },
-    { name = "solweig" },
-    { name = "umep" },
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "clustergram" },
+    { name = "libpysal" },
+    { name = "matplotlib" },
+    { name = "momepy" },
+    { name = "osmnx" },
+    { name = "polars" },
+    { name = "pythermalcomfort" },
+    { name = "solweig" },
+    { name = "umep" },
+]
 dev = [
     { name = "basedpyright" },
     { name = "pytest" },
+]
+polars = [
+    { name = "polars" },
+]
+thermal = [
+    { name = "pythermalcomfort" },
+    { name = "solweig" },
+    { name = "umep" },
 ]
 urban = [
     { name = "clustergram" },
@@ -1813,15 +1829,17 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "osmnx", marker = "extra == 'urban'" },
     { name = "pandas", specifier = ">=3.1.1" },
+    { name = "polars", marker = "extra == 'polars'", specifier = ">=1.0" },
+    { name = "pymdurs", extras = ["thermal", "urban", "polars"], marker = "extra == 'all'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.2.0" },
-    { name = "pythermalcomfort", specifier = ">=4.8.1" },
+    { name = "pythermalcomfort", marker = "extra == 'thermal'", specifier = ">=4.8.1" },
     { name = "rasterio", specifier = ">=1.5.2" },
     { name = "scikit-image", specifier = ">=0.26.0" },
     { name = "shapely", specifier = ">=2.2.0" },
-    { name = "solweig", git = "https://github.com/UMEP-dev/solweig.git" },
-    { name = "umep", specifier = ">=0.0.1b47" },
+    { name = "solweig", marker = "extra == 'thermal'", git = "https://github.com/UMEP-dev/solweig.git" },
+    { name = "umep", marker = "extra == 'thermal'", specifier = ">=0.0.1b47" },
 ]
-provides-extras = ["dev", "urban"]
+provides-extras = ["all", "thermal", "dev", "urban", "polars"]
 
 [package.metadata.requires-dev]
 dev = [

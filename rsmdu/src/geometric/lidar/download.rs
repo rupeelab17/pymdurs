@@ -10,11 +10,11 @@ use super::types::Lidar;
 use super::types::progress_style;
 
 impl Lidar {
-
     pub(super) fn cache_path_for_url(cache_dir: &Path, url: &str) -> PathBuf {
-        let segment = url::Url::parse(url)
-            .ok()
-            .and_then(|u| u.path_segments().and_then(|mut s| s.next_back().map(String::from)));
+        let segment = url::Url::parse(url).ok().and_then(|u| {
+            u.path_segments()
+                .and_then(|mut s| s.next_back().map(String::from))
+        });
         let sanitized: String = segment
             .as_deref()
             .unwrap_or("")
@@ -180,66 +180,10 @@ impl Lidar {
     }
 
     #[cfg(feature = "reqwest")]
-    #[allow(dead_code)]
-    pub(super) fn download_laz_full_get(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
-        use std::io::Read;
-        let mut retries = 3;
-        loop {
-            let response = match client.get(url).send() {
-                Ok(r) => r,
-                Err(e) => {
-                    retries -= 1;
-                    if retries > 0 {
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                        continue;
-                    }
-                    return Err(anyhow::anyhow!(
-                        "Failed to download LAZ from {} after retries: {}",
-                        url,
-                        e
-                    ));
-                }
-            };
-            if !response.status().is_success() {
-                return Err(anyhow::anyhow!(
-                    "HTTP {} when downloading {}",
-                    response.status(),
-                    url
-                ));
-            }
-            let expected = response.content_length().filter(|&n| n > 0);
-            let mut data = match expected {
-                Some(n) => Vec::with_capacity(n as usize),
-                None => Vec::new(),
-            };
-            let mut buffer = [0u8; 65536];
-            let mut response = response;
-            loop {
-                match response.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(n) => data.extend_from_slice(&buffer[..n]),
-                    Err(e) => {
-                        retries -= 1;
-                        if retries > 0 {
-                            std::thread::sleep(std::time::Duration::from_secs(2));
-                            break;
-                        }
-                        return Err(anyhow::anyhow!("Failed to read from {}: {}", url, e));
-                    }
-                }
-            }
-            if !data.is_empty() {
-                return Ok(data);
-            }
-            retries -= 1;
-            if retries == 0 {
-                return Err(anyhow::anyhow!("Empty response from {}", url));
-            }
-        }
-    }
-
-    #[cfg(feature = "reqwest")]
-    pub(super) fn download_laz_via_range(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {
+    pub(super) fn download_laz_via_range(
+        client: &reqwest::blocking::Client,
+        url: &str,
+    ) -> Result<Vec<u8>> {
         const HEADER_RANGE_END: u64 = 4095;
         let header_bytes = download_partial_laz(client, url, 0, HEADER_RANGE_END, None::<fn(u64)>)
             .map_err(|e| anyhow::anyhow!("Range request for header failed: {}", e))?;
@@ -297,5 +241,4 @@ impl Lidar {
         full.extend(point_data);
         Ok(full)
     }
-
 }

@@ -4,6 +4,7 @@ use geojson::GeoJson;
 use std::path::{Path, PathBuf};
 
 use crate::collect::ign::ign_collect::IgnCollect;
+use crate::commons::basic_functions::shapefile_to_geojson;
 use crate::geo_core::{BoundingBox, GeoCore};
 
 /// Water structure
@@ -172,48 +173,7 @@ impl Water {
         let _dataset =
             Dataset::open(&filepath).context(format!("Failed to open shapefile: {}", filepath))?;
 
-        // Use ogr2ogr command-line tool for reliable shapefile to GeoJSON conversion
-        // This is more reliable than using the GDAL Rust bindings directly
-        // which have complex API requirements for vector dataset creation
-        // Following the approach from lcz.rs
-        use std::process::Command;
-
-        // GeoJSON driver refuses overwrite: reserve a path then delete the empty tempfile.
-        let tmp = tempfile::Builder::new()
-            .prefix("water_")
-            .suffix(".geojson")
-            .tempfile()
-            .context("Failed to create temporary GeoJSON file")?;
-        let temp_geojson = tmp.path().to_path_buf();
-        drop(tmp);
-
-        let status = Command::new("ogr2ogr")
-            .arg("-f")
-            .arg("GeoJSON")
-            .arg(&temp_geojson)
-            .arg(&filepath)
-            .status()
-            .context(
-                "Failed to execute ogr2ogr. Make sure GDAL is installed and ogr2ogr is in PATH",
-            )?;
-
-        if !status.success() {
-            let _ = std::fs::remove_file(&temp_geojson);
-            anyhow::bail!("ogr2ogr failed to convert shapefile to GeoJSON");
-        }
-
-        // Read the GeoJSON file we just created
-        let geojson_bytes =
-            std::fs::read(&temp_geojson).context("Failed to read temporary GeoJSON file")?;
-        let _ = std::fs::remove_file(&temp_geojson);
-
-        // Parse GeoJSON
-        let geojson_str = String::from_utf8_lossy(&geojson_bytes);
-        let geojson: GeoJson = geojson_str
-            .parse()
-            .context("Failed to parse GeoJSON from shapefile")?;
-
-        self.geojson = Some(geojson);
+        self.geojson = Some(shapefile_to_geojson(Path::new(&filepath), "water_")?);
 
         Ok(())
     }

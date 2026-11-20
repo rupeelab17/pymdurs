@@ -12,7 +12,7 @@ from typing import Sequence
 
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import LinearRing, LineString, MultiLineString, Point, Polygon
+from shapely.geometry import LinearRing, LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from .cosia_colors import TABLE_COLOR_COSIA
@@ -132,11 +132,6 @@ def _geometry_to_polygon(geom: BaseGeometry, layer_name: object) -> BaseGeometry
         radius, _ = calculate_circumscribed_circle_radius(geom)
         center = calculate_centroid(geom)
         return create_circle(center, radius)
-    if isinstance(geom, Polygon):
-        return geom
-    if isinstance(geom, MultiLineString | LineString):
-        # Keep as-is; overlay step may buffer later if needed.
-        return geom
     return geom
 
 
@@ -218,7 +213,9 @@ def dxf_to_cosia_and_weighted_layers(
     layer_groups = {layer: data for layer, data in dxf_gdf.groupby("Layer")}
     final_gdf = gpd.GeoDataFrame(columns=dxf_gdf.columns, crs=dxf_gdf.crs)
 
-    for layer, _ in sorted(props.items(), key=lambda x: float(x[1]["weight"]), reverse=True):
+    for layer, _ in sorted(
+        props.items(), key=lambda x: float(x[1]["weight"]), reverse=True
+    ):
         layer_data = layer_groups.get(layer)
         if layer_data is None:
             continue

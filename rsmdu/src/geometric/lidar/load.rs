@@ -1,7 +1,6 @@
 //! Load LAZ/COPC tiles into memory.
 
 use anyhow::{Context, Result};
-use proj::Proj;
 use std::path::Path;
 
 use super::io::*;
@@ -13,13 +12,11 @@ use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "progressbar")]
-use indicatif::ProgressBar;
-#[cfg(feature = "progressbar")]
 use super::types::progress_style;
+#[cfg(feature = "progressbar")]
+use indicatif::ProgressBar;
 
 impl Lidar {
-
-
     /// Dispatcher COPC vs LAZ — used by the non-rayon load path only.
     #[cfg(not(feature = "rayon"))]
     pub(super) fn load_single_point_file(
@@ -171,14 +168,7 @@ impl Lidar {
             .get_bbox()
             .context("Bounding box must be set before getting LiDAR points")?;
         tracing::info!("Bounding box set");
-        let transformer = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
-            .context("Failed to create coordinate transformer")?;
-        let (min_x, min_y) = transformer
-            .convert((bbox.min_x, bbox.min_y))
-            .context("Failed to transform min coordinates")?;
-        let (max_x, max_y) = transformer
-            .convert((bbox.max_x, bbox.max_y))
-            .context("Failed to transform max coordinates")?;
+        let (min_x, min_y, max_x, max_y) = self.bbox_projected()?;
         // WFS 2.0 default axis order is lat,lon for EPSG:4326.
         let bbox_string = format!(
             "{},{},{},{}",
@@ -220,8 +210,7 @@ impl Lidar {
                 laz_urls.iter().partition(|u| Self::is_copc_url(u));
 
             let mut all_points: Vec<LidarPoint> = Vec::new();
-            let mut tile_point_counts: Vec<(String, usize)> =
-                Vec::with_capacity(laz_urls.len());
+            let mut tile_point_counts: Vec<(String, usize)> = Vec::with_capacity(laz_urls.len());
 
             // --- COPC séquentiel avec retry/backoff ---
             for (idx, url) in copc_urls.iter().enumerate() {
@@ -248,11 +237,17 @@ impl Lidar {
                                 let wait = 2u64.pow(attempt);
                                 tracing::warn!(
                                     "  ⚠️  Erreur (tentative {}/5): {}. Retry dans {}s...",
-                                    attempt, msg, wait
+                                    attempt,
+                                    msg,
+                                    wait
                                 );
                                 std::thread::sleep(std::time::Duration::from_secs(wait));
                             } else {
-                                tracing::warn!("  ❌ Échec COPC après {} tentative(s): {}", attempt, e);
+                                tracing::warn!(
+                                    "  ❌ Échec COPC après {} tentative(s): {}",
+                                    attempt,
+                                    e
+                                );
                                 break;
                             }
                         }
@@ -309,8 +304,7 @@ impl Lidar {
         #[cfg(not(feature = "rayon"))]
         {
             let mut all_points = Vec::new();
-            let mut tile_point_counts: Vec<(String, usize)> =
-                Vec::with_capacity(laz_urls.len());
+            let mut tile_point_counts: Vec<(String, usize)> = Vec::with_capacity(laz_urls.len());
 
             #[cfg(feature = "progressbar")]
             let overall_pb = if laz_urls.len() > 1 {
@@ -406,5 +400,4 @@ impl Lidar {
         }
         Ok(())
     }
-
 }

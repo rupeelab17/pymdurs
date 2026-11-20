@@ -1,8 +1,8 @@
 //! Export buildings to Polars / GeoJSON.
 
-use anyhow::Result;
 #[cfg(feature = "polars")]
 use anyhow::Context;
+use anyhow::Result;
 use geojson::{GeoJson, Geometry};
 use std::path::Path;
 
@@ -240,107 +240,5 @@ impl BuildingCollection {
     #[allow(dead_code)]
     pub fn to_geojson<P: AsRef<Path>>(&self, _filepath: P, _name: Option<&str>) -> Result<()> {
         anyhow::bail!("GeoJSON export is temporarily disabled. Use to_polars_df() instead.");
-        /*
-        use gdal::vector::{Geometry, OGRFieldType};
-        use std::ffi::CString;
-        use std::path::PathBuf;
-
-        let filepath = filepath.as_ref();
-        let layer_name = name.unwrap_or("batiments");
-
-        // Get or create driver
-        let driver = DriverManager::get_driver_by_name("GeoJSON")
-            .context("GeoJSON driver not available")?;
-
-        // Create or open dataset
-        let mut dataset = if filepath.exists() {
-            Dataset::open(filepath)
-                .context("Failed to open existing GeoJSON file")?
-        } else {
-            driver.create(filepath)
-                .context("Failed to create GeoJSON file")?
-        };
-
-        // Create layer
-        let mut layer = dataset.create_layer(
-            gdal::vector::LayerOptions {
-                name: layer_name,
-                srs: None, // Will set CRS if available
-                geom_type: gdal::vector::OGRwkbGeometryType::wkbPolygon,
-                options: None,
-            },
-        )
-        .context("Failed to create layer")?;
-
-        // Set CRS if available
-        if let Ok(srs) = gdal::spatial_ref::SpatialRef::from_epsg(self.geo_core.get_epsg()) {
-            layer.set_spatial_ref(&srs)
-                .context("Failed to set spatial reference")?;
-        }
-
-        // Create fields
-        layer.create_defn_field(
-            &gdal::vector::FieldDefn::new("hauteur", OGRFieldType::OFTReal)
-                .context("Failed to create hauteur field")?,
-        )
-        .context("Failed to add hauteur field")?;
-
-        layer.create_defn_field(
-            &gdal::vector::FieldDefn::new("area", OGRFieldType::OFTReal)
-                .context("Failed to create area field")?,
-        )
-        .context("Failed to add area field")?;
-
-        layer.create_defn_field(
-            &gdal::vector::FieldDefn::new("centroid_x", OGRFieldType::OFTReal)
-                .context("Failed to create centroid_x field")?,
-        )
-        .context("Failed to add centroid_x field")?;
-
-        layer.create_defn_field(
-            &gdal::vector::FieldDefn::new("centroid_y", OGRFieldType::OFTReal)
-                .context("Failed to create centroid_y field")?,
-        )
-        .context("Failed to add centroid_y field")?;
-
-        // Add buildings as features
-        for building in &self.buildings {
-            let mut feature = layer.create_feature(
-                layer.defn()
-                    .context("Failed to get layer definition")?,
-            )
-            .context("Failed to create feature")?;
-
-            // Convert geo::Polygon to GDAL Geometry
-            let geos_geom: geos::Geometry = building.footprint.clone().try_into()
-                .context("Failed to convert polygon to GEOS")?;
-
-            let gdal_geom: gdal::Geometry = geos_geom.try_into()
-                .context("Failed to convert GEOS to GDAL geometry")?;
-
-            feature.set_geometry(gdal_geom)
-                .context("Failed to set geometry")?;
-
-            // Set fields
-            if let Some(height) = building.height {
-                feature.set_field_double_by_name("hauteur", height)
-                    .context("Failed to set hauteur field")?;
-            }
-
-            feature.set_field_double_by_name("area", building.area)
-                .context("Failed to set area field")?;
-
-            feature.set_field_double_by_name("centroid_x", building.centroid.x())
-                .context("Failed to set centroid_x field")?;
-
-            feature.set_field_double_by_name("centroid_y", building.centroid.y())
-                .context("Failed to set centroid_y field")?;
-
-            feature.create(layer)
-                .context("Failed to create feature in layer")?;
-        }
-
-        Ok(())
-        */
     }
 }

@@ -4,7 +4,9 @@ use anyhow::{Context, Result};
 use gdal::raster::Buffer;
 use gdal::Dataset;
 use geojson::GeoJson;
-use std::process::Command;
+use std::{path::Path, process::Command};
+
+use crate::commons::basic_functions::shapefile_to_geojson;
 
 use super::types::Vegetation;
 
@@ -71,7 +73,11 @@ impl Vegetation {
                 } else {
                     -999.0
                 };
-                if ndvi < 0.2 { -999.0 } else { ndvi }
+                if ndvi < 0.2 {
+                    -999.0
+                } else {
+                    ndvi
+                }
             })
             .collect();
 
@@ -179,39 +185,7 @@ impl Vegetation {
     /// vegetation = vegetation.loc[(vegetation["NDVI"] == 0)]
     /// mes_polygons = [x for x in vegetation["geometry"] if x.area > self.min_area]
     fn filter_vegetation_polygons(&mut self) -> Result<()> {
-        // GeoJSON driver refuses overwrite: reserve a path then delete the empty tempfile.
-        let tmp = tempfile::Builder::new()
-            .prefix("vegetation_")
-            .suffix(".geojson")
-            .tempfile()
-            .context("Failed to create temporary GeoJSON file")?;
-        let temp_geojson = tmp.path().to_path_buf();
-        drop(tmp);
-
-        let status = Command::new("ogr2ogr")
-            .arg("-f")
-            .arg("GeoJSON")
-            .arg(&temp_geojson)
-            .arg(&self.ndvi_shp_path)
-            .status()
-            .context(
-                "Failed to execute ogr2ogr. Make sure GDAL is installed and ogr2ogr is in PATH",
-            )?;
-
-        if !status.success() {
-            let _ = std::fs::remove_file(&temp_geojson);
-            anyhow::bail!("ogr2ogr failed to convert shapefile to GeoJSON");
-        }
-
-        // Read GeoJSON
-        let geojson_bytes =
-            std::fs::read(&temp_geojson).context("Failed to read temporary GeoJSON file")?;
-        let _ = std::fs::remove_file(&temp_geojson);
-
-        let geojson_str = String::from_utf8_lossy(&geojson_bytes);
-        let geojson: GeoJson = geojson_str
-            .parse()
-            .context("Failed to parse GeoJSON from shapefile")?;
+        let geojson = shapefile_to_geojson(&self.ndvi_shp_path, "vegetation_")?;
 
         // Filter polygons: NDVI == 0 and area > min_area
         // Convert to FeatureCollection and filter
@@ -296,41 +270,7 @@ impl Vegetation {
             self.set_crs(epsg);
         }
 
-        let tmp = tempfile::Builder::new()
-            .prefix("vegetation_")
-            .suffix(".geojson")
-            .tempfile()
-            .context("Failed to create temporary GeoJSON file")?;
-        let temp_geojson = tmp.path().to_path_buf();
-        drop(tmp);
-
-        let status = Command::new("ogr2ogr")
-            .arg("-f")
-            .arg("GeoJSON")
-            .arg(&temp_geojson)
-            .arg(&filepath)
-            .status()
-            .context(
-                "Failed to execute ogr2ogr. Make sure GDAL is installed and ogr2ogr is in PATH",
-            )?;
-
-        if !status.success() {
-            let _ = std::fs::remove_file(&temp_geojson);
-            anyhow::bail!("ogr2ogr failed to convert shapefile to GeoJSON");
-        }
-
-        // Read the GeoJSON file
-        let geojson_bytes =
-            std::fs::read(&temp_geojson).context("Failed to read temporary GeoJSON file")?;
-        let _ = std::fs::remove_file(&temp_geojson);
-
-        // Parse GeoJSON
-        let geojson_str = String::from_utf8_lossy(&geojson_bytes);
-        let geojson: GeoJson = geojson_str
-            .parse()
-            .context("Failed to parse GeoJSON from shapefile")?;
-
-        self.geojson = Some(geojson);
+        self.geojson = Some(shapefile_to_geojson(Path::new(&filepath), "vegetation_")?);
 
         Ok(())
     }

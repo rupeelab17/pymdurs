@@ -64,6 +64,24 @@ The package is published on [PyPI](https://pypi.org/project/pymdurs/). To instal
 uv pip install pymdurs
 ```
 
+Install all optional runtime dependencies (`thermal`, `urban`, `polars`, excluding development tools):
+
+```bash
+uv pip install "pymdurs[all]"
+# From a source checkout:
+uv sync --extra all
+```
+
+Like the individual extras, `all` does not enable Rust build features; Polars exports still require the source build described below.
+
+Thermal workflows (UMEP, SOLWEIG and UTCI) require the optional thermal stack:
+
+```bash
+uv pip install "pymdurs[thermal]"
+```
+
+These packages are no longer installed by the base `pymdurs` package. For a source checkout, use `uv sync --extra thermal`.
+
 Optional morphometrics stack (DetectionUrbanTypes):
 
 ```bash
@@ -674,9 +692,8 @@ For advanced workflows and examples:
 # Geospatial operations
 uv pip install geopandas rasterio pyproj shapely
 
-# For UMEP integration
-uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
-uv pip install umep  # Optional
+# For UMEP / SOLWEIG / UTCI integration
+uv pip install "pymdurs[thermal]"
 ```
 
 ---

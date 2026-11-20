@@ -524,9 +524,9 @@ uv pip install geopandas rasterio pyproj shapely
 # For detection_urban_types_example.py (morphometrics)
 uv pip install "pymdurs[urban]"
 
-# For umep_workflow / SOLWEIG
-uv pip install "solweig @ git+https://github.com/UMEP-dev/solweig.git"
-uv pip install umep  # Optional
+# For umep_workflow / SOLWEIG / UTCI (optional thermal stack)
+uv pip install "pymdurs[thermal]"
+# From a source checkout: uv sync --extra thermal
 ```
 
 ### Internet connection
