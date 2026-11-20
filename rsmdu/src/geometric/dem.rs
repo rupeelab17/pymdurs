@@ -161,45 +161,23 @@ impl Dem {
         Ok(())
     }
 
-    /// Generate mask shapefile and adapt DEM
-    /// Following Python: def __generate_mask_and_adapt_dem(self)
-    fn generate_mask_and_adapt_dem(&self) -> Result<()> {
+    /// Build an axis-aligned mask in the configured CRS, inset by 15%.
+    fn mask_polygon(&self) -> Result<geo::Polygon<f64>> {
         let bbox = self
             .bbox
             .context("Bounding box must be set before generating mask")?;
 
-        // Python: gdf_project = gpd.GeoDataFrame(gpd.GeoSeries(box(...)), crs="epsg:4326")
-        //         gdf_project = gdf_project.to_crs(epsg=2154)
-        // Create bounding box polygon in EPSG:4326
-        use geo::Rect;
-        let rect_4326 = Rect::new(
-            geo::coord! { x: bbox.min_x, y: bbox.min_y },
-            geo::coord! { x: bbox.max_x, y: bbox.max_y },
-        );
-
-        // Transform to EPSG:2154 (Lambert-93)
-        use geo::algorithm::map_coords::MapCoords;
-        use proj::Proj;
-
-        let proj_4326_to_2154 = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)
-            .context("Failed to create projection from EPSG:4326 to EPSG:2154")?;
-
-        // Transform the rectangle
-        let rect_2154 = rect_4326.map_coords(|c| {
-            let (x, y) = proj_4326_to_2154.convert((c.x, c.y)).unwrap_or((c.x, c.y));
-            geo::coord! { x: x, y: y }
-        });
-
-        // Python: envelope_polygon = gdf_project.envelope.bounds
-        //         Bbox = envelope_polygon.values[0]
-        //         Bbox_final = box(Bbox[0], Bbox[1], Bbox[2], Bbox[3])
-        let min_x = rect_2154.min().x;
-        let min_y = rect_2154.min().y;
-        let max_x = rect_2154.max().x;
-        let max_y = rect_2154.max().y;
-
-        // Python: gdf_Bbox_mask_2154.scale(xfact=0.85, yfact=0.85)
-        // Scale the Bbox by 0.85
+        // Rect::map_coords transforms only min/max, losing the other corners and
+        // curved edges. Bound the full footprint in the target CRS before insetting.
+        let bounds = bbox
+            .transform(4326, self.geo_core.epsg)
+            .context("Failed to transform DEM mask bounds")?;
+        let BoundingBox {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        } = bounds;
         let center_x = (min_x + max_x) / 2.0;
         let center_y = (min_y + max_y) / 2.0;
         let width = max_x - min_x;
@@ -210,19 +188,20 @@ impl Dem {
         let scaled_max_x = center_x + (width * 0.85 / 2.0);
         let scaled_max_y = center_y + (height * 0.85 / 2.0);
 
-        // Create scaled rectangle
-        // Python: bbox_final = box(bbox[0], bbox[1], bbox[2], bbox[3])
-        //         gdf_bbox_mask_2154 = gpd.GeoDataFrame(gpd.GeoSeries(bbox_final), columns=["geometry"], crs="epsg:2154")
-        let scaled_rect = Rect::new(
+        let scaled_rect = geo::Rect::new(
             geo::coord! { x: scaled_min_x, y: scaled_min_y },
             geo::coord! { x: scaled_max_x, y: scaled_max_y },
         );
 
-        // Convert Rect to Polygon for shapefile export
-        let polygon: geo::Polygon<f64> = scaled_rect.into();
+        Ok(scaled_rect.into())
+    }
 
-        // Export to shapefile
-        // Python: gdf_bbox_mask_2154.scale(xfact=0.85, yfact=0.85).to_file(self.path_save_mask, driver="ESRI Shapefile")
+    /// Generate mask shapefile and adapt DEM
+    /// Following Python: def __generate_mask_and_adapt_dem(self)
+    fn generate_mask_and_adapt_dem(&self) -> Result<()> {
+        let polygon = self.mask_polygon()?;
+
+        // Coordinates and shapefile metadata must use the same configured CRS.
         #[cfg(not(feature = "wasm"))]
         {
             self.export_mask_to_shapefile(&polygon)?;
@@ -236,14 +215,7 @@ impl Dem {
             tracing::info!("Mask geometry created (shapefile export disabled in WASM mode)");
         }
 
-        tracing::info!(
-            "  Scaled Bbox (EPSG:2154): ({:.2}, {:.2}) to ({:.2}, {:.2})",
-            scaled_min_x, scaled_min_y, scaled_max_x, scaled_max_y
-        );
-        tracing::info!(
-            "  Original Bbox (EPSG:2154): ({:.2}, {:.2}) to ({:.2}, {:.2})",
-            min_x, min_y, max_x, max_y
-        );
+        tracing::info!(epsg = self.geo_core.epsg, "DEM mask uses configured CRS");
 
         Ok(())
     }
@@ -303,16 +275,12 @@ impl Dem {
         tmp.flush()
             .context("Failed to flush temporary GeoJSON file")?;
 
-        // Use ogr2ogr to convert GeoJSON to Shapefile
-        // The polygon is already in EPSG:2154, so we specify the source CRS
-        // Python: gdf_bbox_mask_2154 has crs="epsg:2154"
+        // Assign the polygon's CRS without reprojecting its native coordinates.
         let status = Command::new("ogr2ogr")
             .arg("-f")
             .arg("ESRI Shapefile")
-            .arg("-s_srs")
-            .arg("EPSG:2154") // Source CRS: polygon is already in EPSG:2154
-            .arg("-t_srs")
-            .arg("EPSG:2154") // Target CRS: keep EPSG:2154
+            .arg("-a_srs")
+            .arg(format!("EPSG:{}", self.geo_core.epsg))
             .arg(&self.path_save_mask)
             .arg(tmp.path())
             .status()
@@ -369,7 +337,7 @@ impl Dem {
         //   xRes=1, yRes=1
         //   outputType=gdalconst.GDT_Float32
         //   dstNodata=None
-        //   dstSRS='EPSG:2154'
+        //   dstSRS=self.geo_core.epsg
         //   cropToCutline=True
         //   cutlineDSName='mask.shp'
         //   cutlineLayer='mask'
@@ -382,7 +350,7 @@ impl Dem {
             .arg("-ot")
             .arg("Float32") // outputType=gdalconst.GDT_Float32
             .arg("-t_srs")
-            .arg("EPSG:2154") // dstSRS='EPSG:2154'
+            .arg(format!("EPSG:{}", self.geo_core.epsg))
             .arg("-crop_to_cutline") // cropToCutline=True
             .arg("-cutline")
             .arg(&self.path_save_mask) // cutlineDSName='mask.shp'
@@ -432,6 +400,205 @@ impl Dem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geo::BoundingRect;
+
+    // Avoid Dem::new's cleanup of the shared temporary DEM in offline tests.
+    fn reunion_dem(output_path: &Path) -> Result<Dem> {
+        Ok(Dem {
+            ign_collect: IgnCollect::new()?,
+            output_path: output_path.to_path_buf(),
+            path_save_tiff: output_path.join("DEM.tif"),
+            path_save_mask: output_path.join("mask.shp"),
+            path_temp_tiff: output_path.join("dem.tiff"),
+            geo_core: GeoCore::new(2975),
+            bbox: Some(BoundingBox::new(55.51, -21.285, 55.53, -21.265)),
+        })
+    }
+
+    #[test]
+    fn test_dem_mask_reunion_native_axis_aligned() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dem = reunion_dem(dir.path())?;
+        let polygon = dem.mask_polygon()?;
+        let bounds = polygon.bounding_rect().context("Missing mask bounds")?;
+        let projected = dem
+            .bbox
+            .context("Missing test bbox")?
+            .transform(4326, 2975)?;
+
+        assert!((bounds.width() - 0.85 * (projected.max_x - projected.min_x)).abs() < 1e-6);
+        assert!((bounds.height() - 0.85 * (projected.max_y - projected.min_y)).abs() < 1e-6);
+        assert!((bounds.center().x - (projected.min_x + projected.max_x) / 2.0).abs() < 1e-6);
+        assert!((bounds.center().y - (projected.min_y + projected.max_y) / 2.0).abs() < 1e-6);
+        assert!(
+            (300_000.0..400_000.0).contains(&bounds.min().x),
+            "{bounds:?}"
+        );
+        assert!(
+            (7_600_000.0..7_700_000.0).contains(&bounds.min().y),
+            "{bounds:?}"
+        );
+        assert!(
+            bounds.width() > 1700.0 && bounds.height() > 1800.0,
+            "{bounds:?}"
+        );
+        for edge in polygon.exterior().0.windows(2) {
+            assert!(
+                edge[0].x == edge[1].x || edge[0].y == edge[1].y,
+                "diagonal edge: {edge:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_dem_mask_lambert93_uses_full_footprint() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut dem = reunion_dem(dir.path())?;
+        dem.set_crs(2154);
+        let bounds = dem
+            .mask_polygon()?
+            .bounding_rect()
+            .context("Missing mask bounds")?;
+        assert!(
+            (bounds.width() - 0.85 * 5659.6402).abs() < 0.1,
+            "{bounds:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_dem_mask_transform_errors_propagate() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut dem = reunion_dem(dir.path())?;
+        dem.set_crs(-1);
+        assert!(
+            dem.mask_polygon().is_err(),
+            "invalid CRS must not fall back to degrees"
+        );
+        dem.set_crs(2975);
+        dem.set_bbox(55.51, 95.0, 55.53, 96.0);
+        assert!(
+            dem.mask_polygon().is_err(),
+            "invalid latitude must not fall back to degrees"
+        );
+        Ok(())
+    }
+
+    #[cfg(all(not(feature = "wasm"), feature = "gdal"))]
+    #[test]
+    fn test_dem_mask_shapefile_native_geometry_and_prj() -> Result<()> {
+        use gdal::vector::LayerAccess;
+        use std::process::Command;
+
+        match Command::new("ogr2ogr").arg("--version").output() {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("Skipping shapefile regression: ogr2ogr is not installed");
+                return Ok(());
+            }
+            result => anyhow::ensure!(result?.status.success(), "ogr2ogr --version failed"),
+        }
+        let dir = tempfile::tempdir()?;
+        let dem = reunion_dem(dir.path())?;
+        dem.generate_mask_and_adapt_dem()?;
+        assert!(dem.path_save_mask.with_extension("prj").is_file());
+        let dataset = gdal::Dataset::open(&dem.path_save_mask)?;
+        let mut layer = dataset.layer(0)?;
+        let srs = layer.spatial_ref().context("Missing shapefile CRS")?;
+        assert_eq!(srs, gdal::spatial_ref::SpatialRef::from_epsg(2975)?);
+        let feature = layer.features().next().context("Missing mask feature")?;
+        let geometry = feature.geometry().context("Missing mask geometry")?;
+        let ring = geometry.get_geometry(0);
+        let expected = dem.mask_polygon()?;
+        assert_eq!(ring.point_count(), expected.exterior().0.len());
+        for index in 0..ring.point_count() {
+            let (x, y, _) = ring.get_point(index as i32);
+            assert!(
+                expected
+                    .exterior()
+                    .0
+                    .iter()
+                    .any(|c| (c.x - x).abs() < 1e-6 && (c.y - y).abs() < 1e-6),
+                "shapefile coordinate ({x}, {y}) differs from native mask"
+            );
+            if index > 0 {
+                let (previous_x, previous_y, _) = ring.get_point(index as i32 - 1);
+                assert!(
+                    x == previous_x || y == previous_y,
+                    "diagonal shapefile edge"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(all(not(feature = "wasm"), feature = "gdal"))]
+    #[test]
+    fn test_dem_warp_and_clip_native_crs_offline() -> Result<()> {
+        use std::process::Command;
+
+        for tool in ["ogr2ogr", "gdalwarp"] {
+            match Command::new(tool).arg("--version").output() {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("Skipping warp regression: {tool} is not installed");
+                    return Ok(());
+                }
+                result => anyhow::ensure!(result?.status.success(), "{tool} --version failed"),
+            }
+        }
+        let dir = tempfile::tempdir()?;
+        let dem = reunion_dem(dir.path())?;
+        dem.generate_mask_and_adapt_dem()?;
+        let bounds = dem
+            .mask_polygon()?
+            .bounding_rect()
+            .context("Missing mask bounds")?;
+        let srs = gdal::spatial_ref::SpatialRef::from_epsg(2975)?;
+        let driver = gdal::DriverManager::get_driver_by_name("GTiff")?;
+        let mut source = driver.create_with_band_type::<f32, _>(
+            &dem.path_save_tiff,
+            bounds.width().ceil() as usize + 200,
+            bounds.height().ceil() as usize + 200,
+            1,
+        )?;
+        source.set_spatial_ref(&srs)?;
+        source.set_geo_transform(&[
+            bounds.min().x - 100.0,
+            1.0,
+            0.0,
+            bounds.max().y + 100.0,
+            0.0,
+            -1.0,
+        ])?;
+        source.rasterband(1)?.fill(42.0, None)?;
+        source.close()?;
+
+        let output_path = dir.path().join("DEM_clip.tif");
+        dem.warp_and_clip_dem(&dem.path_save_tiff, &output_path)?;
+        let clipped = gdal::Dataset::open(output_path)?;
+        assert_eq!(clipped.spatial_ref()?, srs);
+        let transform = clipped.geo_transform()?;
+        let (width, height) = clipped.raster_size();
+        assert_eq!((transform[1], transform[5]), (1.0, -1.0));
+        assert!((transform[0] - bounds.min().x).abs() <= 1.0);
+        assert!((transform[3] - bounds.max().y).abs() <= 1.0);
+        assert!((width as f64 - bounds.width()).abs() <= 2.0);
+        assert!((height as f64 - bounds.height()).abs() <= 2.0);
+        let pixels = clipped.rasterband(1)?.read_band_as::<f32>()?;
+
+        // GDAL rounds the crop extent to whole pixels; only the outermost
+        // row/column can lie outside the fractional cutline boundary.
+        assert!(
+            pixels
+                .data()
+                .chunks_exact(width)
+                .skip(1)
+                .take(height - 2)
+                .all(|row| row[1..width - 1].iter().all(|&value| value == 42.0)),
+            "native rectangular cutline must not introduce diagonal nodata"
+        );
+        Ok(())
+    }
 
     #[test]
     fn test_dem_new() {

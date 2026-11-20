@@ -32,6 +32,20 @@ fn lidar_hd_csv_typename(typename: &str) -> String {
     typename.replace(".LAMB93", ".SHADOW")
 }
 
+fn lidar_hd_wms_layer(typename: &str, epsg: i32) -> (String, i32) {
+    // Each elevation grid advertises its own CRS; SHADOW is a rendered image,
+    // not an elevation grid. Use the geographic grid for other target CRSs.
+    let (suffix, request_epsg) = match epsg {
+        2154 => ("LAMB93", 2154),
+        2975 => ("RGR92UTM40S", 2975),
+        _ => ("WGS84G", 4326),
+    };
+    let prefix = typename
+        .rsplit_once('.')
+        .map_or(typename, |(prefix, _)| prefix);
+    (format!("{prefix}.{suffix}"), request_epsg)
+}
+
 /// CSV row structure for IGN services
 #[derive(Debug, Clone)]
 pub struct IgnServiceRow {
@@ -186,8 +200,7 @@ impl IgnCollect {
         }
 
         // 2. Fallback embarqué (wheel) — parsé en mémoire, pas d'écriture disque
-        Self::parse_csv_bytes(EMBEDDED_CSV)
-            .context("Failed to parse embedded IGN services CSV")
+        Self::parse_csv_bytes(EMBEDDED_CSV).context("Failed to parse embedded IGN services CSV")
     }
 
     /// Parse IGN CSV bytes (semicolon delimiter, ISO-8859-1 encoding) into a map
@@ -201,7 +214,11 @@ impl IgnCollect {
         let mut map = HashMap::with_capacity(1024);
         for result in rdr.deserialize() {
             let record: IgnCsvRecord = result.context("failed to deserialize CSV record")?;
-            let nom = record.nom_technique.trim().trim_end_matches('\u{a0}').to_string();
+            let nom = record
+                .nom_technique
+                .trim()
+                .trim_end_matches('\u{a0}')
+                .to_string();
             if nom.is_empty() {
                 continue;
             }
@@ -368,11 +385,7 @@ impl IgnCollect {
 
         // Add filter if present (Python: filter=self.filter_xml)
         if let Some(ref filter_xml) = filter_xml {
-            let _ = write!(
-                request_url,
-                "&FILTER={}",
-                urlencoding::encode(filter_xml)
-            );
+            let _ = write!(request_url, "&FILTER={}", urlencoding::encode(filter_xml));
         }
 
         // Store filter for potential future use
@@ -425,15 +438,21 @@ impl IgnCollect {
         let resolution = 1.0; // Default resolution in meters/pixel
 
         let lidar_hd = is_lidar_hd_elevation_key(key);
-        let request_bbox = if lidar_hd {
-            bbox.transform(4326, 2154).context(
-                "Failed to reproject bbox to EPSG:2154 for LiDAR HD WMS (input bbox is WGS84)",
-            )?
+        let (request_typename, request_epsg) = if lidar_hd {
+            lidar_hd_wms_layer(typename, self.geo_core.epsg)
+        } else {
+            (typename.to_owned(), 4326)
+        };
+        let projected_grid = lidar_hd && request_epsg != 4326;
+        let request_bbox = if projected_grid {
+            bbox.transform(4326, request_epsg).with_context(|| {
+                format!("Failed to reproject WGS84 bbox to EPSG:{request_epsg} for LiDAR HD WMS")
+            })?
         } else {
             *bbox
         };
 
-        let (width_m, height_m) = if lidar_hd {
+        let (width_m, height_m) = if projected_grid {
             (
                 (request_bbox.max_x - request_bbox.min_x).abs(),
                 (request_bbox.max_y - request_bbox.min_y).abs(),
@@ -473,17 +492,14 @@ impl IgnCollect {
             );
         }
 
-        // For WMS 1.3.0 with EPSG:4326, Bbox order is inverted for ortho and dem
-        // (ymin, xmin, ymax, xmax). LiDAR HD uses EPSG:2154 grids with (xmin, ymin, xmax, ymax).
-        let bbox_str = if lidar_hd {
+        // WMS 1.3.0 uses latitude/longitude axis order for EPSG:4326,
+        // but easting/northing order for the projected elevation grids.
+        let bbox_str = if projected_grid {
             format!(
                 "{},{},{},{}",
-                request_bbox.min_x,
-                request_bbox.min_y,
-                request_bbox.max_x,
-                request_bbox.max_y
+                request_bbox.min_x, request_bbox.min_y, request_bbox.max_x, request_bbox.max_y
             )
-        } else if matches!(key, "ortho" | "dem" | "cosia") {
+        } else if lidar_hd || matches!(key, "ortho" | "dem" | "cosia") {
             format!(
                 "{},{},{},{}",
                 bbox.min_y, bbox.min_x, bbox.max_y, bbox.max_x
@@ -513,8 +529,7 @@ impl IgnCollect {
         // Optional: STYLES, TRANSPARENT, EXCEPTIONS
         let request_url = if lidar_hd {
             format!(
-                "https://data.geopf.fr/wms-r/wms?LAYERS={}&FORMAT=image/geotiff&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:2154&BBOX={}&WIDTH={}&HEIGHT={}",
-                typename, bbox_str, width_px, height_px
+                "https://data.geopf.fr/wms-r/wms?LAYERS={request_typename}&FORMAT=image/geotiff&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:{request_epsg}&BBOX={bbox_str}&WIDTH={width_px}&HEIGHT={height_px}"
             )
         } else if matches!(key, "dem" | "irc" | "cosia" | "dsm") {
             // For DEM and other raster services, use wms-r endpoint with exact format
@@ -553,12 +568,15 @@ impl IgnCollect {
 
             let status = response.status();
             last_error = response.text().unwrap_or_default();
-            let retryable = lidar_hd && (status.as_u16() == 400 || status.as_u16() == 502);
+            let retryable =
+                lidar_hd && matches!(status.as_u16(), 400 | 429 | 500 | 502 | 503 | 504);
 
             if retryable && attempt < WMS_RETRY_ATTEMPTS {
                 tracing::warn!(
                     "Warning: LiDAR HD WMS attempt {}/{} failed with {} — retrying...",
-                    attempt, WMS_RETRY_ATTEMPTS, status
+                    attempt,
+                    WMS_RETRY_ATTEMPTS,
+                    status
                 );
                 std::thread::sleep(Duration::from_secs(attempt as u64));
                 continue;
@@ -707,6 +725,57 @@ mod tests {
         if let Some(row) = row {
             assert!(!row.url_geoplateforme.is_empty());
         }
+    }
+
+    #[test]
+    fn test_lidar_hd_layer_matches_request_crs() {
+        for product in ["MNT", "MNS", "MNH"] {
+            let prefix = format!("IGNF_LIDAR-HD_{product}_ELEVATION.ELEVATIONGRIDCOVERAGE");
+            let typename = format!("{prefix}.LAMB93");
+            for (target_epsg, suffix, expected_epsg) in [
+                (2154, "LAMB93", 2154),
+                (2975, "RGR92UTM40S", 2975),
+                (4326, "WGS84G", 4326),
+                (32620, "WGS84G", 4326),
+            ] {
+                let (layer, request_epsg) = lidar_hd_wms_layer(&typename, target_epsg);
+                assert_eq!(layer, format!("{prefix}.{suffix}"));
+                assert_eq!(request_epsg, expected_epsg);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the live IGN WMS service"]
+    fn test_lidar_hd_reunion_wms() -> Result<()> {
+        let mut ign = IgnCollect::new()?;
+        ign.set_bbox(55.51, -21.285, 55.53, -21.265);
+        ign.geo_core.set_epsg(2975);
+        ign.execute_ign("mnt")?;
+        let raster = gdal::Dataset::open(ign.collect_path.join("mnt.tiff"))?;
+        // IGN GeoTIFFs may omit EPSG authority metadata or identify the grid as
+        // WGS84 / UTM 40S. Check the actual projected footprint instead.
+        assert!(raster.spatial_ref()?.is_projected());
+        let expected = ign.bbox.context("missing bbox")?.transform(4326, 2975)?;
+        let transform = raster.geo_transform()?;
+        assert!((transform[0] - expected.min_x).abs() < 0.01);
+        assert!((transform[3] - expected.max_y).abs() < 0.01);
+        let (width, height) = raster.raster_size();
+        assert!((2000..2300).contains(&width), "unexpected width: {width}");
+        assert!(
+            (2200..2400).contains(&height),
+            "unexpected height: {height}"
+        );
+        let band = raster.rasterband(1)?;
+        let stats = band
+            .get_statistics(true, false)?
+            .context("missing elevation statistics")?;
+        assert!(stats.min > 0.0, "invalid ground elevation: {}", stats.min);
+        assert!(
+            stats.max > stats.min,
+            "elevation raster must not be constant"
+        );
+        Ok(())
     }
 
     #[test]

@@ -4,85 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import geopandas as gpd
+
 import numpy as np
 import rasterio
 from PIL import Image, ImageDraw, ImageFont
-from rasterio.enums import Resampling
-from rasterio.io import MemoryFile
-from rasterio.mask import mask as rio_mask
-from rasterio.transform import from_bounds
-from rasterio.warp import reproject
 
 
-def warp_clip_raster(
-    src_path: str | Path,
-    dst_path: str | Path,
-    mask_shp: str | Path,
-    *,
-    dst_crs: str = "EPSG:2154",
-    resolution: float = 1.0,
-    resampling: Resampling = Resampling.bilinear,
-) -> None:
-    """Reproject, resample, and clip a raster to a shapefile mask.
-
-    Equivalent to ``gdal.Warp`` with ``dstSRS``, ``xRes``/``yRes``,
-    ``cropToCutline``, and ``outputType=Float32``.
-    """
-    src_path = Path(src_path)
-    dst_path = Path(dst_path)
-    geometries = gpd.read_file(mask_shp).to_crs(dst_crs)
-
-    bounds = geometries.total_bounds
-    width = int(np.ceil((bounds[2] - bounds[0]) / resolution))
-    height = int(np.ceil((bounds[3] - bounds[1]) / resolution))
-    dst_transform = from_bounds(*bounds, width, height)
-
-    with rasterio.open(src_path) as src:
-        reproj_data = np.zeros((src.count, height, width), dtype=np.float32)
-        for band in range(1, src.count + 1):
-            reproject(
-                source=rasterio.band(src, band),
-                destination=reproj_data[band - 1],
-                src_transform=src.transform,
-                src_crs=src.crs,
-                dst_transform=dst_transform,
-                dst_crs=dst_crs,
-                resampling=resampling,
-            )
-
-        with MemoryFile() as memfile:
-            with memfile.open(
-                driver="GTiff",
-                height=height,
-                width=width,
-                count=src.count,
-                dtype="float32",
-                crs=dst_crs,
-                transform=dst_transform,
-            ) as dataset:
-                dataset.write(reproj_data)
-                clipped, clipped_transform = rio_mask(
-                    dataset,
-                    geometries.geometry,
-                    crop=True,
-                    nodata=None,
-                    filled=True,
-                )
-
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
-        dst_path,
-        "w",
-        driver="GTiff",
-        height=clipped.shape[1],
-        width=clipped.shape[2],
-        count=clipped.shape[0],
-        dtype="float32",
-        crs=dst_crs,
-        transform=clipped_transform,
-    ) as dst:
-        dst.write(clipped.astype(np.float32))
+# Keep the existing import API for both scripts and package-style imports.
+if __package__:
+    from .umep_rasters import warp_clip_raster as warp_clip_raster
+else:
+    from umep_rasters import warp_clip_raster as warp_clip_raster
 
 PHI = (1 + 5**0.5) / 2  # nombre d'or
 DAYTIME_HOUR_START = 7
@@ -118,7 +50,8 @@ def compute_daytime_value_range(
     daytime_paths = [
         path
         for path in paths
-        if (hour := parse_raster_hour(path)) is not None and hour_start <= hour <= hour_end
+        if (hour := parse_raster_hour(path)) is not None
+        and hour_start <= hour <= hour_end
     ]
     if not daytime_paths:
         return None
@@ -146,7 +79,9 @@ def compute_value_range(
     hour_end: int = DAYTIME_HOUR_END,
 ) -> tuple[float, float] | None:
     """Daytime min/max for legends; fall back to all timesteps if needed."""
-    value_range = compute_daytime_value_range(paths, hour_start=hour_start, hour_end=hour_end)
+    value_range = compute_daytime_value_range(
+        paths, hour_start=hour_start, hour_end=hour_end
+    )
     if value_range is not None:
         return value_range
 
@@ -222,7 +157,9 @@ def append_colorbar_legend(
     max_w = draw.textlength(max_label, font=font)
     draw.text((width - max_w - 4, label_y), max_label, fill=(0, 0, 0), font=font)
     caption_w = draw.textlength(caption, font=font)
-    draw.text(((width - caption_w) / 2, label_y + 14), caption, fill=(0, 0, 0), font=font)
+    draw.text(
+        ((width - caption_w) / 2, label_y + 14), caption, fill=(0, 0, 0), font=font
+    )
     return out
 
 
@@ -383,11 +320,17 @@ def preview_rasters_to_gif(
         print(f"⚠️  No files found for GIF: {folder / pattern}")
         return None
 
-    value_range = compute_value_range(paths, hour_start=hour_start, hour_end=hour_end) if cmap else None
+    value_range = (
+        compute_value_range(paths, hour_start=hour_start, hour_end=hour_end)
+        if cmap
+        else None
+    )
     legend_caption = None
     if value_range is not None:
         vmin, vmax = value_range
-        legend_caption = format_scale_caption(variable, vmin, vmax, hour_start, hour_end)
+        legend_caption = format_scale_caption(
+            variable, vmin, vmax, hour_start, hour_end
+        )
         print(f"  {legend_caption}")
 
     frames: list[Image.Image] = []
@@ -444,11 +387,17 @@ def export_rasters_to_pngs(
         print(f"⚠️  No files found for PNG export: {folder / pattern}")
         return None
 
-    value_range = compute_value_range(paths, hour_start=hour_start, hour_end=hour_end) if cmap else None
+    value_range = (
+        compute_value_range(paths, hour_start=hour_start, hour_end=hour_end)
+        if cmap
+        else None
+    )
     legend_caption = None
     if value_range is not None:
         vmin, vmax = value_range
-        legend_caption = format_scale_caption(variable, vmin, vmax, hour_start, hour_end)
+        legend_caption = format_scale_caption(
+            variable, vmin, vmax, hour_start, hour_end
+        )
         print(f"  {legend_caption}")
 
     out_dir.mkdir(parents=True, exist_ok=True)

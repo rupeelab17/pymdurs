@@ -146,10 +146,25 @@ impl BoundingBox {
         }
     }
 
-    /// Transform bounding box to another CRS
+    /// Transform bounds using all corners and densified edges to account for projection curvature.
     pub fn transform(&self, from_epsg: i32, to_epsg: i32) -> Result<Self> {
-        let (min_x, min_y) = GeoCore::transform_coords(from_epsg, to_epsg, self.min_x, self.min_y)?;
-        let (max_x, max_y) = GeoCore::transform_coords(from_epsg, to_epsg, self.max_x, self.max_y)?;
+        let proj = Proj::new_known_crs(
+            &format!("EPSG:{from_epsg}"),
+            &format!("EPSG:{to_epsg}"),
+            None,
+        )
+        .context("Failed to create Proj transformation")?;
+        // PROJ's recommended densification: 21 additional points per edge.
+        const DENSIFY_POINTS: i32 = 21;
+        let [min_x, min_y, max_x, max_y] = proj
+            .transform_bounds(
+                self.min_x,
+                self.min_y,
+                self.max_x,
+                self.max_y,
+                DENSIFY_POINTS,
+            )
+            .context("Failed to transform bounding box")?;
 
         Ok(BoundingBox::new(min_x, min_y, max_x, max_y))
     }
@@ -170,6 +185,57 @@ mod tests {
         let bbox: BoundingBox = BoundingBox::new(0.0, 0.0, 1.0, 1.0);
         assert_eq!(bbox.min_x, 0.0);
         assert_eq!(bbox.max_x, 1.0);
+    }
+
+    #[test]
+    fn test_bounding_box_transform_reunion() -> Result<()> {
+        let bbox = BoundingBox::new(55.51, -21.285, 55.53, -21.265);
+        let transformed = bbox.transform(4326, 2154)?;
+        let proj = Proj::new_known_crs("EPSG:4326", "EPSG:2154", None)?;
+
+        // Check all four corners and samples along every edge, not just SW/NE.
+        for step in 0..=22 {
+            let fraction = f64::from(step) / 22.0;
+            let x = bbox.min_x + fraction * (bbox.max_x - bbox.min_x);
+            let y = bbox.min_y + fraction * (bbox.max_y - bbox.min_y);
+            for point in [
+                (x, bbox.min_y),
+                (x, bbox.max_y),
+                (bbox.min_x, y),
+                (bbox.max_x, y),
+            ] {
+                let (x, y) = proj.convert(point)?;
+                let tolerance = 1e-6;
+                assert!(
+                    x >= transformed.min_x - tolerance
+                        && x <= transformed.max_x + tolerance
+                        && y >= transformed.min_y - tolerance
+                        && y <= transformed.max_y + tolerance,
+                    "boundary point {point:?} projects to ({x}, {y}) outside {transformed:?}"
+                );
+            }
+        }
+        assert!(
+            (transformed.max_x - transformed.min_x - 5659.6402).abs() < 0.1,
+            "Réunion footprint must span about 5660 m, not the SW/NE strip: {transformed:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_bounding_box_transform_curved_edge() -> Result<()> {
+        // Lambert-93's southern edge reaches its minimum at the central meridian,
+        // between the corners of this bbox (symmetric about longitude 3°).
+        let bbox = BoundingBox::new(-5.0, 44.0, 11.0, 50.0);
+        let transformed = bbox.transform(4326, 2154)?;
+        let (_, edge_y) = GeoCore::transform_coords(4326, 2154, 3.0, bbox.min_y)?;
+        let (_, corner_y) = GeoCore::transform_coords(4326, 2154, bbox.min_x, bbox.min_y)?;
+        assert!(edge_y < corner_y - 1000.0, "edge must curve below corners");
+        assert!(
+            transformed.min_y <= edge_y + 1e-6,
+            "curved edge minimum {edge_y} is outside {transformed:?}"
+        );
+        Ok(())
     }
 
     #[test]

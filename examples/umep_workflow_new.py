@@ -22,11 +22,10 @@ import os
 import sys
 from pathlib import Path
 
-import geopandas as gpd
-import numpy as np
-import rasterio
+
 import solweig
-from shapely.geometry import box
+from rasterio.enums import Resampling
+
 
 import pymdurs
 
@@ -34,7 +33,12 @@ _EXAMPLES_DIR = Path(__file__).resolve().parent
 if str(_EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(_EXAMPLES_DIR))
 
-from utils import create_solweig_preview_gifs, create_solweig_preview_pngs, warp_clip_raster  # noqa: E402
+from umep_rasters import fill_dsm_nodata, surface_cache_directory  # noqa: E402
+from utils import (  # noqa: E402
+    create_solweig_preview_gifs,
+    create_solweig_preview_pngs,
+    warp_clip_raster,
+)
 
 
 def main():
@@ -50,30 +54,28 @@ def main():
     # Bounding box (La Rochelle area, France)
     # Format: min_x, min_y, max_x, max_y (WGS84, EPSG:4326)
     # bbox_wgs84 = (-1.152704, 46.181627, -1.139893, 46.18699)
-    #bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
-    #bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
+    # bbox_wgs84 = (-1.152223, 46.183282, -1.149637, 46.185459)
+    # bbox_wgs84 = (-1.14850,46.18197,-1.14421,46.18565)
 
     # Tipee
-    #bbox_wgs84 = (-1.1484979698,46.1838328061,-1.1444401229,46.1862607901)
- 
-     # Atlantec
-    bbox_wgs84 = (-1.152704,46.181627,-1.139893,46.18699)
-    
+    # bbox_wgs84 = (-1.1484979698,46.1838328061,-1.1444401229,46.1862607901)
+
+    # Atlantec
+    # bbox_wgs84 = (-1.152704,46.181627,-1.139893,46.18699)
+
     # Bordeaux
-    #bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
+    # bbox_wgs84 = (-0.5833492801,44.8457876761,-0.5737192696,44.8509319773)
 
-    # La Rochelle
-    #bbox_wgs84 = (-1.182833,46.145232,-1.107044,46.176027)
+    # Atlantec
+    # bbox_wgs84 =  (-1.152704,46.181627,-1.139893,46.18699)
+    # working_crs = 2154  # Lambert 93
 
-    # Convert bbox to Lambert-93 (EPSG:2154) with GeoPandas
-    minx, miny, maxx, maxy = bbox_wgs84
-    geom_wgs84 = box(minx, miny, maxx, maxy)
-    gdf_bbox = gpd.GeoDataFrame(geometry=[geom_wgs84], crs="EPSG:4326")
-    gdf_bbox = gdf_bbox.to_crs(2154)
-    bbox_2154 = tuple(gdf_bbox.total_bounds)  # (minx, miny, maxx, maxy)
-
-    # Working CRS (Lambert 93 - EPSG:2154)
-    working_crs = 2154
+    # REUNION
+    # Match the native tile CRS: RGR92 / UTM 40S for La Réunion.
+    # For mainland France, use EPSG:2154 (Lambert-93) instead.
+    working_crs = 2975
+    # WGS84 bbox: resolves COPC URLs via WFS only (no LAZ download yet).
+    bbox_wgs84 = (55.51, -21.285, 55.53, -21.265)
 
     print(f"Bounding box: {bbox_wgs84}")
     print(f"Working CRS: EPSG:{working_crs}")
@@ -85,7 +87,6 @@ def main():
     print("\n" + "=" * 60)
     print("Step 1: Collecting DEM from IGN API...")
     print("=" * 60)
-
 
     dem = pymdurs.geometric.Dem(output_path=output_folder_str)
     dem.set_bbox(*bbox_wgs84)
@@ -173,7 +174,17 @@ def main():
         ]
         for label, src, dst in clip_targets:
             if src.exists():
-                warp_clip_raster(src, dst, mask_shp_path)
+                warp_clip_raster(
+                    src,
+                    dst,
+                    mask_shp_path,
+                    dst_crs=f"EPSG:{working_crs}",
+                    resampling=(
+                        Resampling.nearest
+                        if label == "Landcover"
+                        else Resampling.bilinear
+                    ),
+                )
                 print(f"{label} clipped to: {dst}")
             elif label == "Landcover":
                 print(
@@ -194,35 +205,10 @@ def main():
         print("Step 3a: Filling DSM NoData with DEM values...")
         print("-" * 40)
 
-        with rasterio.open(dem_clip_path) as dem_src:
-            dem_data = dem_src.read(1)
-            dem_nodata = dem_src.nodata or -99999.0
-
-        with rasterio.open(dsm_clip_path) as dsm_src:
-            dsm_data = dsm_src.read(1)
-            dsm_profile = dsm_src.profile.copy()
-            dsm_nodata = dsm_src.nodata or 0
-
-        # Find DSM NoData pixels
-        dsm_invalid = (dsm_data == dsm_nodata) | np.isnan(dsm_data) | (dsm_data == 0)
-        dem_valid = (dem_data != dem_nodata) & ~np.isnan(dem_data)
-
-        # Fill DSM NoData with DEM values where DEM is valid
-        fill_mask = dsm_invalid & dem_valid
-        filled_count = np.sum(fill_mask)
-
+        filled_count, pixel_count = fill_dsm_nodata(dsm_clip_path, dem_clip_path)
         if filled_count > 0:
-            dsm_data[fill_mask] = dem_data[fill_mask]
-
-            # Update nodata value
-            dsm_profile.update(nodata=-9999.0)
-
-            # Save filled DSM
-            with rasterio.open(dsm_clip_path, "w", **dsm_profile) as dst:
-                dst.write(dsm_data, 1)
-
             print(f"Filled {filled_count} DSM NoData pixels with DEM values")
-            print(f"   ({filled_count / dsm_data.size * 100:.2f}% of total)")
+            print(f"   ({filled_count / pixel_count * 100:.2f}% of total)")
         else:
             print("No DSM NoData pixels to fill")
 
@@ -239,14 +225,19 @@ def main():
         # - Walls and SVF computed and cached to working_dir if not provided
         # - Extent and resolution handled automatically
         # - Resampled data saved to working_dir for inspection
+        # SOLWEIG can reuse stale walls/SVF even after its fast-path is invalidated.
+        # Isolate all preprocessing by input contents, not just pixel size.
+        working_dir = surface_cache_directory(
+            output_path / "working", dsm_path, cdsm_path, lc_path
+        )
         surface = solweig.SurfaceData.prepare(
             dsm=str(dsm_path),
-            working_dir=str(output_path / "working"),  # Cache preprocessing here
+            working_dir=str(working_dir),
             cdsm=str(cdsm_path),
-            # bbox=bbox_2154,  # Optional: specify extent
+            # Infer the extent from the clipped rasters, not the larger collection bbox.
             pixel_size=1.0,  # Optional: specify resolution (default: from DSM),
             land_cover=str(lc_path),  # Grid with class IDs (0-7, 99-102),
-            cdsm_relative = False,
+            cdsm_relative=False,
         )
 
         # Load weather from EPW fileVectorized COSIA
