@@ -1,0 +1,84 @@
+# Règles du projet pymdurs — agents Zed
+
+## Périmètre et Git
+
+- Lire les consignes et les workflows concernés avant de modifier le code.
+- Commencer par `git status --short` et examiner les modifications déjà présentes.
+- Préserver le travail utilisateur. Ne pas inclure ses autres modifications dans un commit, sauf demande explicite.
+- Ne pas créer de branche, committer, pousser, publier ou relancer un déploiement sans demande explicite. Ne jamais forcer un push.
+- Messages de commit : Conventional Commits, sujet bref et exact. Documenter les migrations et corrections de sécurité dans le corps.
+
+## Barrière avant chaque push
+
+1. Examiner le diff complet destiné au commit, y compris les fichiers nouveaux et les manifests.
+2. Exécuter `git diff --check` puis `git diff --cached --check` après staging.
+3. Toujours exécuter `cargo fmt --manifest-path rsmdu/Cargo.toml --all -- --check` avant de pousser. Un contrôle des seuls fichiers édités ne suffit pas.
+4. Identifier les workflows déclenchés par le push et exécuter les contrôles pertinents ci-dessous. Distinguer un contrôle local partiel d'une validation complète.
+5. En cas d'échec, de timeout, d'outil absent ou de validation impossible : expliquer le blocage et demander l'accord avant de pousser malgré ce blocage. Une demande générique « commit et push » ne vaut pas acceptation d'un échec découvert ensuite.
+6. Après push, rapporter le SHA et le résultat du push. Ne pas annoncer « CI verte » sans avoir consulté les résultats GitHub du SHA exact.
+
+## Rust et Rustdoc
+
+Commandes depuis la racine, avec les options de `.github/workflows/rust-ci.yml` :
+
+```sh
+cargo fmt --manifest-path rsmdu/Cargo.toml --all
+cargo fmt --manifest-path rsmdu/Cargo.toml --all -- --check
+RUSTFLAGS='-D warnings' cargo clippy --manifest-path rsmdu/Cargo.toml --all-targets --features lidar-copc
+RUSTFLAGS='-D warnings' cargo nextest run --manifest-path rsmdu/Cargo.toml --features lidar-copc
+RUSTFLAGS='-D warnings' RUSTDOCFLAGS='-D warnings' cargo test --manifest-path rsmdu/Cargo.toml --doc --features lidar-copc
+RUSTFLAGS='-D warnings' RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path rsmdu/Cargo.toml --no-deps --features lidar-copc
+```
+
+- Adapter ces commandes si le workflow change ; le workflow fait référence. Si `nextest` manque, le signaler ; `cargo test` est un complément, pas une reproduction exacte de Nextest.
+- Ajouter les contrôles des fonctionnalités réellement modifiées : `polars`, `gpu`, bindings Python, WASM, etc. Ne pas confondre compilation par défaut et validation de toutes les fonctionnalités.
+- Ne pas supprimer un contrôle ni ajouter `allow(...)` pour masquer un échec.
+- Rustdoc : expressions avec crochets entre backticks (`solid[i,j,k]`), unités en parenthèses `(m)`, URL sous forme `<https://…>`.
+- Vérifier la toolchain réellement active. Une action demandant une ancienne version ne prouve pas le MSRV si `rust-toolchain.toml` la remplace.
+
+## Workflows GitHub Actions
+
+- Après modification d'un workflow, lancer `actionlint` si disponible. S'il manque, le signaler : ne pas prétendre avoir validé le YAML et les expressions GitHub.
+- Vérifier que la version Python existe pour l'OS et l'architecture du runner et respecte `requires-python`. Ne pas conserver Python 3.9 alors que le projet exige Python 3.12+.
+- Installer explicitement chaque outil utilisé : `uv`, Marimo, Rust, GDAL, PROJ, GEOS, etc. Ne jamais compter sur les outils déjà présents sur le Mac local.
+- Lire les valeurs par défaut des actions tierces. Exemple : `cargo-deny-action` active `--all-features` par défaut, même si `deny.toml` indique `all-features = false`.
+- Commandes non interactives uniquement. Pour l'export Marimo, utiliser `--force` afin d'éviter une confirmation d'écrasement.
+- Un export local réussi ne valide ni le runner Linux, ni les permissions, ni les secrets, ni le déploiement Pages, ni l'exécution du notebook dans le navigateur.
+- Pour une validation distante avant intégration à `main`, proposer une branche/PR et attendre l'accord avant sa création. Une relance d'un ancien SHA ne teste pas les corrections locales.
+
+## Dépendances, sécurité et licences
+
+- Après modification des dépendances, exécuter le même périmètre `cargo deny` que la CI, notamment `cargo deny --manifest-path rsmdu/Cargo.toml --all-features check` si l'action utilise toutes les fonctionnalités.
+- Distinguer les résultats `advisories`, `bans`, `licenses` et `sources`. Un seul échec signifie que l'audit complet échoue.
+- Ne jamais ignorer une vulnérabilité, réduire le périmètre d'audit ou déclarer une licence arbitraire pour obtenir un résultat vert.
+- Remonter les dépendances transitives avec `cargo tree`. Privilégier une version corrigée compatible ; retirer une fonctionnalité inutilisée uniquement après vérification du code et tests de l'API conservée.
+- Ne pas supposer qu'une dépendance directe plus récente remplace une version transitive incompatible. Vérifier les bornes et les conflits `links`.
+- Épingler les correctifs Git sur un SHA vérifié. Les tables `[patch]` doivent figurer dans chaque racine Cargo consommatrice, pas seulement dans la bibliothèque dépendante.
+- Vérifier une résolution fraîche comme en CI. Les `Cargo.lock` actuellement ignorés ne permettent pas de supposer que la CI utilise les versions locales.
+- Ne pas ajouter une licence à la liste autorisée sans lire ses conditions. Pour GDAL embarqué, ne pas remplacer un fichier composite par une déclaration « MIT » non justifiée.
+- Une version corrigée de `libsqlite3-sys` ne met pas à jour la bibliothèque SQLite système. Distinguer build embarqué, lien système et bibliothèques distribuées dans les wheels.
+
+## Python et API publique
+
+- Utiliser le `.venv` du projet pour les outils et tests locaux ; ne pas installer dans le Python global.
+- Après édition Python : Ruff sur les fichiers concernés, puis tests ciblés et tests de régression. Signaler séparément les diagnostics préexistants ; ne pas les masquer silencieusement.
+- Vérifier l'API via `import pymdurs`, pas uniquement via l'extension native. Un alias créé par `setattr` peut manquer dans `__all__` et ne pas être réexporté par `import *`.
+- Vérifier l'accord entre bindings, réexports, stubs et tests. Un setter PyO3 expose une affectation de propriété ; il ne crée pas automatiquement une méthode Python `set_*`.
+- Reproduire le défaut et ajouter un test qui échoue avant correction quand le changement comporte une logique non triviale.
+
+## Rasters et UMEP
+
+- Avant de modifier un clip, comparer le fichier source réellement utilisé, le résultat et le masque : CRS, coordonnées, transform, résolution, dimensions, NoData et couverture valide.
+- Ne pas confondre `DEM.tif` et `mnt_lidar_hd.tif` : annoncer explicitement lequel produit `DEM_clip.tif`.
+- Une emprise reprojetée doit envelopper les quatre coins et les bords densifiés. Ne pas transformer seulement min/max ni appliquer `Rect::map_coords` comme calcul d'enveloppe.
+- Construire le masque dans le CRS configuré ; ses coordonnées, son fichier `.prj` et le CRS de découpage doivent être cohérents. Aucun EPSG:2154 imposé pour La Réunion.
+- Respecter exactement la résolution demandée. Préserver les NoData et les zéros valides ; plus proche voisin pour les classes d'occupation du sol.
+- Vérifier l'alignement DEM/DSM avant remplissage. Ne pas réutiliser des murs/SVF issus d'autres sources ou grilles.
+- L'emprise SOLWEIG doit être contenue dans l'intersection des rasters découpés ; ne pas imposer la bbox de collecte après un clip plus petit.
+- Ne pas annoncer les TIFF réparés si seul le code a changé : préciser quels fichiers ont été régénérés et lesquels restent à recalculer.
+
+## Compte rendu
+
+- Rapporter exactement les commandes exécutées, leurs résultats et leurs limites.
+- Distinguer « contrôle local réussi », « job GitHub réussi » et « workflow complet réussi ».
+- Ne jamais affirmer qu'un test, une licence, une version ou une compatibilité a été vérifié sans preuve.
