@@ -28,11 +28,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Install marimo
-        run: pip install marimo
+        run: uv pip install --system marimo
 
       - name: Export notebook
-        run: marimo export html-wasm notebooks/umep_workflow.py -o output --mode edit
+        run: marimo export html-wasm notebooks/umep_workflow.py -o output --mode edit --force
 
       - name: Add .nojekyll
         run: touch output/.nojekyll
