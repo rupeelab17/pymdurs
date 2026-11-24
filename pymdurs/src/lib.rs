@@ -19,6 +19,7 @@ fn pymdurs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register core classes
     m.add_class::<PyBoundingBox>()?;
     m.add_class::<PyGeoCore>()?;
+
     // Add aliases for Pythonic API
     m.setattr("BoundingBox", m.getattr("PyBoundingBox")?)?;
     m.setattr("GeoCore", m.getattr("PyGeoCore")?)?;
@@ -85,7 +86,10 @@ fn register_geometric_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
 fn register_thermal_module(py_module: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = py_module.py();
     let submodule = PyModule::new(py, "thermal")?;
-    submodule.add("__doc__", "Urban wind field (Röckle model) for UTCI pipeline.")?;
+    submodule.add(
+        "__doc__",
+        "Urban wind field (Röckle model) for UTCI pipeline.",
+    )?;
     submodule.add_class::<PyWindField>()?;
     submodule.add_class::<PyWindConfig>()?;
     submodule.setattr("WindField", submodule.getattr("PyWindField")?)?;

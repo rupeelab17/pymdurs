@@ -16,7 +16,9 @@ umep = []
 # Preserve public feature names after removing unused optional dependencies.
 geotiff = []
 quick-xml = []
-gdal_src = ["gdal/gdal-src"]
+gdal_src = ["gdal/gdal-src", "dep:libsqlite3-sys"]
+# Constrain SQLite even when PROJ is built against a system library.
+proj = ["dep:proj", "dep:libsqlite3-sys"]
 # Use memory-mapped I/O for large cached LAZ files (>50 MiB) to reduce RAM usage
 laz-memmap = ["memmap2"]
 # COPC (Cloud Optimized Point Cloud) support via las::copc::CopcEntryReader
@@ -35,13 +37,16 @@ geojson = "1.0"
 geos = { version = "11.3", features = ["geo"], optional = true }
 # 0.31 required for proj-sys 0.27 compatibility with gdal/gdal-src
 proj = { version = "0.31", optional = true }
+# SQLite 3.54.1 fixes RUSTSEC-2026-0459 when building the bundled library.
+libsqlite3-sys = { version = "0.39.1", optional = true }
 # gdal = { version = "0.19", features = ["bindgen"], optional = true }
 gdal = { version = "0.19", git = "https://github.com/AlexanderWillner/gdal.git", branch = "fix/gdal-3.13-compat", features = ["bindgen"], optional = true }
 
 rstar = "0.14"
 
 # Data processing (opt-in via feature "polars")
-polars = { version = "0.55", features = ["lazy", "temporal", "strings"], optional = true }
+# Exports construct eager DataFrames; lazy/cloud I/O pulls vulnerable quick-xml.
+polars = { version = "0.55", default-features = false, features = ["fmt"], optional = true }
 # polars-arrow pulls this; 1.5.2 transmutes () into TryFromIntError (E0512 on rustc 1.97+)
 ethnum = { version = "1.5.3", optional = true }
 
@@ -106,6 +111,11 @@ required-features = ["polars"]
 [[example]]
 name = "building_manual"
 required-features = ["polars"]
+
+# Upstream SQLite-bound fix, before proj-sys 0.28 breaks gdal-src compatibility.
+# Remove once gdal-src supports the released proj-sys with this fix.
+[patch.crates-io]
+proj-sys = { git = "https://github.com/georust/proj.git", rev = "0961616823f3345f962c97ccd059ef98f4d2a060" }
 
 [profile.release]
 opt-level = 3

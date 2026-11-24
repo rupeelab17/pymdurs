@@ -10,9 +10,9 @@ use geo::{Point, Polygon};
 pub struct VegetationPatch {
     /// Footprint polygon (project CRS).
     pub footprint: Polygon<f64>,
-    /// Canopy top height [m] above ground.
+    /// Canopy top height (m) above ground.
     pub canopy_height_m: f64,
-    /// Roughness length [m] for log profile (default 0.1).
+    /// Roughness length (m) for log profile (default 0.1).
     pub z0: f64,
     /// Attenuation coefficient αi (default 2.0).
     pub alpha_i: f64,

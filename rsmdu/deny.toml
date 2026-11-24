@@ -23,6 +23,7 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "bzip2-1.0.6",
     "ISC",
     "Zlib",
     "Unicode-3.0",
@@ -53,4 +54,5 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
     "https://github.com/AlexanderWillner/gdal.git",
+    "https://github.com/georust/proj.git",
 ]

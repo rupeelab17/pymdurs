@@ -259,13 +259,13 @@ impl IgnCollect {
     ///
     /// This method uses the Géoplateforme URLs from the CSV file to make requests.
     /// According to the Géoplateforme documentation:
-    /// - WFS services: https://data.geopf.fr/wfs/ows (Service Géoplateforme de sélection WFS)
-    /// - WMS-Raster: https://data.geopf.fr/wms-r/wms (Service Géoplateforme d'images WMS-Raster)
-    /// - WMS-Vecteur: https://data.geopf.fr/wms-v/wms (Service Géoplateforme d'images WMS-Vecteur)
-    /// - WMTS: https://data.geopf.fr/wmts (Service Géoplateforme d'images tuilées WMTS)
+    /// - WFS services: <https://data.geopf.fr/wfs/ows> (Service Géoplateforme de sélection WFS)
+    /// - WMS-Raster: <https://data.geopf.fr/wms-r/wms> (Service Géoplateforme d'images WMS-Raster)
+    /// - WMS-Vecteur: <https://data.geopf.fr/wms-v/wms> (Service Géoplateforme d'images WMS-Vecteur)
+    /// - WMTS: <https://data.geopf.fr/wmts> (Service Géoplateforme d'images tuilées WMTS)
     ///
     /// The service follows OGC WFS 2.0.0 and WMS 1.3.0 standards.
-    /// See: https://geoservices.ign.fr/documentation/services/services-geoplateforme/diffusion
+    /// See: <https://geoservices.ign.fr/documentation/services/services-geoplateforme/diffusion>
     pub fn execute_ign(&mut self, key: &str) -> Result<()> {
         let typename = self
             .ign_keys

@@ -1,4 +1,7 @@
-//! Mass-consistent wind field solver (URock sect. 2.4.2, Eqs 7–9).
+//! Experimental mass-consistent wind field solver (URock sect. 2.4.2, Eqs 7–9).
+//!
+//! This implementation is not operational for production wind fields and is
+//! disabled in `WindField::run`. The prototype is kept for future validation.
 //!
 //! Minimizes E(u,v,w,λ) with constraint div(u)=0 via Lagrange multiplier λ.
 //! ∇²λ = -2α² div(u0); u = u0 + ∂λ/∂x/(2α1²), v = v0 + ∂λ/∂y/(2α1²), w = w0 + ∂λ/∂z/(2α2²).
@@ -12,13 +15,16 @@ use rayon::prelude::*;
 #[cfg(feature = "progressbar")]
 use indicatif::{ProgressBar, ProgressStyle};
 
+// Do not enable until the 3D correction is validated on representative wind fields.
+pub(super) const SOLVER_OPERATIONAL: bool = false;
+
 /// SOR relaxation parameter. ω = 1 gives red-black Gauss–Seidel (stable).
 /// ω > 1 can diverge with Neumann BC and irregular solids; use 1.0 for safety.
 const SOR_OMEGA: f64 = 1.0;
 
 /// Solve for λ such that u = u0 + grad(λ)/(2α²) is divergence-free.
 /// Cell-centered u0,v0,w0 and λ; face fluxes from interpolation.
-/// solid[i,j,k] = true means obstacle (no flow); λ not solved there, Neumann ∂λ/∂n=0 at interface.
+/// `solid[i,j,k] = true` means obstacle (no flow); λ not solved there, Neumann ∂λ/∂n=0 at interface.
 pub fn solve_mass_consistent(
     u0: &Array3<f64>,
     v0: &Array3<f64>,

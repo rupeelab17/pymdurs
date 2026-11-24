@@ -28,10 +28,15 @@ name = "stub_gen"
 path = "src/bin/stub_gen.rs"
 required-features = []
 
+# Cargo only applies patches declared at the consuming root (not in rsmdu).
+[patch.crates-io]
+proj-sys = { git = "https://github.com/georust/proj.git", rev = "0961616823f3345f962c97ccd059ef98f4d2a060" }
+
 [dependencies]
 # PyO3 for Python bindings (extension-module enabled via maturin / default features)
 pyo3 = { version = "0.30.1", features = ["abi3-py312"] }
 pyo3-stub-gen = "0.23.2"
+
 
 # Core rsmdu library
 rsmdu = { path = "../rsmdu", default-features = true, features = ["rayon", "lidar-copc"] }

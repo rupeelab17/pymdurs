@@ -4,14 +4,15 @@
 //! zone formulas (Appendix A), wind factors (Appendix B), profiles (sect. 2.2), Weff/Leff (Eqs 4–5).
 //! References: Röckle (1990), Kaplan & Dinar (1996), Bagal et al. (2004), Pol et al. (2006), Nelson et al. (2008).
 //!
-//! Includes: mass-consistent solver (Eqs 7–9), vegetation zones (B8–B10). Street canyon: still simplified.
+//! Includes vegetation zones (B8–B10); the street canyon is still simplified.
+//! The experimental mass-consistent correction (Eqs 7–9) is disabled.
 
 use anyhow::{Context, Result};
 use ndarray::{Array2, Array3};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use super::mass_consistent_solver::solve_mass_consistent;
+use super::mass_consistent_solver::{solve_mass_consistent, SOLVER_OPERATIONAL};
 use super::vegetation::{vegetation_wind_factor, VegetationCollection};
 
 use crate::geo_core::{BoundingBox, GeoCore};
@@ -536,7 +537,9 @@ fn read_raster_band_as_f32(path: &Path) -> Result<(Array2<f32>, [f64; 6], usize,
 
 // ---------- WindConfig ----------
 
-/// Configuration for Röckle wind field and optional mass-consistent solver.
+/// Configuration for the Röckle wind field.
+///
+/// The 3D solver settings are retained for compatibility, but the correction is disabled.
 ///
 /// **Grid spacing (3D solver):**
 ///   - Horizontal: `solver_dx` / `solver_dy` override the raster pixel size (from geotransform) when set.
@@ -547,31 +550,32 @@ pub struct WindConfig {
     pub wind_speed_ref: f64,
     pub wind_direction: f64,
     pub z_ref: f64,
-    /// Nominal resolution [m]. Also used as default vertical step (dz) for the 3D solver when `solver_dz` is None.
+    /// Nominal resolution (m). Also used as default vertical step (dz) for the 3D solver when `solver_dz` is None.
     pub resolution_m: f64,
     /// Vertical profile type (URock sect. 2.2).
     pub profile_type: WindProfileType,
-    /// Roughness length [m]. If not set, computed from buildings (Hanna & Britter).
+    /// Roughness length (m). If not set, computed from buildings (Hanna & Britter).
     pub z0: Option<f64>,
-    /// Displacement height [m]. If not set, computed from buildings.
+    /// Displacement height (m). If not set, computed from buildings.
     pub d: Option<f64>,
-    /// Mean obstacle height [m] for urban profile. If not set, computed from buildings.
+    /// Mean obstacle height (m) for urban profile. If not set, computed from buildings.
     pub hr: Option<f64>,
     /// Normalized frontal area for urban profile. If not set, computed from buildings.
     pub lambda_f: Option<f64>,
-    /// If true, run mass-consistent solver (Eqs 7–9) on 3D field then extract 2D at output_height.
+    /// Requests the experimental 3D correction. Currently disabled; `true` logs a warning
+    /// and keeps the analytical 2D Röckle field.
     pub use_mass_consistent_solver: bool,
     /// Solver stop threshold (sum of |λ^{t+1} − λ^t|).
     pub solver_epsilon: f64,
     /// Max iterations for λ.
     pub solver_max_iter: usize,
-    /// Height [m] above ground for 2D output when using solver (slice of 3D result).
+    /// Height (m) above ground for 2D output when using solver (slice of 3D result).
     pub output_height: f64,
-    /// Grid spacing [m] for solver (x). If None, use raster geotransform.
+    /// Grid spacing (m) for solver (x). If None, use raster geotransform.
     pub solver_dx: Option<f64>,
-    /// Grid spacing [m] for solver (y). If None, use raster geotransform.
+    /// Grid spacing (m) for solver (y). If None, use raster geotransform.
     pub solver_dy: Option<f64>,
-    /// Grid spacing [m] for solver (z). If None, use `resolution_m` as vertical step.
+    /// Grid spacing (m) for solver (z). If None, use `resolution_m` as vertical step.
     pub solver_dz: Option<f64>,
     /// If true, write a GeoTIFF of Röckle zone codes (rockle_zone.tif): 0=Freestream, 1=Inside, 2=Upwind, 3=UpwindVortex, 4=Cavity, 5=Wake, etc.
     pub save_rockle_zone: bool,
@@ -1047,7 +1051,13 @@ impl WindField {
             lambda_f: config.lambda_f.unwrap_or(lambda_f_computed),
         };
 
-        let (speed, direction, uv_opt) = if config.use_mass_consistent_solver {
+        if config.use_mass_consistent_solver && !SOLVER_OPERATIONAL {
+            tracing::warn!(
+                "Mass-consistent wind solver is disabled; using analytical Röckle field"
+            );
+        }
+        let (speed, direction, uv_opt) = if config.use_mass_consistent_solver && SOLVER_OPERATIONAL
+        {
             let dz = config.solver_dz.unwrap_or(config.resolution_m).max(1e-10);
             let (u0, v0, w0, solid) = compute_initial_3d(
                 &dem,
@@ -1249,6 +1259,28 @@ fn write_geotiff_u8(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requested_mass_consistent_solver_uses_analytical_field_without_uv_output() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let terrain = dir.path().join("terrain.tif");
+        let gt = [700_000.0, 2.0, 0.0, 6_600_000.0, 0.0, -2.0];
+        write_geotiff_f32(&terrain, &Array2::zeros((3, 3)), &gt, 2154, None)?;
+        let buildings = BuildingCollection::new(None, None, 3.0, Some(2154))?;
+        let field = WindField::new(Some(dir.path().to_string_lossy().into_owned()))?;
+        let baseline = field.run(WindConfig::default(), &terrain, &terrain, &buildings, None)?;
+        let (baseline_speed, _, _, _) = read_raster_band_as_f32(&baseline.wind_speed_path)?;
+
+        let requested = WindConfig {
+            use_mass_consistent_solver: true,
+            ..WindConfig::default()
+        };
+        let result = field.run(requested, &terrain, &terrain, &buildings, None)?;
+        assert!(!dir.path().join("wind_uv.dat").exists());
+        let (speed, _, _, _) = read_raster_band_as_f32(&result.wind_speed_path)?;
+        assert_eq!(speed, baseline_speed);
+        Ok(())
+    }
 
     #[test]
     fn wind_transform_roundtrip() {
