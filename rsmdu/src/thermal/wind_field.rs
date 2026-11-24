@@ -547,15 +547,15 @@ pub struct WindConfig {
     pub wind_speed_ref: f64,
     pub wind_direction: f64,
     pub z_ref: f64,
-    /// Nominal resolution [m]. Also used as default vertical step (dz) for the 3D solver when `solver_dz` is None.
+    /// Nominal resolution (m). Also used as default vertical step (dz) for the 3D solver when `solver_dz` is None.
     pub resolution_m: f64,
     /// Vertical profile type (URock sect. 2.2).
     pub profile_type: WindProfileType,
-    /// Roughness length [m]. If not set, computed from buildings (Hanna & Britter).
+    /// Roughness length (m). If not set, computed from buildings (Hanna & Britter).
     pub z0: Option<f64>,
-    /// Displacement height [m]. If not set, computed from buildings.
+    /// Displacement height (m). If not set, computed from buildings.
     pub d: Option<f64>,
-    /// Mean obstacle height [m] for urban profile. If not set, computed from buildings.
+    /// Mean obstacle height (m) for urban profile. If not set, computed from buildings.
     pub hr: Option<f64>,
     /// Normalized frontal area for urban profile. If not set, computed from buildings.
     pub lambda_f: Option<f64>,
@@ -565,13 +565,13 @@ pub struct WindConfig {
     pub solver_epsilon: f64,
     /// Max iterations for λ.
     pub solver_max_iter: usize,
-    /// Height [m] above ground for 2D output when using solver (slice of 3D result).
+    /// Height (m) above ground for 2D output when using solver (slice of 3D result).
     pub output_height: f64,
-    /// Grid spacing [m] for solver (x). If None, use raster geotransform.
+    /// Grid spacing (m) for solver (x). If None, use raster geotransform.
     pub solver_dx: Option<f64>,
-    /// Grid spacing [m] for solver (y). If None, use raster geotransform.
+    /// Grid spacing (m) for solver (y). If None, use raster geotransform.
     pub solver_dy: Option<f64>,
-    /// Grid spacing [m] for solver (z). If None, use `resolution_m` as vertical step.
+    /// Grid spacing (m) for solver (z). If None, use `resolution_m` as vertical step.
     pub solver_dz: Option<f64>,
     /// If true, write a GeoTIFF of Röckle zone codes (rockle_zone.tif): 0=Freestream, 1=Inside, 2=Upwind, 3=UpwindVortex, 4=Cavity, 5=Wake, etc.
     pub save_rockle_zone: bool,

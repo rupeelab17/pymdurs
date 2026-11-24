@@ -18,7 +18,7 @@ const SOR_OMEGA: f64 = 1.0;
 
 /// Solve for λ such that u = u0 + grad(λ)/(2α²) is divergence-free.
 /// Cell-centered u0,v0,w0 and λ; face fluxes from interpolation.
-/// solid[i,j,k] = true means obstacle (no flow); λ not solved there, Neumann ∂λ/∂n=0 at interface.
+/// `solid[i,j,k] = true` means obstacle (no flow); λ not solved there, Neumann ∂λ/∂n=0 at interface.
 pub fn solve_mass_consistent(
     u0: &Array3<f64>,
     v0: &Array3<f64>,
