@@ -18,6 +18,7 @@
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [API context for assistants](#api-context-for-assistants)
 - [Core Classes](#core-classes)
 - [Geometric Data Modules](#geometric-data-modules)
 - [Requirements](#requirements)
@@ -222,6 +223,18 @@ buildings = buildings.run()
 # Convert to pandas DataFrame
 df = buildings.to_pandas()
 print(df.head())
+```
+
+---
+
+## API context for assistants
+
+[`llms.txt`](llms.txt) contains the typed Python API reference and a runnable [Bordeaux UTCI example](pymdurs/examples/utci_bbox.py). Get the matching reference for your installed version with `pymdurs.llm_context()`. It reads the stubs and the example shipped in the wheel, without opening a browser, contacting a provider, or reading local datasets or credentials.
+
+After changing the stubs or example, regenerate the repository copy from the project environment:
+
+```bash
+.venv/bin/python -c 'from pymdurs import llm_context; print(llm_context(), end="")' > llms.txt
 ```
 
 ---

@@ -8,8 +8,10 @@ from typing_extensions import Self
 
 from . import indicators
 from . import vegetation
+from ._llm_context import llm_context
 from .pymdurs import (
     BoundingBox,
+
     GeoCore,
     PyBoundingBox,
     PyGeoCore,
@@ -58,10 +60,10 @@ def dxf_to_cosia_and_weighted_layers(
     layer_properties: dict[str, dict[str, float | str]] | None = ...,
 ) -> GeoDataFrame: ...
 
-def init_logging(level: str = ...) -> None: ...
 
 __all__ = [
     "BoundingBox",
+    "llm_context",
     "GeoCore",
     "PyBoundingBox",
     "PyGeoCore",

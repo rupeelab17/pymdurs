@@ -21,6 +21,7 @@ from . import vegetation as vegetation  # noqa: E402
 
 # Urban indicators (note de biotope CBS / BFF, etc.).
 from . import indicators as indicators  # noqa: E402
+from ._llm_context import llm_context as llm_context  # noqa: E402
 
 # Python geometric helpers injected onto the Rust `geometric` submodule so
 # `from pymdurs.geometric import DetectionUrbanTypes` matches pymdu layout.

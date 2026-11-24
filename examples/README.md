@@ -4,6 +4,7 @@ This folder contains Python examples for using the `pymdurs` package to collect 
 
 ## 📋 Table of contents
 
+- [Bordeaux UTCI on a 1 km² square](#bordeaux-utci-on-a-1-km²-square)
 - [Geometric data examples](#geometric-data-examples)
 - [Advanced workflow examples](#advanced-workflow-examples)
 - [Prerequisites](#prerequisites)
@@ -11,6 +12,18 @@ This folder contains Python examples for using the `pymdurs` package to collect 
 - [General notes](#general-notes)
 
 ---
+
+## Bordeaux UTCI on a 1 km² square
+
+With the `thermal` extra and local DEM/DSM GeoTIFFs in Lambert-93 that cover the study area, run from the repository root:
+
+```bash
+.venv/bin/python -m pymdurs.examples.utci_bbox --dem /path/to/ground.tif \
+    --dsm /path/to/ground_and_buildings.tif --epw examples/bordeaux_2025.epw \
+    --when '2025-07-01 13:00' --output /path/to/utci-output
+```
+
+The [packaged example](../pymdurs/examples/utci_bbox.py) uses SOLWEIG to align the rasters, calculate walls and SVF, and produce Tmrt and UTCI GeoTIFFs for one EPW timestep. It does not download the input rasters and uses the EPW reference wind.
 
 ## Geometric data examples
 
