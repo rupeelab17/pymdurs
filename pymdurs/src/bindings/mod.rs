@@ -3,18 +3,16 @@
 
 pub mod bounding_box;
 pub mod building;
-pub mod cadastre;
 pub mod cosia;
 pub mod dem;
 pub mod geo_core;
-pub mod iris;
+pub mod ign_layer;
 pub mod lcz;
 pub mod lidar;
 pub mod lidar_raster;
 pub mod logging;
 
 pub mod rnb;
-pub mod road;
 pub mod vegetation;
 pub mod water;
 pub mod wind;
@@ -22,17 +20,15 @@ pub mod wind;
 // Re-export all bindings for convenience
 pub use bounding_box::PyBoundingBox;
 pub use building::PyBuilding;
-pub use cadastre::PyCadastre;
 pub use cosia::PyCosia;
 pub use dem::PyDem;
 pub use geo_core::PyGeoCore;
-pub use iris::PyIris;
+pub use ign_layer::{PyCadastre, PyIris, PyRoad};
 pub use lcz::PyLcz;
 pub use lidar::PyLidar;
 pub use lidar_raster::{PyMnh, PyMns, PyMnt};
 pub use logging::init_logging;
 pub use rnb::PyRnb;
-pub use road::PyRoad;
 pub use vegetation::PyVegetation;
 pub use water::PyWater;
 pub use wind::{PyWindConfig, PyWindField};
