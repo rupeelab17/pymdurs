@@ -1,8 +1,10 @@
 # pymdurs
 
-[![PyPI](https://img.shields.io/pypi/v/pymdurs?label=PyPI)](https://pypi.org/project/pymdurs/) [![Python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)](https://pypi.org/project/pymdurs/)
+[![PyPI](https://img.shields.io/pypi/v/pymdurs?label=PyPI)](https://pypi.org/project/pymdurs/) [![Python](https://img.shields.io/badge/python-3.12%20|%203.13%20|%203.14-blue)](https://pypi.org/project/pymdurs/) [![Status](https://img.shields.io/badge/status-Alpha-orange)](https://pypi.org/project/pymdurs/)
 
 **Python bindings** for the Rust library `rsmdu` — a high-performance reimplementation of [pymdu](https://github.com/UMEP-dev/pymdu) (Python Urban Data Model). Geospatial data processing for urban analysis, with integration with IGN (Institut Géographique National) APIs and UMEP toolchains.
+
+**Status:** Alpha (`Development Status :: 3 - Alpha`). The public API may still change between releases.
 
 - **PyPI package**: [pypi.org/project/pymdurs](https://pypi.org/project/pymdurs/)
 - **Latest version**: [![pypi](https://img.shields.io/pypi/v/pymdurs?label=pymdurs)](https://pypi.org/project/pymdurs/)
@@ -58,6 +60,8 @@ uv venv .venv --python 3.13
 ```
 
 ### From PyPI (recommended)
+
+Prefer the PyPI wheel on Windows and macOS: it avoids a local Rust toolchain and system GDAL. Building from source still needs both (see below).
 
 The package is published on [PyPI](https://pypi.org/project/pymdurs/). To install the latest version:
 
@@ -115,7 +119,9 @@ uv pip install "pymdurs==<version>"
 
 ### From source
 
-**GDAL prerequisites** (build only — not required for `pip install pymdurs` on Windows):
+Only needed for development or custom Rust features. Prefer [From PyPI](#from-pypi-recommended) for normal use.
+
+**GDAL prerequisites** (build only — not required for `uv pip install pymdurs`):
 
 | Platform    | Command                                                                                                                                                            |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -231,7 +237,7 @@ print(df.head())
 
 ## API context for assistants
 
-[`llms.txt`](llms.txt) contains the typed Python API reference and a runnable [Bordeaux UTCI example](pymdurs/examples/utci_bbox.py). Get the matching reference for your installed version with `pymdurs.llm_context()`. It reads the stubs and the example shipped in the wheel, without opening a browser, contacting a provider, or reading local datasets or credentials.
+[`llms.txt`](llms.txt) contains the typed Python API reference and a runnable [Bordeaux UTCI example](pymdurs/examples/utci_bbox.py). Get the matching reference for your installed version with `pymdurs.llm_context()`. It reads the stubs and the example shipped in the wheel — no network, no provider, no local datasets or credentials — an intentional API accessibility practice so assistants and offline environments can inspect the public surface safely.
 
 After changing the stubs or example, regenerate the repository copy from the project environment:
 
@@ -687,28 +693,23 @@ See `examples/detection_urban_types_example.py`.
 
 ## Requirements
 
+Aligned with `pyproject.toml` (not the older pymdu constraints):
+
 ### Python
 
-- **Python >= 3.8**
-- **pandas >= 1.0.0**
-- **numpy < 2.0.0** (for compatibility with numexpr and other dependencies)
-
-**Note**: If you encounter NumPy 2.x compatibility issues, install NumPy 1.x:
-
-```bash
-uv pip install 'numpy<2.0.0'
-```
+- **Python >= 3.12, < 3.15**
+- **pandas >= 3.1.1**
+- **numpy >= 2.5.4**
+- **geopandas**, **rasterio**, **shapely**, **scikit-image** (base install)
 
 ### Optional Dependencies
 
-For advanced workflows and examples:
-
 ```bash
-# Geospatial operations
-uv pip install geopandas rasterio pyproj shapely
-
-# For UMEP / SOLWEIG / UTCI integration
+# UMEP / SOLWEIG / UTCI
 uv pip install "pymdurs[thermal]"
+
+# Urban morphometrics
+uv pip install "pymdurs[urban]"
 ```
 
 ---

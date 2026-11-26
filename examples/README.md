@@ -516,24 +516,15 @@ maturin develop --target x86_64-apple-darwin
 
 ### Python dependencies
 
-**Base dependencies:**
+**Base dependencies** (also pulled by `uv pip install pymdurs`; Python >= 3.12, numpy >= 2.5):
 
 ```bash
-uv pip install pandas 'numpy<2.0.0'
-```
-
-**Important note:** NumPy 2.x may cause compatibility issues with some dependencies (e.g. `numexpr`). Using NumPy < 2.0.0 is recommended. If you already have NumPy 2.x installed, you can downgrade with:
-
-```bash
-uv pip install 'numpy<2.0.0' --force-reinstall
+uv pip install "pymdurs"
 ```
 
 **Dependencies for advanced workflows:**
 
 ```bash
-# For geospatial examples
-uv pip install geopandas rasterio pyproj shapely
-
 # For detection_urban_types_example.py (morphometrics)
 uv pip install "pymdurs[urban]"
 

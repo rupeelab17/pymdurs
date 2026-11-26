@@ -351,8 +351,9 @@ jobs:
 
             ### Requirements
 
-            - Python >= 3.8
-            - pandas >= 2.0.0
-            - numpy < 2.0.0
+            - Python >= 3.12, < 3.15
+            - pandas >= 3.1.1
+            - numpy >= 2.5.4
+            - Status: Alpha (API may change)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
