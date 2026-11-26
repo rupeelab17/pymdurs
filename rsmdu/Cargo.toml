@@ -5,23 +5,18 @@ edition = "2021"
 description = "Rust transpilation of pymdu (Python Urban Data Model) - Core library"
 license = "GPL-3.0"
 repository = "https://github.com/rupeelab17/pymdurs"
-homepage = "https://github.com/rupeelab17/pymdurs"
 documentation = "https://github.com/rupeelab17/pymdurs#readme"
 
 [features]
 # polars opt-in: only BuildingCollection::{to_polars_df,to_gdf} — heavy compile
-default = ["proj", "umep", "gdal", "reqwest", "las", "laz", "geos", "quick-xml", "progressbar", "rayon", "laz-memmap", "ndarray"]
+default = ["proj", "gdal", "reqwest", "las", "laz", "geos", "progressbar", "rayon", "laz-memmap", "ndarray"]
 wasm = []
-umep = []
-# Preserve public feature names after removing unused optional dependencies.
-geotiff = []
-quick-xml = []
 gdal_src = ["gdal/gdal-src", "dep:libsqlite3-sys"]
 # Constrain SQLite even when PROJ is built against a system library.
 proj = ["dep:proj", "dep:libsqlite3-sys"]
 # Use memory-mapped I/O for large cached LAZ files (>50 MiB) to reduce RAM usage
 laz-memmap = ["memmap2"]
-# COPC (Cloud Optimized Point Cloud) support via las::copc::CopcEntryReader
+# Kept empty: rust-ci / deny.toml / pymdurs still pass --features lidar-copc.
 lidar-copc = []
 # Headless wgpu compute for LiDAR DSM/DTM max-Z binning (same stack as UMEP solweig)
 gpu = ["wgpu", "pollster", "bytemuck"]
@@ -87,10 +82,6 @@ pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1.24", optional = true, features = ["derive"] }
 rustc-hash = "2.1.3"
 
-
-# [[bin]]
-# name = "rsmdu"
-# path = "src/main.rs"
 
 [lib]
 name = "rsmdu"

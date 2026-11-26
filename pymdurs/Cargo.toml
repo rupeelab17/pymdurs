@@ -5,7 +5,6 @@ edition = "2021"
 description = "Python bindings for rsmdu - Rust transpilation of pymdu"
 license = "GPL-3.0"
 repository = "https://github.com/rupeelab17/pymdurs"
-homepage = "https://github.com/rupeelab17/pymdurs"
 documentation = "https://github.com/rupeelab17/pymdurs#readme"
 
 [features]

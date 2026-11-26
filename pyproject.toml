@@ -75,8 +75,6 @@ module-name = "pymdurs"
 # Release CI overrides with --auditwheel repair.
 auditwheel = "skip"
 
-[tool.pyo3-stub-gen]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

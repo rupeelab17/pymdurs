@@ -41,6 +41,13 @@ allow = [
     "LGPL-2.1-or-later",
 ]
 
+# gdal-src ships license-file=source/LICENSE.TXT (GDAL MIT-style) but no SPDX
+# `license` field; cargo-deny cannot machine-read that multi-license dump.
+[[licenses.clarify]]
+crate = "gdal-src"
+expression = "MIT"
+license-files = [{ path = "source/LICENSE.TXT", hash = 0x071ad662 }]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use geojson::GeoJson;
-use serde::{Deserialize, Serialize};
 use std::{path::Path, process::Command};
 
 pub(crate) fn shapefile_to_geojson(filepath: &Path, prefix: &str) -> Result<GeoJson> {
@@ -29,14 +28,6 @@ pub(crate) fn shapefile_to_geojson(filepath: &Path, prefix: &str) -> Result<GeoJ
     String::from_utf8_lossy(&bytes)
         .parse()
         .context("Failed to parse GeoJSON from shapefile")
-}
-
-/// Process datetime fields in a dataset
-/// This is a placeholder for datetime processing functionality
-pub fn process_datetime<T: Serialize + for<'de> Deserialize<'de>>(_data: T) -> T {
-    // TODO: Implement datetime processing logic
-    // For now, just return the data as-is
-    _data
 }
 
 #[cfg(test)]
@@ -81,10 +72,5 @@ mod tests {
                 .contains("ogr2ogr failed")
         );
         Ok(())
-    }
-
-    #[test]
-    fn test_process_datetime_roundtrip() {
-        assert_eq!(process_datetime(42u32), 42);
     }
 }
