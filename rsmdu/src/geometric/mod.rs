@@ -2,6 +2,7 @@ pub mod building;
 pub mod cadastre;
 pub mod cosia;
 pub mod dem;
+pub mod ign_layer;
 pub mod iris;
 pub mod lcz;
 pub mod lidar;
