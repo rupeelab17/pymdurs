@@ -5,6 +5,7 @@ use geo::algorithm::map_coords::MapCoordsInPlace;
 use geo::{Area, Centroid, Coord};
 use proj::Proj;
 
+#[cfg(not(feature = "wasm"))]
 use crate::collect::ign::ign_collect::IgnCollect;
 use crate::geo_core::BoundingBox;
 
@@ -23,33 +24,42 @@ impl BuildingCollection {
     /// Used by Python bindings to avoid ownership issues
     pub fn run_internal(&mut self) -> Result<()> {
         if self.filepath_shp.is_none() {
-            // Load from IGN API
-            let mut ign_collect = self
-                .ign_collect
-                .take()
-                .unwrap_or_else(|| IgnCollect::new().expect("Failed to create IgnCollect"));
+            #[cfg(not(feature = "wasm"))]
+            {
+                // Load from IGN API
+                let mut ign_collect = self
+                    .ign_collect
+                    .take()
+                    .unwrap_or_else(|| IgnCollect::new().expect("Failed to create IgnCollect"));
 
-            // Execute IGN API request
-            ign_collect.execute_ign("buildings")?;
+                // Execute IGN API request
+                ign_collect.execute_ign("buildings")?;
 
-            // Get GeoJSON content as bytes
-            let geojson_bytes = ign_collect
-                .content
-                .as_ref()
-                .context("No content available from IGN API")?;
+                // Get GeoJSON content as bytes
+                let geojson_bytes = ign_collect
+                    .content
+                    .as_ref()
+                    .context("No content available from IGN API")?;
 
-            // Load from GeoJSON (coords stay EPSG:4326 until reproject_from_wgs84)
-            let output_path = self.geo_core.get_output_path().cloned();
-            let mut new_collection = Self::from_geojson(
-                geojson_bytes,
-                output_path,
-                self.default_storey_height,
-                Some(self.geo_core.get_epsg()),
-            )?;
+                // Load from GeoJSON (coords stay EPSG:4326 until reproject_from_wgs84)
+                let output_path = self.geo_core.get_output_path().cloned();
+                let mut new_collection = Self::from_geojson(
+                    geojson_bytes,
+                    output_path,
+                    self.default_storey_height,
+                    Some(self.geo_core.get_epsg()),
+                )?;
 
-            // Preserve GeoCore state (Bbox, output_path, etc.)
-            new_collection.geo_core = self.geo_core.clone();
-            *self = new_collection;
+                // Preserve GeoCore state (Bbox, output_path, etc.)
+                new_collection.geo_core = self.geo_core.clone();
+                *self = new_collection;
+            }
+            #[cfg(feature = "wasm")]
+            if self.buildings.is_empty() {
+                anyhow::bail!(
+                    "IGN API loading is unavailable in WASM; use from_geojson() instead"
+                );
+            }
         } else {
             // NOTE: Shapefile loading is temporarily disabled due to GDAL issues
             anyhow::bail!("Shapefile loading is temporarily disabled. Use from_geojson() or from_ign_api() instead.");
@@ -97,13 +107,16 @@ impl BuildingCollection {
     pub fn set_bbox(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Result<()> {
         let bbox = BoundingBox::new(min_x, min_y, max_x, max_y);
         self.geo_core.set_bbox(Some(bbox));
-        if let Some(ref mut ign_collect) = self.ign_collect {
-            ign_collect.set_bbox(min_x, min_y, max_x, max_y);
-        } else {
-            // Create IgnCollect if needed
-            let mut ign_collect = IgnCollect::new()?;
-            ign_collect.set_bbox(min_x, min_y, max_x, max_y);
-            self.ign_collect = Some(ign_collect);
+        #[cfg(not(feature = "wasm"))]
+        {
+            if let Some(ref mut ign_collect) = self.ign_collect {
+                ign_collect.set_bbox(min_x, min_y, max_x, max_y);
+            } else {
+                // Create IgnCollect if needed
+                let mut ign_collect = IgnCollect::new()?;
+                ign_collect.set_bbox(min_x, min_y, max_x, max_y);
+                self.ign_collect = Some(ign_collect);
+            }
         }
         Ok(())
     }

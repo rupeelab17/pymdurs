@@ -164,6 +164,8 @@ source $HOME/.cargo/env
 
 With uv: `uv run maturin develop --target <target>`
 
+For `rsmdu` cargo checks, list features explicitly (`lidar-copc,polars,gpu`) — do not use `--all-features` (it enables `wasm` and strips native IGN paths such as `BuildingCollection::ign_collect`).
+
 **macOS: linker can't find GDAL / "library 'gdal' not found"**  
 If you upgraded GDAL or PROJ with Homebrew, the linker may still use old paths. Clean and point pkg-config at the current install, then rebuild:
 

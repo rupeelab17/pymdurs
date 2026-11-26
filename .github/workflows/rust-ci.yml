@@ -47,7 +47,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rsmdu
-      - run: cargo clippy --all-targets --features lidar-copc
+      # Explicit features — do not use --all-features (enables wasm and breaks native IGN paths).
+      - run: cargo clippy --all-targets --features lidar-copc,polars,gpu
 
   test:
     name: tests
@@ -64,8 +65,8 @@ jobs:
         with:
           workspaces: rsmdu
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --features lidar-copc
-      - run: cargo test --doc --features lidar-copc
+      - run: cargo nextest run --features lidar-copc,polars,gpu
+      - run: cargo test --doc --features lidar-copc,polars,gpu
 
   docs:
     name: docs
@@ -81,7 +82,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rsmdu
-      - run: cargo doc --no-deps --features lidar-copc
+      - run: cargo doc --no-deps --features lidar-copc,polars,gpu
 
   msrv:
     name: MSRV
@@ -99,7 +100,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rsmdu
-      - run: cargo check --features lidar-copc
+      - run: cargo check --features lidar-copc,polars,gpu
 
   deny:
     name: cargo-deny
