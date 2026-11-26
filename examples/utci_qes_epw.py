@@ -137,6 +137,15 @@ def _ensure_hauteur(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     )
 
 
+def _sanitize_gtiff_profile(profile: dict) -> dict:
+    """Drop strip/tile block keys that conflict with GDAL when ``tiled`` is false."""
+    out = dict(profile)
+    if not out.get("tiled"):
+        out.pop("blockxsize", None)
+        out.pop("blockysize", None)
+    return out
+
+
 def project_dem_to_meters(dem_path: Path, epsg: int = WORKING_CRS) -> Path:
     """Reproject DEM to a metric CRS so QES domain sizing uses metres."""
     from rasterio.warp import Resampling, calculate_default_transform, reproject
@@ -151,7 +160,7 @@ def project_dem_to_meters(dem_path: Path, epsg: int = WORKING_CRS) -> Path:
         transform, width, height = calculate_default_transform(
             src.crs, dst_crs, src.width, src.height, *src.bounds
         )
-        profile = src.meta.copy()
+        profile = _sanitize_gtiff_profile(src.meta)
         profile.update(crs=dst_crs, transform=transform, width=width, height=height)
 
         with rasterio.open(out_path, "w", **profile) as dst:
@@ -177,7 +186,7 @@ def clip_dem_to_mask(dem_path: Path, mask_shp: Path, out_path: Path) -> Path:
         if mask_gdf.crs is not None and src.crs is not None:
             mask_gdf = mask_gdf.to_crs(src.crs)
         data, transform = rio_mask(src, mask_gdf.geometry, crop=True, filled=True)
-        profile = src.profile.copy()
+        profile = _sanitize_gtiff_profile(src.profile)
         profile.update(
             height=data.shape[1],
             width=data.shape[2],
@@ -191,7 +200,11 @@ def clip_dem_to_mask(dem_path: Path, mask_shp: Path, out_path: Path) -> Path:
 def fetch_buildings(
     work_dir: Path, bbox: tuple[float, float, float, float]
 ) -> Path:
-    """Download buildings from IGN and write ``buildings.shp`` (EPSG:2154)."""
+    """Download buildings from IGN and write ``buildings.shp`` (EPSG:2154).
+
+    ``Building.run()`` already reprojects footprints to ``WORKING_CRS``; do not
+    treat ``get_geojson()`` as EPSG:4326 or a second ``to_crs`` yields Inf.
+    """
     buildings = pymdurs.geometric.Building(
         output_path=str(work_dir),
         defaultStoreyHeight=3.0,
@@ -205,12 +218,12 @@ def fetch_buildings(
     if not features:
         raise SystemExit("No buildings returned for this bbox.")
 
-    gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
-    gdf = gdf.to_crs(epsg=WORKING_CRS)
+    gdf = gpd.GeoDataFrame.from_features(features, crs=f"EPSG:{WORKING_CRS}")
     gdf = _ensure_hauteur(gdf)
 
     out_shp = work_dir / "buildings.shp"
-    gdf.to_file(out_shp, driver="ESRI Shapefile")
+    # Shapefile 10-char field limit: keep only what QES needs.
+    gdf[["geometry", "hauteur"]].to_file(out_shp, driver="ESRI Shapefile")
     return out_shp
 
 
@@ -895,7 +908,7 @@ def main() -> None:
         print(f"Removing stale SOLWEIG cache: {working_dir}")
         shutil.rmtree(working_dir)
     print("\nPreparing surface and running SOLWEIG (Tmrt)...")
-    
+
     surface = solweig.SurfaceData.prepare(
         dsm=str(dsm_path),
         working_dir=str(working_dir),
