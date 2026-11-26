@@ -56,9 +56,7 @@ impl BuildingCollection {
             }
             #[cfg(feature = "wasm")]
             if self.buildings.is_empty() {
-                anyhow::bail!(
-                    "IGN API loading is unavailable in WASM; use from_geojson() instead"
-                );
+                anyhow::bail!("IGN API loading is unavailable in WASM; use from_geojson() instead");
             }
         } else {
             // NOTE: Shapefile loading is temporarily disabled due to GDAL issues
