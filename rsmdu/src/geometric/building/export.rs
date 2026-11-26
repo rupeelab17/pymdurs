@@ -50,7 +50,7 @@ impl BuildingCollection {
     }
 
     /// Convert building collection to Polars DataFrame with geometry column (EWKB format)
-    /// Compatible with polars-st (https://github.com/Oreilles/polars-st)
+    /// Compatible with polars-st (<https://github.com/Oreilles/polars-st>)
     /// Returns a DataFrame with a "geometry" column containing EWKB bytes with SRID
     /// polars-st stores geometries as EWKB in Binary columns
     #[cfg(feature = "polars")]
@@ -90,7 +90,7 @@ impl BuildingCollection {
                 }
                 wkt.push_str(&format!("{} {}", coord.x, coord.y));
             }
-            wkt.push_str(")");
+            wkt.push(')');
 
             // Add interior rings if any
             for ring in poly.interiors() {
@@ -101,9 +101,9 @@ impl BuildingCollection {
                     }
                     wkt.push_str(&format!("{} {}", coord.x, coord.y));
                 }
-                wkt.push_str(")");
+                wkt.push(')');
             }
-            wkt.push_str(")");
+            wkt.push(')');
 
             // Create GDAL geometry from WKT
             use gdal::vector::Geometry as GdalGeometry;

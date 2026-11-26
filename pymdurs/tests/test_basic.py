@@ -119,5 +119,21 @@ def test_dem_creation():
     assert dem is not None
 
 
+@pytest.mark.parametrize("name", ["Cadastre", "Road", "Iris"])
+def test_ign_layer_aliases_construct_and_set_bbox(name: str, tmp_path) -> None:
+    """Cadastre/Road/Iris stay as public aliases over the shared IgnLayer backend."""
+    import pymdurs
+
+    cls = getattr(pymdurs.geometric, name)
+    py_cls = getattr(pymdurs.geometric, f"Py{name}")
+    assert cls is py_cls
+
+    layer = cls(output_path=str(tmp_path))
+    layer.set_bbox(-1.15, 46.18, -1.14, 46.19)
+    layer.set_crs(2154)
+    assert layer.get_output_path() == str(tmp_path)
+    assert layer.geo_core.epsg == 2154
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
