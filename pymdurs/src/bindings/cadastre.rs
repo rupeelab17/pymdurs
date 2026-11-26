@@ -81,7 +81,7 @@ impl PyCadastre {
     #[getter]
     fn geo_core(&self) -> PyGeoCore {
         PyGeoCore {
-            inner: (&*self.inner).geo_core.clone(),
+            inner: self.inner.clone_geo_core(),
         }
     }
 }

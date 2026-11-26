@@ -46,7 +46,7 @@ fn main() -> Result<()> {
 
     println!("Buildings loaded and processed: {}", buildings.len());
 
-    if buildings.len() > 0 {
+    if !buildings.is_empty() {
         println!(
             "\nMean height (area-weighted): {:.2} m",
             buildings.calculate_mean_height()

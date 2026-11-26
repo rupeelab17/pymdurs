@@ -139,6 +139,15 @@ impl IgnLayer {
     pub fn get_output_path(&self) -> &Path {
         &self.output_path
     }
+
+    /// Clone of [`Self::geo_core`] (for wrappers that only expose methods via `Deref`).
+    pub fn clone_geo_core(&self) -> GeoCore {
+        self.geo_core.clone()
+    }
+
+    pub fn epsg(&self) -> i32 {
+        self.geo_core.get_epsg()
+    }
 }
 
 #[cfg(test)]

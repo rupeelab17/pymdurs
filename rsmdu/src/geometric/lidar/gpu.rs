@@ -2,10 +2,10 @@
 //!
 //! Rasters stay on the device between kernels; a single readback at the end.
 //!
-//! 1. `lidar_bin`       — DSM max-Z (enabled classes) + ground max-Z (class 2), uploaded in
-//!                        batches that respect the device limits (binding size, dispatch size).
-//! 2. `lidar_jfa_*`     — nearest ground cell by Jump Flooding (only for [`DtmFill::Nearest`]).
-//! 3. `lidar_fill_chm`  — decode DSM, fill DTM holes, CHM = max(DSM − DTM, 0).
+//! 1. `lidar_bin` — DSM max-Z (enabled classes) + ground max-Z (class 2), uploaded in
+//!    batches that respect the device limits (binding size, dispatch size).
+//! 2. `lidar_jfa_*` — nearest ground cell by Jump Flooding (only for [`DtmFill::Nearest`]).
+//! 3. `lidar_fill_chm` — decode DSM, fill DTM holes, CHM = max(DSM − DTM, 0).
 //!
 //! Every failure (no adapter, raster too large, validation / OOM error) returns `Err`, so the
 //! caller can fall back to the CPU path in `raster.rs`, which computes the same results.

@@ -17,7 +17,7 @@ fn main() -> Result<()> {
     // Set bounding box (geographic area)
     // Example: Area around La Rochelle, France
     // Format: [min_x, min_y, max_x, max_y] in decimal degrees (WGS84, EPSG:4326)
-    let Bbox = BoundingBox::new(
+    let bbox = BoundingBox::new(
         -1.152704, // Min longitude (West)
         46.181627, // Min latitude (South)
         -1.139893, // Max longitude (East)
@@ -25,8 +25,8 @@ fn main() -> Result<()> {
     );
 
     println!("Bounding box set:");
-    println!("  - Longitude: {} to {}", Bbox.min_x, Bbox.max_x);
-    println!("  - Latitude: {} to {}", Bbox.min_y, Bbox.max_y);
+    println!("  - Longitude: {} to {}", bbox.min_x, bbox.max_x);
+    println!("  - Latitude: {} to {}", bbox.min_y, bbox.max_y);
     println!("  - Area: La Rochelle, France");
     println!("  - Format: WGS84 (EPSG:4326)\n");
 
@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     match BuildingCollection::from_ign_api(
         Some("./output".to_string()), // Output folder
         3.0,                          // Default storey height (3 meters)
-        Some(Bbox),                   // Bounding box
+        Some(bbox),                   // Bounding box
     ) {
         Ok(mut collection) => {
             println!("✓ Buildings loaded successfully!\n");
@@ -118,7 +118,7 @@ fn main() -> Result<()> {
             let tall_buildings: Vec<_> = collection
                 .buildings()
                 .iter()
-                .filter(|b| b.height.map_or(false, |h| h > 15.0))
+                .filter(|b| b.height.is_some_and(|h| h > 15.0))
                 .collect();
             println!("  Number of buildings > 15m: {}", tall_buildings.len());
 
@@ -148,7 +148,7 @@ fn main() -> Result<()> {
 #[allow(dead_code)]
 fn example_paris() -> Result<()> {
     // Area around Paris (example)
-    let Bbox = BoundingBox::new(
+    let bbox = BoundingBox::new(
         2.30,  // Min longitude
         48.85, // Min latitude
         2.35,  // Max longitude
@@ -156,7 +156,7 @@ fn example_paris() -> Result<()> {
     );
 
     let collection =
-        BuildingCollection::from_ign_api(Some("./output".to_string()), 3.0, Some(Bbox))?;
+        BuildingCollection::from_ign_api(Some("./output".to_string()), 3.0, Some(bbox))?;
 
     println!("Buildings loaded for Paris: {}", collection.len());
     Ok(())
@@ -166,18 +166,18 @@ fn example_paris() -> Result<()> {
 #[allow(dead_code)]
 fn example_with_crs_transform() -> Result<()> {
     // Bounding box in WGS84 (EPSG:4326)
-    let Bbox_wgs84 = BoundingBox::new(-1.152704, 46.181627, -1.139893, 46.18699);
+    let bbox_wgs84 = BoundingBox::new(-1.152704, 46.181627, -1.139893, 46.18699);
 
     // Transform to Lambert-93 (EPSG:2154) if needed
     // Note: IGN API typically returns data in WGS84
-    let Bbox_lambert = Bbox_wgs84.transform(4326, 2154)?;
+    let bbox_lambert = bbox_wgs84.transform(4326, 2154)?;
 
-    println!("Bounding box WGS84: {:?}", Bbox_wgs84);
-    println!("Bounding box Lambert-93: {:?}", Bbox_lambert);
+    println!("Bounding box WGS84: {:?}", bbox_wgs84);
+    println!("Bounding box Lambert-93: {:?}", bbox_lambert);
 
     // Load buildings
     let mut collection =
-        BuildingCollection::from_ign_api(Some("./output".to_string()), 3.0, Some(Bbox_wgs84))?;
+        BuildingCollection::from_ign_api(Some("./output".to_string()), 3.0, Some(bbox_wgs84))?;
 
     // Set collection CRS
     collection.set_crs(2154); // Lambert-93
